@@ -85,13 +85,31 @@ test('evidence requirements target one explicit gate; ambiguous all-scope is rej
   );
 });
 
+test('legacy task evidence scope is rejected in favor of universal final scope', async () => {
+  const { controller } = makeHarness();
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Evidence-scoped task.',
+      contractText: 'Goal: evidence-scoped task.',
+      cwd: '/r',
+      evidenceRequirements: [{
+        id: 'runtime-task-alias',
+        type: 'runtime',
+        description: 'Run the runtime check.',
+        gate: 'task',
+      }],
+    }),
+    /unknown gate \"task\"/i,
+  );
+});
+
 test('submitted optional evidence keeps its requirement description for Reviewer context', () => {
   const objective = {
     evidenceRequirements: [{
       id: 'optional-diagnostic',
       type: 'artifact',
       description: 'Optional diagnostic trace that can strengthen review confidence.',
-      gate: 'task',
+      gate: 'final',
       required: false,
       covers: [],
     }],
@@ -258,6 +276,10 @@ test('PHASE_PASS returns and durably stores a compact resume packet for context 
   assert.equal(result.contextRefreshSafe, true);
   assert.equal(result.resumePacket.loopId, loopId);
   assert.equal(result.resumePacket.nextPhase.id, 'phase-2');
+  assert.deepEqual(
+    result.resumePacket.nextPhase.carryForwardInvariants,
+    ['The foundation remains authoritative.'],
+  );
   assert.deepEqual(
     result.resumePacket.carryForwardInvariants,
     ['Later work preserves the foundation.'],
