@@ -121,6 +121,58 @@ test('Supervisor non-convergence memory is gate-local and may be used once in a 
   assert.equal(calls.supervisor, 2, 'phase 2 owns a fresh Supervisor escalation opportunity');
 });
 
+test('phase-local Gate failure cannot be suppressed by a colliding global baseline failure', async () => {
+  const persistence = new MemoryPersistence();
+  let reviewerCalls = 0;
+  const controller = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({
+      head: 'H', baselineRef: 'H', dirtyFiles: [], untrackedHashes: {}, evidenceComplete: true,
+    }),
+    collectWorkerDeltaFn: async () => ({
+      baselineHead: 'H',
+      currentHead: 'H',
+      evidenceComplete: true,
+      noWorkerChangeYet: false,
+      changedFiles: ['a.js'],
+      fingerprint: 'phase-collision-delta',
+      diff: 'worker change',
+    }),
+    discoverVerificationCommandsFn: () => ({
+      source: 'configured',
+      commands: ['global-check'],
+      manifestFingerprint: 'global-plan',
+    }),
+    gateRunner: async (command) => ({
+      command,
+      exitCode: 1,
+      stdout: '✖ shared identity\n',
+      stderr: '',
+    }),
+    reviewerFn: async () => {
+      reviewerCalls += 1;
+      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 } };
+    },
+  });
+
+  const { loopId } = await controller.begin({
+    goal: 'g',
+    cwd: '/r',
+    phases: [{
+      id: 'phase-1',
+      title: 'Phase 1',
+      objective: 'Exercise phase-only verification.',
+      exitCriteria: ['The phase-only check passes.'],
+      verificationCommands: ['phase-only-check'],
+    }],
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'REWORK');
+  assert.equal(result.gate.verdict, 'FAIL');
+  assert.equal(reviewerCalls, 0, 'a failing phase-only deterministic check blocks before Reviewer spend');
+});
+
 test('phase-specific verification commands join the zero-token deterministic Gate', async () => {
   const persistence = new MemoryPersistence();
   const seenCommands = [];
