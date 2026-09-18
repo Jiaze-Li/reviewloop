@@ -14,7 +14,8 @@
     "install-global": "node ./bin/install-plugin.js",
     "uninstall-global": "node ./bin/install-plugin.js --uninstall",
     "benchmark": "node ./scripts/benchmark-context-footprint.js",
-    "benchmark:transports": "node ./scripts/benchmark-review-transports.js"
+    "benchmark:transports": "node ./scripts/benchmark-review-transports.js",
+    "setup": "npm run install-global && npm run doctor"
   },
   "engines": {
     "node": ">=20"
