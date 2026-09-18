@@ -484,3 +484,29 @@ test('phase verificationEvidence is bounded per item and in aggregate before bas
     assert.equal(h.calls.gate, 0);
   }
 });
+
+
+test('explicit multi-phase counts recognize 10-19 and larger values', () => {
+  for (const [text, count] of [
+    ['Full spec has 12 phases.', 12],
+    ['10-phase execution plan', 10],
+    ['Execution plan contains 19 phases.', 19],
+    ['Execution plan includes the 20 phases.', 20],
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, count);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+});
+
+test('reserved ids report reserved and mixed-id violations together when both apply', () => {
+  const three = [
+    { ...phases[0], id: 'final' },
+    { ...phases[1], id: 'phase-2' },
+    { ...phases[1], id: 'integration', title: 'Integration 2' },
+  ];
+  assert.throws(
+    () => assertContractHandoff({ goal: 'Full spec has 3 phases.', phases: three }),
+    (error) => /phase id "final" is reserved/i.test(error.message)
+      && /mixes canonical phase-N ids with custom ids/i.test(error.message),
+  );
+});

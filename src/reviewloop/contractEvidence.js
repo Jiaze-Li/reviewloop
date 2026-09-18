@@ -103,11 +103,11 @@ export function declaredPhasePlan(text) {
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
   const explicitCounts = [
-    ...[...s.matchAll(/\bfull\s+spec\s+has\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bfull\s+spec\s+has\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b([2-9]\d*)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
+    ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s+(?:has|with|contains|includes|including)\s+(?:the\s+)?([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bexecution\s+plan\s+(?:has|with|contains|includes|including)\s+(?:the\s+)?([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];
 
@@ -238,12 +238,16 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       return m ? Number(m[1]) : null;
     });
     const canonicalCount = canonicalIds.filter((n) => n != null).length;
-    const rawPhaseIds = phases.map((phase) => String(phase?.id ?? '').trim().toLowerCase());
-    const containsReservedScopeId = rawPhaseIds.some((id) => id === 'final' || id === 'task');
-    // Reserved scope ids have their own stronger validation in objective
-    // normalization. Do not mask that diagnostic merely because another id is
-    // canonical; mixed ordinary custom/canonical ids are still rejected here.
-    if (canonicalCount > 0 && canonicalCount < canonicalIds.length && !containsReservedScopeId) {
+    const rawPhaseIds = phases.map((phase) => String(phase?.id ?? '').trim());
+    const reservedScopeIds = rawPhaseIds.filter((id) => id.toLowerCase() === 'final' || id.toLowerCase() === 'task');
+    const mixedIds = canonicalCount > 0 && canonicalCount < canonicalIds.length;
+    if (reservedScopeIds.length) {
+      throw new Error(
+        `reviewloop_begin: phase id "${reservedScopeIds[0]}" is reserved for ReviewLoop scope state`
+        + (mixedIds ? '; the declared plan also mixes canonical phase-N ids with custom ids' : ''),
+      );
+    }
+    if (mixedIds) {
       throw new Error(
         'reviewloop_begin: declared phase plan mixes canonical phase-N ids with custom ids; use either a complete canonical phase-1..phase-N sequence or consistently custom ids',
       );
