@@ -1375,32 +1375,29 @@ export function createReviewLoopController({
       };
     }
 
-    const fp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-    });
-
-    if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
-      await saveLoop(loopState);
-      return {
-        status: 'NO_PROGRESS',
-        loopId: loopState.loopId,
-        round: loopState.round,
-        reason: 'submitted state is identical to the last review; no Reviewer/Supervisor call made',
-        lastReview: compactLastReview(loopState),
-        telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
-      };
-    }
-
     if (gate.verdict === GATE_VERDICTS.FAIL) {
-      // A deterministic Gate FAIL is a repair cycle, NOT a fresh Reviewer
-      // round: it never consumes one of the objective's max review rounds and
-      // the independent Reviewer has not run. An identical failing (diff+gate)
-      // resubmission still deterministically returns NO_PROGRESS (above).
+      // Gate failure needs no runtime/manual evidence. Keep the legacy
+      // diff+gate progress identity so an identical deterministic failure does
+      // not become "new information" merely because evidence text changed.
+      const gateFp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+      });
+      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === gateFp) {
+        await saveLoop(loopState);
+        return {
+          status: 'NO_PROGRESS',
+          loopId: loopState.loopId,
+          round: loopState.round,
+          reason: 'submitted state is identical to the last review; no Reviewer/Supervisor call made',
+          lastReview: compactLastReview(loopState),
+          telemetry: await durableTelemetry(loopState.loopId),
+          safetyEvents,
+        };
+      }
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-      loopState.lastReviewedFingerprint = fp;
+      loopState.lastReviewedFingerprint = gateFp;
       loopState.lastGateFingerprint = gate.fingerprint;
       recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
       await saveLoop(loopState);
@@ -1412,6 +1409,9 @@ export function createReviewLoopController({
       };
     }
 
+    // Runtime/artifact/manual proof is part of the logical review state.
+    // Process it BEFORE the no-progress guard so improved evidence can be
+    // independently re-reviewed without requiring an unrelated code change.
     const evidenceCheck = await enforceEvidenceObligations({
       loopState,
       objective,
@@ -1422,6 +1422,25 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
+    if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
+      await saveLoop(loopState);
+      return {
+        status: 'NO_PROGRESS',
+        loopId: loopState.loopId,
+        round: loopState.round,
+        reason: 'submitted code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
+        lastReview: compactLastReview(loopState),
+        telemetry: await durableTelemetry(loopState.loopId),
+        safetyEvents,
+      };
+    }
+
     const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
@@ -1431,7 +1450,9 @@ export function createReviewLoopController({
     try {
       reviewOut = await runReviewerOverEvidence({
         spend, loopState, objective, delta, gate, reviewScope,
-        evidenceBundle: evidenceCheck.bundle, signal,
+        evidenceBundle: evidenceCheck.bundle,
+        evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+        signal,
       });
     } catch (err) {
       if (err instanceof LeaseLostError) throw err; // read-only exit in review()
