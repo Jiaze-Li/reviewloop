@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { MemoryPersistence, makeHarness, finding } from './helpers/reviewLoopHarness.js';
 import { resolveReviewLoopLimits } from '../src/reviewloop/reviewSpend.js';
+import { reviewFingerprint } from '../src/reviewloop/reviewPolicy.js';
 
 const phases = [
   {
@@ -203,4 +204,50 @@ test('coarse physical-call ceilings scale with frozen gate count while task-wide
   assert.equal(three.maxCostUsd, one.maxCostUsd);
   assert.equal(three.maxSingleCallUsage, one.maxSingleCallUsage);
   assert.equal(three.maxContextOverheadTokens, one.maxContextOverheadTokens);
+});
+
+test('ordinary-task review fingerprint remains byte-compatible with pre-phase semantics', () => {
+  const legacy = reviewFingerprint({ deltaFingerprint: 'd', gateFingerprint: 'g' });
+  const explicitNoScope = reviewFingerprint({
+    deltaFingerprint: 'd',
+    gateFingerprint: 'g',
+    reviewScopeFingerprint: '',
+  });
+  const phaseScoped = reviewFingerprint({
+    deltaFingerprint: 'd',
+    gateFingerprint: 'g',
+    reviewScopeFingerprint: 'phase-scope',
+  });
+  assert.equal(explicitNoScope, legacy);
+  assert.notEqual(phaseScoped, legacy);
+});
+
+test('phase progression cannot skip a frozen phase by editing durable state', async () => {
+  const { controller, persistence } = makeHarness();
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', phases });
+
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.currentPhaseIndex = 2;
+  raw.reviewLoop.completedPhases = [];
+  await persistence.writeWorkflowState(loopId, raw);
+
+  await assert.rejects(
+    () => controller.review({ loopId }),
+    /phase progression invalid/,
+  );
+});
+
+test('phase progression requires completed phase ids to match the frozen prefix', async () => {
+  const { controller, persistence } = makeHarness();
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', phases });
+
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.currentPhaseIndex = 1;
+  raw.reviewLoop.completedPhases = [{ id: 'phase-2' }];
+  await persistence.writeWorkflowState(loopId, raw);
+
+  await assert.rejects(
+    () => controller.review({ loopId }),
+    /phase progression invalid/,
+  );
 });
