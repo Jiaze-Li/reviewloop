@@ -131,7 +131,11 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       verificationCommands: p.verificationCommands ?? [],
     })),
     phaseCount: phases.length,
-    verificationCommands: phases.flatMap((p) => p.verificationCommands ?? []),
+    // Phase-local verification may certify an intermediate implementation
+    // that a later phase intentionally replaces. The final Gate therefore runs
+    // the frozen whole-task/global verification plan only. Lasting semantics
+    // belong in carry-forward invariants or global verification.
+    verificationCommands: [],
   };
   return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
 }
