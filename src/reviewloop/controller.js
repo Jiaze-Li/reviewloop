@@ -23,6 +23,7 @@ import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
 import {
   createReviewObjective,
   normalizePhasePlan,
+  assertResumeTaskDefinitionBound,
   rehydrateObjective,
   assertObjectiveNotWeakened,
   baselineGateEvidenceIdentity,
@@ -58,6 +59,7 @@ import {
   EvidenceValidationError,
   ContractValidationError,
   normalizeContractText,
+  normalizeEvidenceRequirements,
   validateEvidenceSubmissions,
   latestEvidenceRecords,
   requiredEvidenceForScope,
@@ -473,7 +475,25 @@ export function createReviewLoopController({
     // createReviewObjective normalizes again when freezing the objective; this
     // early pass is deliberately side-effect free and prevents invalid
     // verificationEvidence from spending repository work first.
-    normalizePhasePlan(phases);
+    const preflightPhases = normalizePhasePlan(phases);
+    const preflightEvidenceRequirements = normalizeEvidenceRequirements(
+      evidenceRequirements,
+      preflightPhases.map((phase) => phase.id),
+    );
+    // Verification commands are also copied into resumePacket. The configured
+    // commands are the only part known before repository discovery; validate
+    // the full discovered plan again immediately after discovery below.
+    assertResumeTaskDefinitionBound({
+      goal,
+      constraints,
+      phases: preflightPhases,
+      contractText: frozenContractText,
+      verificationPlan: verificationCommands == null ? null : {
+        source: 'configured-preflight',
+        commands: Array.isArray(verificationCommands) ? verificationCommands.map(String) : [String(verificationCommands)],
+      },
+      evidenceRequirements: preflightEvidenceRequirements,
+    });
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
     const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     const mode = prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL;
@@ -493,13 +513,22 @@ export function createReviewLoopController({
     // PR Gate plan.
     const freezeVerificationPlan = (discoverCwd) => {
       const discovered = discoverVerificationCommandsFn({ cwd: discoverCwd, configured: verificationCommands });
-      return {
+      const plan = {
         source: String(discovered.source ?? 'unknown'),
         commands: (discovered.commands ?? []).map(String),
         manifestFingerprint: discovered.manifestFingerprint
           ?? sha256Hex(`fallback::${JSON.stringify(discovered.commands ?? [])}`),
         frozenAt: new Date(clock()).toISOString(),
       };
+      assertResumeTaskDefinitionBound({
+        goal,
+        constraints,
+        phases: preflightPhases,
+        contractText: frozenContractText,
+        verificationPlan: plan,
+        evidenceRequirements: preflightEvidenceRequirements,
+      });
+      return plan;
     };
 
     if (mode === REVIEW_MODES.LOCAL) {

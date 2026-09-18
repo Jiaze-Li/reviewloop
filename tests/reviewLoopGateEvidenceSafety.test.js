@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
-import { PHASE_PLAN_MAX_BYTES, PHASE_VERIFICATION_EVIDENCE_LIMITS } from '../src/reviewloop/objective.js';
+import {
+  PHASE_PLAN_MAX_BYTES, PHASE_VERIFICATION_EVIDENCE_LIMITS, RESUME_TASK_DEFINITION_MAX_BYTES,
+} from '../src/reviewloop/objective.js';
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
   assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions,
@@ -539,4 +541,54 @@ test('complete structured phase metadata is aggregate-bounded before baseline/Ga
   }), /complete structured phase plan exceeds/);
   assert.equal(h.calls.baseline, 0);
   assert.equal(h.calls.gate, 0);
+});
+
+
+test('Execution plan consists-of and same-line first phase plus later headings remain fail-closed', () => {
+  for (const text of [
+    'Execution plan consists of 3 phases: Phase 1 foundation; Phase 2 integration; Phase 3 finish.',
+    'Execution plan: Phase 1 covers foundation.\nPhase 2 covers integration.',
+    'Execution plan: Phase 1 covers foundation.\n2. Phase 2 covers integration.',
+  ]) {
+    const count = text.includes('3 phases') ? 3 : 2;
+    assert.equal(declaredPhasePlan(text).count, count);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+});
+
+test('evidencePromptLines renders the normalized submissions it validates', () => {
+  const lines = evidencePromptLines({
+    requirements: [{ id: 'runtime', type: 'runtime', required: true, description: 'Prove runtime.', covers: [] }],
+    submissions: [{ requirementId: ' runtime ', summary: ' verified behavior ', artifactRef: ' ref.txt ' }],
+  });
+  const rendered = lines.join('\n');
+  assert.match(rendered, /- runtime: verified behavior \[ref\.txt\]/);
+  assert.doesNotMatch(rendered, /  runtime | verified behavior | ref\.txt /);
+});
+
+test('invalid evidence requirements fail before LOCAL baseline or Gate side effects', async () => {
+  for (const evidenceRequirements of [
+    [{ id: 'bad', description: 'Wrong gate.', gate: 'missing-phase' }],
+    [{ id: 'dup', description: 'One.' }, { id: 'dup', description: 'Two.' }],
+    [{ id: 'x'.repeat(EVIDENCE_LIMITS.idBytes + 1), description: 'Oversized id.' }],
+  ]) {
+    const h = makeHarness();
+    await assert.rejects(() => h.controller.begin({
+      cwd: '/r', goal: 'Preflight evidence requirements.', evidenceRequirements,
+    }), /evidence requirement|duplicate|unknown gate|exceeds/i);
+    assert.equal(h.calls.baseline, 0);
+    assert.equal(h.calls.gate, 0);
+  }
+});
+
+test('resume task-definition aggregate bound rejects oversized goal and configured verification before baseline', async () => {
+  for (const args of [
+    { goal: 'x'.repeat(RESUME_TASK_DEFINITION_MAX_BYTES + 1) },
+    { goal: 'Bound commands.', verificationCommands: ['x'.repeat(RESUME_TASK_DEFINITION_MAX_BYTES + 1)] },
+  ]) {
+    const h = makeHarness();
+    await assert.rejects(() => h.controller.begin({ cwd: '/r', ...args }), /task definition copied into resume packets exceeds/);
+    assert.equal(h.calls.baseline, 0);
+    assert.equal(h.calls.gate, 0);
+  }
 });

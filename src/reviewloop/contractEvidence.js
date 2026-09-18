@@ -52,15 +52,15 @@ function assertEvidenceText(value, label, limit, { optional = false } = {}) {
 // therefore covers optional descriptions, covers, refs and formatting, not just
 // summaries, and cannot diverge from what every diff chunk actually receives.
 export function evidencePromptLines(evidence) {
-  normalizeEvidenceSubmissions(evidence?.submissions);
+  const normalizedSubmissions = normalizeEvidenceSubmissions(evidence?.submissions);
   const lines = [
     evidence?.requirements?.length
       ? `EVIDENCE REQUIREMENTS / CONTEXT FOR THIS GATE:
 ${evidence.requirements.map((r) => `- ${r.id} [${r.type}; ${r.required === false ? 'optional' : 'required'}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
       : '',
-    evidence?.submissions?.length
+    normalizedSubmissions.length
       ? `SUBMITTED EVIDENCE:
-${evidence.submissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
+${normalizedSubmissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
       : '',
     evidence?.requirements?.length
       ? 'Judge whether submitted evidence proves the behavior its requirement describes. Required evidence must be sufficient to pass; optional evidence may inform review but does not itself block when absent. Do not treat mere presence as proof.'
@@ -107,7 +107,7 @@ export function declaredPhasePlan(text) {
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s+(?:has|with|contains|includes|including)\s+(?:the\s+)?([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];
 
@@ -115,12 +115,12 @@ export function declaredPhasePlan(text) {
   // Generic prose/documents often contain "Phase 1"/"Phase 2" headings that
   // describe historical protocols rather than this task. An explicit count
   // already declares a plan; otherwise require an Execution Plan heading.
-  const planHeading = /^\s{0,3}(?:#{1,6}\s*)?execution[ \t]+plan[ \t]*:?[ \t]*$/im.exec(s);
+  const planHeading = /^\s{0,3}(?:#{1,6}\s*)?execution[ \t]+plan[ \t]*:?/im.exec(s);
   const headingText = explicitCounts.length
     ? s
     : (planHeading ? s.slice(planHeading.index + planHeading[0].length) : '');
   const headingNumbers = [...new Set(
-    [...headingText.matchAll(/^\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
+    [...headingText.matchAll(/(?:^|[.;][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
       .map((m) => Number(m[1])),
   )].sort((a, b) => a - b);
 

@@ -59,7 +59,19 @@ export const PHASE_VERIFICATION_EVIDENCE_LIMITS = Object.freeze({
   totalBytes: 16 * 1024,
 });
 export const PHASE_PLAN_MAX_BYTES = 32 * 1024;
+export const RESUME_TASK_DEFINITION_MAX_BYTES = 96 * 1024;
 const utf8Bytes = (value) => Buffer.byteLength(String(value), 'utf8');
+
+export function assertResumeTaskDefinitionBound({
+  goal = '', constraints = [], phases = [], contractText = '', verificationPlan = null, evidenceRequirements = [],
+} = {}) {
+  const payload = { goal: String(goal), constraints, phases, contractText, verificationPlan, evidenceRequirements };
+  if (utf8Bytes(JSON.stringify(payload)) > RESUME_TASK_DEFINITION_MAX_BYTES) {
+    throw new Error(
+      `createReviewObjective: task definition copied into resume packets exceeds the ${RESUME_TASK_DEFINITION_MAX_BYTES}-byte UTF-8 limit; keep goal, constraints, phase metadata, verification commands, contract, and evidence requirements concise without truncating acceptance criteria`,
+    );
+  }
+}
 
 export function normalizePhasePlan(phases = []) {
   if (phases == null) return [];
@@ -178,6 +190,14 @@ export function createReviewObjective({
     evidenceRequirements,
     normalizedPhases.map((p) => p.id),
   );
+  assertResumeTaskDefinitionBound({
+    goal,
+    constraints: normalizedConstraints,
+    phases: normalizedPhases,
+    contractText: normalizedContractText,
+    verificationPlan,
+    evidenceRequirements: normalizedEvidenceRequirements,
+  });
 
   const objective = {
     loopId: String(loopId),
