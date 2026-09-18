@@ -2259,7 +2259,7 @@ export function createReviewLoopController({
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
-      evidenceRecords: loopState.evidenceRecords ?? [],
+      evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
       telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
     };
   }
