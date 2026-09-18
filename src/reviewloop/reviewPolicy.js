@@ -188,6 +188,6 @@ export function compactReworkPayload({ loopState, review, gate, supervisorGuidan
   };
 }
 
-export function reviewFingerprint({ deltaFingerprint, gateFingerprint }) {
-  return sha256(`${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}`);
+export function reviewFingerprint({ deltaFingerprint, gateFingerprint, reviewScopeFingerprint = '' }) {
+  return sha256(`${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}::${reviewScopeFingerprint ?? ''}`);
 }
