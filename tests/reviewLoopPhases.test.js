@@ -252,6 +252,45 @@ test('phase progression requires completed phase ids to match the frozen prefix'
   );
 });
 
+
+test('phase progression cannot be fabricated with only the expected ids and index', async () => {
+  const { controller, persistence } = makeHarness();
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', phases });
+
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.currentPhaseIndex = 2;
+  raw.reviewLoop.completedPhases = [
+    { id: 'phase-1', title: 'Data semantics', round: 1 },
+    { id: 'phase-2', title: 'UI integration', round: 2 },
+  ];
+  await persistence.writeWorkflowState(loopId, raw);
+
+  await assert.rejects(
+    () => controller.review({ loopId }),
+    /PHASE_PASS completion evidence|phase progression invalid/,
+  );
+});
+
+test('phase completion evidence is chained and tamper-evident', async () => {
+  const { controller, persistence } = makeHarness({
+    deltas: [{ fingerprint: 'd1', diff: 'phase 1' }],
+    reviews: [{ findings: [] }],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', phases: [phases[0]] });
+
+  assert.equal((await controller.review({ loopId })).status, 'PHASE_PASS');
+  const raw = await persistence.readWorkflowState(loopId);
+  assert.equal(raw.reviewLoop.completedPhases.length, 1);
+  assert.ok(raw.reviewLoop.completedPhases[0].proof);
+  raw.reviewLoop.completedPhases[0].gateFingerprint = 'forged-gate';
+  await persistence.writeWorkflowState(loopId, raw);
+
+  await assert.rejects(
+    () => controller.review({ loopId }),
+    /PHASE_PASS completion evidence|phase progression invalid/,
+  );
+});
+
 test('legacy no-phase loop without gateRound keeps its already-spent convergence rounds', async () => {
   const blocker = { findings: [finding('P1', 'a.js', 'persistent legacy bug')] };
   const { controller, persistence } = makeHarness({
