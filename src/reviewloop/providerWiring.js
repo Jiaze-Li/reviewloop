@@ -535,13 +535,13 @@ function buildReviewerInvoke() {
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
       evidence?.requirements?.length
-        ? `REQUIRED NON-COMMAND EVIDENCE FOR THIS GATE:\n${evidence.requirements.map((r) => `- ${r.id} [${r.type}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
+        ? `EVIDENCE REQUIREMENTS / CONTEXT FOR THIS GATE:\n${evidence.requirements.map((r) => `- ${r.id} [${r.type}; ${r.required === false ? 'optional' : 'required'}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
         : '',
       evidence?.submissions?.length
         ? `SUBMITTED EVIDENCE:\n${evidence.submissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
         : '',
       evidence?.requirements?.length
-        ? 'Judge whether the submitted evidence actually proves the required behavior. A present-but-inadequate claim is a blocking finding; do not treat mere presence as proof.'
+        ? 'Judge whether submitted evidence proves the behavior its requirement describes. Required evidence must be sufficient to pass; optional evidence may inform review but does not itself block when absent. Do not treat mere presence as proof.'
         : '',
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
