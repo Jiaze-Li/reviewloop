@@ -684,3 +684,41 @@ test('LOCAL invalid evidence returns explicit NOT_ACCEPTED receipt without Revie
   assert.equal(w.calls.reviewer, 0);
   assert.deepEqual((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords, []);
 });
+
+
+test('article-prefixed Execution Plan heading with numbered phases is fail-closed', () => {
+  const text = '# The Execution Plan:\n1. Phase 1 foundation\n2. Phase 2 integration';
+  assert.equal(declaredPhasePlan(text).count, 2);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+});
+
+test('common explicit task phrasing and leading Phase 1/2 clauses are recognized without broad historical scanning', () => {
+  for (const [text, count] of [
+    ['This task consists of 3 phases: Phase 1 foundation; Phase 2 integration; Phase 3 finish.', 3],
+    ['The implementation has 2 phases.', 2],
+    ['Phase 1: implement the API. Phase 2: add integration tests. Phase 3: update docs.', 3],
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, count);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+  assert.equal(declaredPhasePlan('Phase 1 of the old migration shipped. Phase 2 is historical.').count, null);
+});
+
+test('unqualified prior acceptance-criteria references require frozen contractText', () => {
+  const text = 'Acceptance criteria are in the previous message.';
+  assert.equal(referencesMissingPriorContract(text), true);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /no self-contained contractText/);
+});
+
+test('LOCAL invalid evidence is rejected before Gate execution and reports still-missing current proof', async () => {
+  const w = world('LOCAL');
+  const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: [req()] });
+  const beforeGate = w.calls.gate;
+  const result = await w.controller.review({ loopId, evidence: [proof('bogus')] });
+  assert.equal(result.status, 'REWORK');
+  assert.equal(result.gate.verdict, 'NOT_RUN');
+  assert.equal(result.evidenceSubmission.reason, 'INVALID_EVIDENCE');
+  assert.deepEqual(result.missingEvidenceRequirements.map((r) => r.id), ['runtime']);
+  assert.equal(w.calls.gate, beforeGate, 'invalid local evidence must be rejected before Gate work');
+  assert.equal(w.calls.reviewer, 0);
+});

@@ -109,28 +109,37 @@ export function declaredPhasePlan(text) {
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
+    ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+      .map((m) => Number(m[1])),
   ];
 
   // Phase headings are declarations only inside strong task-plan context.
   // Generic prose/documents often contain "Phase 1"/"Phase 2" headings that
   // describe historical protocols rather than this task. An explicit count
   // already declares a plan; otherwise require an Execution Plan heading.
-  const planHeading = /^\s{0,3}(?:#{1,6}\s*)?execution[ \t]+plan[ \t]*:?/im.exec(s);
+  const planHeading = /^\s{0,3}(?:#{1,6}\s*)?(?:the[ \t]+)?execution[ \t]+plan[ \t]*:?/im.exec(s);
+  const leadingColonPlan = /^\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+1\s*:/i.test(s);
   const headingText = explicitCounts.length
-    ? s
-    : (planHeading ? s.slice(planHeading.index + planHeading[0].length) : '');
+    ? ''
+    : (planHeading
+      ? s.slice(planHeading.index + planHeading[0].length)
+      : (leadingColonPlan ? s : ''));
+  const headingPattern = leadingColonPlan && !planHeading
+    ? /(?:^|[.;,\n][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\s*:/gim
+    : /(?:^|[.;,][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim;
   const headingNumbers = explicitCounts.length ? [] : [...new Set(
-    [...headingText.matchAll(/(?:^|[.;,][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
-      .map((m) => Number(m[1])),
+    [...headingText.matchAll(headingPattern)].map((m) => Number(m[1])),
   )].sort((a, b) => a - b);
 
   let scopedNumbers = headingNumbers;
-  let source = headingNumbers.length >= 2 ? 'execution-plan phase headings' : null;
+  let source = headingNumbers.length >= 2
+    ? (leadingColonPlan && !planHeading ? 'leading phase clauses' : 'execution-plan phase headings')
+    : null;
   if (scopedNumbers.length < 2 && explicitCounts.length === 0) {
     // An execution-plan mention is not a delimiter for all later prose.
     // Accept an inline enumeration only when the heading is immediately
     // followed by phase clauses. Historical references elsewhere stay prose.
-    for (const match of s.matchAll(/\bexecution[ \t]+plan[ \t]*:[ \t]*([^\r\n]*)/ig)) {
+    for (const match of s.matchAll(/\b(?:the[ \t]+)?execution[ \t]+plan[ \t]*:[ \t]*([^\r\n]*)/ig)) {
       const clauses = match[1].split(/[.;,]/).map((part) => part.trim()).filter(Boolean);
       const labels = [];
       for (const clause of clauses) {
@@ -189,7 +198,8 @@ export function referencesMissingPriorContract(text) {
   const s = String(text ?? '');
   return /\b(?:full|complete|original)\s+(?:spec|specification|contract|acceptance\s+criteria|task\s+requirements)\b[\s\S]{0,500}?\b(?:provided|given|stated|is|was)\b[\s\S]{0,160}?\b(?:in\s+)?(?:the\s+)?(?:earlier|previous|original\s+task\s+message|conversation)\b/i.test(s)
     || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:spec|specification|contract|task\s+message)\b/i.test(s)
-    || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b[\s\S]{0,200}?\b(?:for|containing|with)\s+(?:the\s+)?(?:full|complete|original)?\s*(?:spec|specification|contract|acceptance\s+criteria|requirements)\b/i.test(s);
+    || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b[\s\S]{0,200}?\b(?:for|containing|with)\s+(?:the\s+)?(?:full|complete|original)?\s*(?:spec|specification|contract|acceptance\s+criteria|requirements)\b/i.test(s)
+    || /\b(?:acceptance\s+criteria|success\s+criteria|task\s+requirements|requirements)\s+(?:are|were|is|was)\s+(?:in|from)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b/i.test(s);
 }
 
 export function assertContractHandoff({ goal, contractText, phases } = {}) {

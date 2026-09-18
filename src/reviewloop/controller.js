@@ -1230,6 +1230,26 @@ export function createReviewLoopController({
 
     recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'review requested');
 
+    // Validate shape/requirement/current-scope membership before the LOCAL Gate
+    // can spend time or mutate the worktree. Exact-code binding still happens
+    // only after Gate stabilization below.
+    try {
+      validateEvidenceSubmissions({ objective, reviewScope, submissions: evidence });
+    } catch (err) {
+      if (!(err instanceof EvidenceValidationError)) throw err;
+      const status = evidenceStatusForScope({
+        loopState, objective, reviewScope, evidenceFingerprint: delta.fingerprint,
+      });
+      return evidenceRework({
+        loopState,
+        gate: { verdict: 'NOT_RUN', failureIdentities: [] },
+        head: delta.currentHead ?? null,
+        reason: err.message,
+        missing: status.missing,
+        receipt: unacceptedEvidence(evidence, 'INVALID_EVIDENCE'),
+      });
+    }
+
     // B7 — a pre-existing change that cannot be attributed away from the Worker
     // must not be sent to the Reviewer as Worker output.
     if (delta.evidenceComplete === false) {
