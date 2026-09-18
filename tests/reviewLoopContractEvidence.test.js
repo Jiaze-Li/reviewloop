@@ -141,6 +141,52 @@ test('evidence is bound to the exact diff and becomes stale after code changes',
   assert.equal(calls.reviewer, 1, 'stale runtime evidence cannot authorize a new-code review');
 });
 
+
+test('improved evidence is new information even when code and Gate are unchanged', async () => {
+  const { controller, calls } = makeHarness({
+    deltas: [
+      { fingerprint: 'same-code', diff: 'same change' },
+      { fingerprint: 'same-code', diff: 'same change' },
+    ],
+    gates: [
+      { verdict: 'PASS', fingerprint: 'same-gate', failureIdentities: [] },
+      { verdict: 'PASS', fingerprint: 'same-gate', failureIdentities: [] },
+    ],
+    reviews: [
+      { findings: [finding('P1', 'ui.js', 'runtime evidence is too weak')] },
+      { findings: [] },
+    ],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'Prove the runtime-sensitive behavior.',
+    contractText: 'Goal: prove the runtime-sensitive behavior with sufficient runtime evidence.',
+    cwd: '/r',
+    evidenceRequirements: [{
+      id: 'runtime-ui',
+      type: 'runtime',
+      description: 'Exercise the real production interaction.',
+      gate: 'final',
+    }],
+  });
+
+  const weak = await controller.review({
+    loopId,
+    evidence: [{ requirementId: 'runtime-ui', summary: 'Opened the app only.' }],
+  });
+  assert.equal(weak.status, 'REWORK');
+  assert.equal(calls.reviewer, 1);
+
+  const improved = await controller.review({
+    loopId,
+    evidence: [{
+      requirementId: 'runtime-ui',
+      summary: 'Ran the complete production interaction and observed the required state transition.',
+    }],
+  });
+  assert.equal(improved.status, 'PASS');
+  assert.equal(calls.reviewer, 2, 'revised proof authorizes a fresh review without unrelated code churn');
+});
+
 test('PHASE_PASS returns and durably stores a compact resume packet for context refresh', async () => {
   const { controller, persistence } = makeHarness({
     deltas: [{ fingerprint: 'p1', diff: 'phase 1 change' }],
