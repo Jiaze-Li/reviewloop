@@ -119,7 +119,7 @@ export function declaredPhasePlan(text) {
   const headingText = explicitCounts.length
     ? s
     : (planHeading ? s.slice(planHeading.index + planHeading[0].length) : '');
-  const headingNumbers = [...new Set(
+  const headingNumbers = explicitCounts.length ? [] : [...new Set(
     [...headingText.matchAll(/(?:^|[.;][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
       .map((m) => Number(m[1])),
   )].sort((a, b) => a - b);

@@ -7,7 +7,7 @@ import {
 } from '../src/reviewloop/objective.js';
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
-  assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions,
+  assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions, evidencePromptLines,
   latestEvidenceRecords, evidenceStatusForScope,
 } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
