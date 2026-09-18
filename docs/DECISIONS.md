@@ -14,11 +14,11 @@ Current architectural decisions. Historical SuperGPT V1/V2 decisions are under
 | D7 | The Gate is verification, not a command-permission system. 0 model tokens. |
 | D8 | P1/P2 block completion; P3 does not. Root `CLAUDE.md` review conventions are aligned to this. |
 | D9 | The first actionable REWORK goes directly to the same Worker — no Supervisor, no new session. |
-| D10 | Supervisor is exception-only: invoked at most once, only after a genuine changed implementation left the same blocking finding. |
+| D10 | Supervisor is exception-only: at most one successful escalation per current review gate, only after a genuine changed implementation left the same blocking finding. PHASE_PASS resets this gate-local flag; task-wide model-spend safety does not reset. |
 | D11 | Local waiting never wakes the Worker or a model. `WAITING_FOR_REVIEW` is a durable state. |
 | D12 | A PR review is bound to the exact PR HEAD. Each round re-reads the live PR HEAD (fail closed if unresolvable) and reviews `prBaseSha → that HEAD` inside an isolated exact-HEAD worktree; a pre-`PASS` recheck refuses to certify a stale review if the HEAD moved. An old-HEAD clean review never approves a new HEAD. See D29 for the full snapshot-correctness mechanism. |
 | D28 | ONE review engine. PR is a review TARGET (`prBaseSha → exact PR HEAD` diff), never a reviewer transport. The `@codex review` / `@claude review` external-review engine and its machinery (`prReviewController`, `ExternalModelTriggerAuthority`, `prTrust`, `threadResolution`, `trustedPrReview`, `prCloseoutPolicy`) are removed. Both LOCAL and PR targets run the same deterministic Gate → internal Reviewer routing (`agy:opus` first) → convergence → Supervisor → spend accounting. `githubBackend` is a slim target adapter (repo id, base SHA, HEAD SHA, PR diff, opt-in result publication) and never reviews. The objective fingerprint folds in `prBaseSha` + `reviewedHeadSha`, and every PR round writes a durable tamper-evident audit record to `loopState.audit[]`. |
-| D13 | Same evidence cannot spend twice. `NO NEW INFORMATION → NO NEW MODEL CALL`, enforced at the authority boundary. |
+| D13 | Same evidence in the same review scope cannot spend twice. `NO NEW INFORMATION → NO NEW MODEL CALL`, enforced at the authority boundary. A phase/final scope change is new review information and is fingerprinted into the review-state evidence. |
 | D14 | ReviewLoop never auto-merges and never force-pushes. |
 | D15 | The Worker-facing MCP surface is exactly two tools; COMMON ≤ 2.5 KB; result payloads are compact and never carry raw evidence blobs. |
 | D16 | `~/.reviewloop` is the runtime root. `~/.supergpt` is never read, written, or auto-resumed; a legacy V2 snapshot fails closed. |
