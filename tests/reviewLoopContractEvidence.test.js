@@ -195,6 +195,25 @@ test('legacy task evidence scope is rejected in favor of universal final scope',
   );
 });
 
+test('reserved review-scope ids cannot be used as phase ids', async () => {
+  const { controller } = makeHarness();
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Two-phase task.',
+      contractText: 'Execution Plan: Phase 1 Foundation. Phase 2 Completion.',
+      cwd: '/r',
+      phases: [
+        phases[0],
+        {
+          ...phases[1],
+          id: 'final',
+        },
+      ],
+    }),
+    /phase id "final" is reserved/i,
+  );
+});
+
 test('submitted optional evidence keeps its requirement description for Reviewer context', () => {
   const objective = {
     evidenceRequirements: [{
@@ -302,7 +321,8 @@ test('required final runtime evidence blocks Reviewer spend until submitted', as
   });
   assert.equal(passed.status, 'PASS');
   assert.equal(calls.reviewer, 1);
-  assert.equal(passed.evidenceRecords.length, 1);
+  assert.equal(passed.evidenceRecordCount, 1);
+  assert.equal(passed.evidenceRecords, undefined);
 });
 
 test('evidence is bound to the exact diff and becomes stale after code changes', async () => {
@@ -342,6 +362,58 @@ test('evidence is bound to the exact diff and becomes stale after code changes',
   assert.equal(calls.reviewer, 1, 'stale runtime evidence cannot authorize a new-code review');
 });
 
+
+test('PASS and resume packets never echo raw evidence summaries into Worker context', async () => {
+  const huge = 'e'.repeat(100_000);
+
+  const passHarness = makeHarness({
+    deltas: [{ fingerprint: 'bounded-pass', diff: 'change' }],
+    reviews: [{ findings: [] }],
+  });
+  const { loopId: passLoop } = await passHarness.controller.begin({
+    goal: 'Bound final evidence output.',
+    contractText: 'Goal: bound final evidence output.',
+    cwd: '/r',
+    evidenceRequirements: [{
+      id: 'runtime',
+      type: 'runtime',
+      description: 'Runtime proof.',
+      gate: 'final',
+    }],
+  });
+  const passed = await passHarness.controller.review({
+    loopId: passLoop,
+    evidence: [{ requirementId: 'runtime', summary: huge }],
+  });
+  assert.equal(passed.status, 'PASS');
+  assert.equal(passed.evidenceRecordCount, 1);
+  assert.equal(JSON.stringify(passed).includes(huge.slice(0, 1000)), false);
+
+  const phaseHarness = makeHarness({
+    deltas: [{ fingerprint: 'bounded-phase', diff: 'phase change' }],
+    reviews: [{ findings: [] }],
+  });
+  const { loopId: phaseLoop } = await phaseHarness.controller.begin({
+    goal: 'Two-phase task.',
+    contractText: 'Execution Plan: Phase 1 Foundation. Phase 2 Integration.',
+    cwd: '/r',
+    phases,
+    evidenceRequirements: [{
+      id: 'phase-proof',
+      type: 'runtime',
+      description: 'Phase 1 runtime proof.',
+      gate: 'phase-1',
+    }],
+  });
+  const phasePass = await phaseHarness.controller.review({
+    loopId: phaseLoop,
+    evidence: [{ requirementId: 'phase-proof', summary: huge }],
+  });
+  assert.equal(phasePass.status, 'PHASE_PASS');
+  assert.equal(phasePass.resumePacket.evidenceRecordCount, 1);
+  assert.equal(phasePass.resumePacket.evidenceRecords, undefined);
+  assert.equal(JSON.stringify(phasePass.resumePacket).includes(huge.slice(0, 1000)), false);
+});
 
 test('improved evidence is new information even when code and Gate are unchanged', async () => {
   const { controller, calls } = makeHarness({
