@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { bindEvidenceSubmissions, reviewerEvidenceBundle } from '../src/reviewloop/contractEvidence.js';
+import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
 import { MemoryPersistence, makeHarness, finding } from './helpers/reviewLoopHarness.js';
 
 const phases = [
@@ -135,6 +136,43 @@ test('submitted optional evidence keeps its requirement description for Reviewer
   assert.equal(bundle.requirements.length, 1);
   assert.equal(bundle.requirements[0].description, objective.evidenceRequirements[0].description);
   assert.equal(bundle.submissions[0].requirementId, 'optional-diagnostic');
+});
+
+test('reviewer and supervisor prompts keep the mandatory goal when contractText is present', async () => {
+  let reviewerPrompt = '';
+  const reviewerInvoke = buildReviewerInvoke();
+  await reviewerInvoke({
+    objective: {
+      goal: 'Preserve the actual success definition.',
+      contractText: 'Phase/evidence details that do not restate the concise goal.',
+      constraints: [],
+    },
+    diff: 'diff --git a/a.js b/a.js',
+    changedFiles: ['a.js'],
+    gate: { verdict: 'PASS' },
+    transport: async (prompt) => {
+      reviewerPrompt = prompt;
+      return { text: '{"findings":[]}' };
+    },
+  });
+  assert.match(reviewerPrompt, /ORIGINAL TASK GOAL .*Preserve the actual success definition\./);
+  assert.match(reviewerPrompt, /FROZEN TASK CONTRACT .*Phase\/evidence details/);
+
+  let supervisorPrompt = '';
+  const supervisorInvoke = buildSupervisorInvoke();
+  await supervisorInvoke({
+    objective: {
+      goal: 'Preserve the actual success definition.',
+      contractText: 'Phase/evidence details that do not restate the concise goal.',
+    },
+    blockingFindings: [{ severity: 'P1', title: 'x' }],
+    transport: async (prompt) => {
+      supervisorPrompt = prompt;
+      return { text: '{"guidance":"fix x","recommendation":"REWORK"}' };
+    },
+  });
+  assert.match(supervisorPrompt, /ORIGINAL TASK GOAL .*Preserve the actual success definition\./);
+  assert.match(supervisorPrompt, /FROZEN TASK CONTRACT .*Phase\/evidence details/);
 });
 
 test('required final runtime evidence blocks Reviewer spend until submitted', async () => {
