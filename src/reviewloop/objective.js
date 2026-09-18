@@ -52,6 +52,8 @@ function freezeDeep(value) {
 // Normalize an optional phase plan supplied by the Worker. The plan is frozen
 // into the immutable ReviewObjective so a later review round cannot skip,
 // reorder, weaken, or rewrite phase acceptance boundaries.
+const RESERVED_PHASE_IDS = new Set(['task', 'final']);
+
 export function normalizePhasePlan(phases = []) {
   if (phases == null) return [];
   if (!Array.isArray(phases)) throw new Error('createReviewObjective: phases must be an array');
@@ -63,6 +65,9 @@ export function normalizePhasePlan(phases = []) {
     }
     const id = String(raw.id ?? `phase-${index + 1}`).trim();
     if (!id) throw new Error(`createReviewObjective: phase ${index + 1} has an empty id`);
+    if (RESERVED_PHASE_IDS.has(id.toLowerCase())) {
+      throw new Error(`createReviewObjective: phase id "${id}" is reserved for ReviewLoop scope state`);
+    }
     if (seen.has(id)) throw new Error(`createReviewObjective: duplicate phase id "${id}"`);
     seen.add(id);
 
