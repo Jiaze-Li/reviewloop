@@ -85,6 +85,21 @@ test('D. baseline PASS, current fails D -> NEW_FAILURES = [D] (normal FAIL)', ()
   assert.deepEqual(r.newFailures, ['graph test D']);
 });
 
+
+test('D2. identical failure identity from a different command is still NEW_FAILURES', () => {
+  const baseline = ev(false, [
+    failing('✖ shared identity', 'npm test'),
+  ]);
+  const current = ev(false, [
+    failing('✖ shared identity', 'npm test'),
+    failing('✖ shared identity', 'npm run phase-check'),
+  ]);
+  const r = diffBaselineFailures(baseline, current);
+  assert.equal(r.verdict, BASELINE_DIFF_VERDICTS.NEW_FAILURES);
+  assert.deepEqual(r.newFailures, ['shared identity']);
+  assert.deepEqual(r.ignoredBaselineFailures, ['shared identity']);
+});
+
 test('E. unparseable identity on both sides, both exit 1 -> UNRELIABLE (never assume equal)', () => {
   const baseline = ev(false, [failing('Segmentation fault (core dumped)')]);
   const current = ev(false, [failing('Segmentation fault (core dumped)')]);
