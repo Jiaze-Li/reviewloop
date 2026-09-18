@@ -73,6 +73,9 @@ export function createReviewLoopMcpServer({
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
         prNumber: z.number().int().optional().describe('PR number — review the PR (base -> exact HEAD) instead of the local worktree'),
         constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
+        verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
+        blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1 and P2'),
+        maxReviewRounds: z.number().int().positive().optional().describe('maximum fresh Reviewer rounds PER gate (each phase gate and the final gate); defaults to 3'),
         phases: z.array(z.object({
           id: z.string().min(1),
           title: z.string().min(1).optional(),
@@ -95,12 +98,24 @@ export function createReviewLoopMcpServer({
         currentPhase: z.string().optional(),
       },
     },
-    async ({ goal, cwd: reqCwd, prNumber, constraints, phases }, extra) => {
+    async ({
+      goal,
+      cwd: reqCwd,
+      prNumber,
+      constraints,
+      verificationCommands,
+      blockingSeverities,
+      maxReviewRounds,
+      phases,
+    }, extra) => {
       const res = await ctl.begin({
         goal,
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
         prNumber: prNumber ?? null,
         constraints: constraints ?? [],
+        verificationCommands: verificationCommands ?? null,
+        blockingSeverities,
+        maxReviewRounds,
         phases: phases ?? [],
         signal: extra?.signal,
       });
