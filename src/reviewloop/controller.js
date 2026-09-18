@@ -1479,6 +1479,11 @@ export function createReviewLoopController({
         baseSha: target.baseSha,
         reviewedHeadSha: target.reviewedHeadSha,
       })),
+      reviewScope: {
+        type: reviewScope?.type ?? 'task',
+        id: reviewScope?.id ?? 'task',
+        fingerprint: reviewScope?.fingerprint ?? null,
+      },
       objective: {
         goal: objective.goal,
         constraints: objective.constraints ?? [],
@@ -1849,7 +1854,9 @@ export function createReviewLoopController({
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];
       if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
-        const sup = await runSupervisor({ spend, loopState, objective, review, gate, signal });
+        const sup = await runSupervisor({
+          spend, loopState, objective, review, gate, reviewScope, signal,
+        });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
         const outcome = await applySupervisorOutcome({
