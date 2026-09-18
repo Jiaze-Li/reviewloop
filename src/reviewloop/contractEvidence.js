@@ -9,6 +9,61 @@ import { createHash } from 'node:crypto';
 
 const EVIDENCE_TYPES = new Set(['runtime', 'artifact', 'manual', 'other']);
 
+// UTF-8 byte limits, enforced before binding/persisting or spending model tokens.
+// Reject rather than truncate proof: the Reviewer must see everything accepted.
+export const EVIDENCE_LIMITS = Object.freeze({
+  items: 64,
+  idBytes: 128,
+  summaryBytes: 4096,
+  artifactRefBytes: 1024,
+  requirementsBytes: 16 * 1024,
+  promptBytes: 24 * 1024,
+});
+
+export class EvidenceValidationError extends Error {
+  constructor(message) {
+    super(`reviewloop_review: ${message}`);
+    this.name = 'EvidenceValidationError';
+    this.code = 'INVALID_EVIDENCE';
+  }
+}
+
+const bytes = (value) => Buffer.byteLength(String(value), 'utf8');
+
+function assertEvidenceText(value, label, limit, { optional = false } = {}) {
+  if (optional && value == null) return;
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new EvidenceValidationError(`${label} must be a nonempty string`);
+  }
+  if (bytes(value) > limit) {
+    throw new EvidenceValidationError(`${label} exceeds the ${limit}-byte limit; submit a concise factual summary and an artifact reference instead of raw logs`);
+  }
+}
+
+// This is also the provider's exact evidence rendering. The aggregate limit
+// therefore covers optional descriptions, covers, refs and formatting, not just
+// summaries, and cannot diverge from what every diff chunk actually receives.
+export function evidencePromptLines(evidence) {
+  normalizeEvidenceSubmissions(evidence?.submissions);
+  const lines = [
+    evidence?.requirements?.length
+      ? `EVIDENCE REQUIREMENTS / CONTEXT FOR THIS GATE:
+${evidence.requirements.map((r) => `- ${r.id} [${r.type}; ${r.required === false ? 'optional' : 'required'}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
+      : '',
+    evidence?.submissions?.length
+      ? `SUBMITTED EVIDENCE:
+${evidence.submissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
+      : '',
+    evidence?.requirements?.length
+      ? 'Judge whether submitted evidence proves the behavior its requirement describes. Required evidence must be sufficient to pass; optional evidence may inform review but does not itself block when absent. Do not treat mere presence as proof.'
+      : '',
+  ];
+  if (bytes(lines.join('\n')) > EVIDENCE_LIMITS.promptBytes) {
+    throw new EvidenceValidationError(`combined evidence prompt exceeds the ${EVIDENCE_LIMITS.promptBytes}-byte limit; shorten submitted summaries or artifact references without omitting required proof`);
+  }
+  return lines;
+}
+
 const list = (value) => (Array.isArray(value) ? value : (value == null ? [] : [value]))
   .map((v) => String(v).trim())
   .filter(Boolean);
@@ -155,6 +210,9 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
 export function normalizeEvidenceRequirements(raw = [], phaseIds = []) {
   if (raw == null) return [];
   if (!Array.isArray(raw)) throw new Error('createReviewObjective: evidenceRequirements must be an array');
+  if (raw.length > EVIDENCE_LIMITS.items || bytes(JSON.stringify(raw)) > EVIDENCE_LIMITS.requirementsBytes) {
+    throw new Error(`createReviewObjective: evidenceRequirements exceed ${EVIDENCE_LIMITS.items} items or ${EVIDENCE_LIMITS.requirementsBytes} bytes; keep requirement metadata concise`);
+  }
   const phases = new Set(phaseIds);
   const seen = new Set();
   return raw.map((entry, index) => {
@@ -163,6 +221,9 @@ export function normalizeEvidenceRequirements(raw = [], phaseIds = []) {
     }
     const id = String(entry.id ?? '').trim();
     if (!id) throw new Error(`createReviewObjective: evidence requirement ${index + 1} requires an id`);
+    if (bytes(id) > EVIDENCE_LIMITS.idBytes) {
+      throw new Error(`createReviewObjective: evidence requirement ${index + 1} id exceeds ${EVIDENCE_LIMITS.idBytes} bytes`);
+    }
     if (seen.has(id)) throw new Error(`createReviewObjective: duplicate evidence requirement id "${id}"`);
     seen.add(id);
     const description = String(entry.description ?? '').trim();
@@ -190,19 +251,26 @@ export function normalizeEvidenceRequirements(raw = [], phaseIds = []) {
 
 export function normalizeEvidenceSubmissions(raw = []) {
   if (raw == null) return [];
-  if (!Array.isArray(raw)) throw new Error('reviewloop_review: evidence must be an array');
+  if (!Array.isArray(raw)) throw new EvidenceValidationError('evidence must be an array');
+  if (raw.length > EVIDENCE_LIMITS.items) {
+    throw new EvidenceValidationError(`evidence exceeds the ${EVIDENCE_LIMITS.items}-item limit`);
+  }
+  const seen = new Set();
   return raw.map((entry, index) => {
+    const label = `evidence item ${index + 1}`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error(`reviewloop_review: evidence item ${index + 1} must be an object`);
+      throw new EvidenceValidationError(`${label} must be an object`);
     }
-    const requirementId = String(entry.requirementId ?? '').trim();
-    const summary = String(entry.summary ?? '').trim();
-    if (!requirementId) throw new Error(`reviewloop_review: evidence item ${index + 1} requires requirementId`);
-    if (!summary) throw new Error(`reviewloop_review: evidence item "${requirementId}" requires a summary`);
+    assertEvidenceText(entry.requirementId, `${label} requirementId`, EVIDENCE_LIMITS.idBytes);
+    assertEvidenceText(entry.summary, `${label} summary`, EVIDENCE_LIMITS.summaryBytes);
+    assertEvidenceText(entry.artifactRef, `${label} artifactRef`, EVIDENCE_LIMITS.artifactRefBytes, { optional: true });
+    const requirementId = entry.requirementId.trim();
+    if (seen.has(requirementId)) throw new EvidenceValidationError(`${label} duplicates a requirementId in this batch`);
+    seen.add(requirementId);
     return {
       requirementId,
-      summary,
-      artifactRef: entry.artifactRef == null ? null : String(entry.artifactRef),
+      summary: entry.summary.trim(),
+      artifactRef: entry.artifactRef == null ? null : entry.artifactRef.trim(),
     };
   });
 }
@@ -238,14 +306,17 @@ export function bindEvidenceSubmissions({
   const normalized = normalizeEvidenceSubmissions(submissions);
   if (!normalized.length) return;
   const requirements = new Map((objective?.evidenceRequirements ?? []).map((r) => [r.id, r]));
+  // Stage the complete batch. No accepted prefix or over-budget replacement
+  // may leak into durable state when any later item fails validation.
+  let nextRecords = [...(loopState.evidenceRecords ?? [])];
   for (const item of normalized) {
     const requirement = requirements.get(item.requirementId);
     if (!requirement) {
-      throw new Error(`reviewloop_review: evidence references unknown requirement "${item.requirementId}"`);
+      throw new EvidenceValidationError(`evidence references unknown requirement "${item.requirementId}"`);
     }
     if (!gateMatches(requirement, reviewScope)) {
-      throw new Error(
-        `reviewloop_review: evidence "${item.requirementId}" does not belong to current gate "${reviewScope?.id ?? 'task'}"`,
+      throw new EvidenceValidationError(
+        `evidence "${item.requirementId}" does not belong to the current gate`,
       );
     }
     const record = {
@@ -257,14 +328,18 @@ export function bindEvidenceSubmissions({
       head,
       recordedAt: now,
     };
-    loopState.evidenceRecords = [
-      ...(loopState.evidenceRecords ?? []).filter((r) =>
+    nextRecords = [
+      ...nextRecords.filter((r) =>
         !(r.requirementId === item.requirementId
           && r.reviewScopeFingerprint === record.reviewScopeFingerprint
           && r.evidenceFingerprint === evidenceFingerprint)),
       record,
     ];
   }
+  reviewerEvidenceBundle({
+    loopState: { evidenceRecords: nextRecords }, objective, reviewScope, evidenceFingerprint,
+  });
+  loopState.evidenceRecords = nextRecords;
 }
 
 export function evidenceStatusForScope({ loopState, objective, reviewScope, evidenceFingerprint } = {}) {
@@ -288,7 +363,7 @@ export function reviewerEvidenceBundle({ loopState, objective, reviewScope, evid
   // the description needed to judge that claim without prompt clutter.
   const requirements = evidenceRequirementsForScope(objective, reviewScope)
     .filter((r) => r.required !== false || submittedIds.has(r.id));
-  return {
+  const bundle = {
     requirements,
     submissions: status.records.map((r) => ({
       requirementId: r.requirementId,
@@ -298,6 +373,10 @@ export function reviewerEvidenceBundle({ loopState, objective, reviewScope, evid
       recordedAt: r.recordedAt,
     })),
   };
+  // Re-check persisted evidence too; an upgraded/reloaded loop must not bypass
+  // the new bounds merely because its oversized records were accepted earlier.
+  evidencePromptLines(bundle);
+  return bundle;
 }
 
 export function evidenceBundleFingerprint(bundle) {
@@ -331,10 +410,22 @@ export function buildResumePacket({ loopState, objective, completedScope, nextSc
     .map((entry) => (objective?.phases ?? []).find((p) => p.id === entry.id))
     .filter(Boolean)
     .flatMap((p) => p.carryForwardInvariants ?? []);
+  const pendingPhaseIds = new Set((objective?.phases ?? [])
+    .slice(completed.length).map((phase) => phase.id));
+  const pendingEvidenceRequirements = (objective?.evidenceRequirements ?? [])
+    .filter((requirement) => requirement.gate === 'final' || pendingPhaseIds.has(requirement.gate));
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     loopId: loopState.loopId,
     objectiveFingerprint: objective?.fingerprint ?? null,
+    // Task definitions are not evidence logs. Preserve their exact semantics,
+    // including when contractText is absent and the structured plan is the
+    // only source of the final whole-task acceptance criteria.
+    goal: objective?.goal ?? '',
+    contractText: objective?.contractText ?? null,
+    phasePlan: objective?.phases ?? [],
+    verificationPlan: objective?.verificationPlan ?? null,
+    pendingEvidenceRequirements,
     repository: objective?.repository ?? null,
     head,
     completedPhases: completed.map((p) => ({ id: p.id, title: p.title, proof: p.proof })),
@@ -357,5 +448,11 @@ export function buildResumePacket({ loopState, objective, completedScope, nextSc
     // state and available to ReviewLoop; raw summaries do not belong in the
     // context-refresh packet.
     evidenceRecordCount: (loopState?.evidenceRecords ?? []).length,
+    evidenceSummary: (objective?.evidenceRequirements ?? []).map((requirement) => ({
+      requirementId: requirement.id,
+      gate: requirement.gate,
+      recordCount: (loopState?.evidenceRecords ?? [])
+        .filter((record) => record.requirementId === requirement.id).length,
+    })),
   };
 }

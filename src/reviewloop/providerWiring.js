@@ -33,6 +33,7 @@ import {
   verifyEffectiveAgyAgent,
 } from './adapters/agyCustomAgentCapability.js';
 import { createGithubReviewBackend } from './githubBackend.js';
+import { evidencePromptLines } from './contractEvidence.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 export { narrowReviewTransportCwd, narrowAgyGeminiDir, detectAgyCustomAgentSupport };
@@ -535,15 +536,7 @@ export function buildReviewerInvoke() {
       ...reviewScopePromptLines(reviewScope),
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
-      evidence?.requirements?.length
-        ? `EVIDENCE REQUIREMENTS / CONTEXT FOR THIS GATE:\n${evidence.requirements.map((r) => `- ${r.id} [${r.type}; ${r.required === false ? 'optional' : 'required'}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
-        : '',
-      evidence?.submissions?.length
-        ? `SUBMITTED EVIDENCE:\n${evidence.submissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
-        : '',
-      evidence?.requirements?.length
-        ? 'Judge whether submitted evidence proves the behavior its requirement describes. Required evidence must be sufficient to pass; optional evidence may inform review but does not itself block when absent. Do not treat mere presence as proof.'
-        : '',
+      ...evidencePromptLines(evidence),
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
       '',

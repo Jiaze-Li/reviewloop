@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
-import { bindEvidenceSubmissions, reviewerEvidenceBundle } from '../src/reviewloop/contractEvidence.js';
+import { bindEvidenceSubmissions, reviewerEvidenceBundle, EVIDENCE_LIMITS } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
 import { MemoryPersistence, makeHarness, finding } from './helpers/reviewLoopHarness.js';
 
@@ -364,7 +364,7 @@ test('evidence is bound to the exact diff and becomes stale after code changes',
 
 
 test('PASS and resume packets never echo raw evidence summaries into Worker context', async () => {
-  const huge = 'e'.repeat(100_000);
+  const huge = 'e'.repeat(EVIDENCE_LIMITS.summaryBytes);
 
   const passHarness = makeHarness({
     deltas: [{ fingerprint: 'bounded-pass', diff: 'change' }],

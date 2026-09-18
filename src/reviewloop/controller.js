@@ -54,6 +54,7 @@ import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.j
 import { chunkDiffForReview } from './diffChunker.js';
 import {
   assertContractHandoff,
+  EvidenceValidationError,
   bindEvidenceSubmissions,
   evidenceStatusForScope,
   reviewerEvidenceBundle,
@@ -383,48 +384,63 @@ export function createReviewLoopController({
   }
 
   async function enforceEvidenceObligations({
-    loopState, objective, reviewScope, delta, submissions = [], head = null,
+    loopState, objective, reviewScope, delta, gate, submissions = [], head = null,
   }) {
     const evidenceFingerprint = delta?.fingerprint ?? head ?? 'unknown';
-    bindEvidenceSubmissions({
-      loopState,
-      objective,
-      reviewScope,
-      submissions,
-      evidenceFingerprint,
-      head,
-      now: new Date(clock()).toISOString(),
-    });
-    const status = evidenceStatusForScope({
-      loopState, objective, reviewScope, evidenceFingerprint,
-    });
-    if (status.missing.length) {
-      const ids = status.missing.map((r) => r.id);
-      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'required completion evidence missing');
+    const rework = async (reason, missing = []) => {
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason);
       await saveLoop(loopState);
       return {
         blocked: true,
         result: {
-          status: 'REWORK',
-          loopId: loopState.loopId,
-          round: loopState.round,
-          gateRound: loopState.gateRound ?? loopState.round,
-          reason: `required evidence missing for ${reviewScope.id}: ${ids.join(', ')}`,
-          missingEvidenceRequirements: status.missing,
-          nextAction: 'Produce the required evidence, then call reviewloop_review again with evidence[] bound to those requirement ids.',
+          ...compactReworkPayload({
+            loopState,
+            review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
+            gate,
+          }),
+          head,
+          reason,
+          missingEvidenceRequirements: missing,
+          nextAction: 'Correct or produce the evidence for this gate, then call reviewloop_review again in this same loop. Submit concise factual summaries and artifact references, not raw logs.',
           telemetry: await durableTelemetry(loopState.loopId),
           safetyEvents,
         },
       };
-    }
-    const bundle = reviewerEvidenceBundle({
-      loopState, objective, reviewScope, evidenceFingerprint,
-    });
-    return {
-      blocked: false,
-      bundle,
-      proofFingerprint: evidenceBundleFingerprint(bundle),
     };
+    try {
+      // Binding validates the whole batch and prospective aggregate before
+      // changing records. Invalid input cannot persist an accepted prefix.
+      bindEvidenceSubmissions({
+        loopState,
+        objective,
+        reviewScope,
+        submissions,
+        evidenceFingerprint,
+        head,
+        now: new Date(clock()).toISOString(),
+      });
+      // Includes persisted records: upgrading/reloading cannot bypass limits.
+      const bundle = reviewerEvidenceBundle({
+        loopState, objective, reviewScope, evidenceFingerprint,
+      });
+      const status = evidenceStatusForScope({
+        loopState, objective, reviewScope, evidenceFingerprint,
+      });
+      if (status.missing.length) {
+        const ids = status.missing.map((r) => r.id);
+        return rework(`required evidence missing for ${reviewScope.id}: ${ids.join(', ')}`, status.missing);
+      }
+      return {
+        blocked: false,
+        bundle,
+        proofFingerprint: evidenceBundleFingerprint(bundle),
+      };
+    } catch (err) {
+      if (!(err instanceof EvidenceValidationError)) throw err;
+      // Deterministic input rejection consumes no Reviewer/Supervisor round,
+      // does not latch no-progress, and never echoes the rejected raw proof.
+      return rework(err.message);
+    }
   }
 
   async function begin({
@@ -727,8 +743,9 @@ export function createReviewLoopController({
   }) {
     const tried = new Set();
     // Effective attempt bound = this role's candidate count, so every
-    // DEFAULT_ROLE_POLICY candidate is reachable when each earlier one fails
-    // safely. `tried` + a null selection still stop the loop early.
+    // DEFAULT_ROLE_POLICY candidate must be mechanically reachable when each
+    // earlier one fails safely. `tried` + a null selection still stop the loop
+    // early.
     const maxAttempts = providerAttemptBudget(role);
     let lastErr = null;
     // Resume/continuation: if this exact (role, operationId) already durably
@@ -1417,6 +1434,7 @@ export function createReviewLoopController({
       objective,
       reviewScope,
       delta,
+      gate,
       submissions: evidence,
       head: delta.currentHead ?? null,
     });
@@ -1942,7 +1960,7 @@ export function createReviewLoopController({
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
         && loopState.lastReview?.status === 'ACTIONABLE'
-        && (!Array.isArray(evidence) || evidence.length === 0)) {
+        && Array.isArray(evidence) && evidence.length === 0) {
         await saveLoop(loopState);
         return {
           status: 'PUSH_REQUIRED', loopId: loopState.loopId, head: observedHead,
@@ -2069,6 +2087,7 @@ export function createReviewLoopController({
         objective,
         reviewScope,
         delta,
+        gate,
         // A HEAD rebind makes evidence supplied for the original reviewed SHA
         // stale. Never silently rebind the same runtime/manual claim to a new
         // PR HEAD inside this one call.
