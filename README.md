@@ -34,8 +34,8 @@ The Worker calls two MCP tools:
 
 | tool | when | cost |
 |---|---|---|
-| `reviewloop_begin({ goal, cwd, prNumber?, constraints?, phases?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
-| `reviewloop_review({ loopId })` | when the current gate is ready | Gate (0) + Reviewer if justified |
+| `reviewloop_begin({ goal, cwd, prNumber?, constraints?, contractText?, phases?, evidenceRequirements?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
+| `reviewloop_review({ loopId, evidence? })` | when the current gate is ready | Gate (0) + Reviewer if justified |
 
 `reviewloop_review` returns one of: `PHASE_PASS` (non-terminal; continue the
 next frozen phase in the same loop), `PASS` (final whole-task certification),
@@ -66,6 +66,23 @@ Final whole-task gate
 ```
 
 Each gate has its own convergence counter and Supervisor escalation opportunity.
+A clearly phased contract cannot silently fall back to a single gate: ReviewLoop
+rejects begin-time handoffs that declare multiple phases but omit the structured
+`phases` plan. When a full user-facing contract exists, `contractText` freezes
+that self-contained contract for the independent Reviewer instead of relying on
+chat history.
+
+Non-command runtime/artifact/manual proof can be frozen in
+`evidenceRequirements`. Required evidence is a deterministic precondition for
+the relevant gate: missing evidence returns REWORK with zero Reviewer spend, and
+submitted evidence is bound to the exact code fingerprint and review scope before
+the Reviewer judges whether the proof is actually sufficient.
+
+After `PHASE_PASS`, ReviewLoop returns a durable `resumePacket` containing the
+next phase, inherited invariants, repository identity and evidence summary. A
+Worker may use that packet as a safe context-compaction/refresh boundary while
+continuing the same `loopId`; ReviewLoop still does not spawn or replace the
+Worker.
 A `PHASE_PASS` resets only gate-local convergence state; it does **not** reset
 task-wide Reviewer/Supervisor spend, the Token Sentinel, provider accounting,
 the original baseline, or the immutable objective. The final `PASS` is the only
