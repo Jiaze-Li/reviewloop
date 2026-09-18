@@ -145,6 +145,26 @@ function scopeBoundFingerprint(parts, reviewScope) {
   return sha256Hex(reviewScope?.fingerprint ? `${base}::${reviewScope.fingerprint}` : base);
 }
 
+function phaseCompletionEvidenceHash(entry) {
+  return sha256Hex(JSON.stringify({
+    id: entry.id,
+    title: entry.title,
+    phaseIndex: entry.phaseIndex,
+    completedAt: entry.completedAt,
+    round: entry.round,
+    head: entry.head ?? null,
+    reviewScopeFingerprint: entry.reviewScopeFingerprint,
+    gateFingerprint: entry.gateFingerprint,
+    reviewFingerprint: entry.reviewFingerprint,
+    previousProof: entry.previousProof,
+    auditTargetFingerprint: entry.auditTargetFingerprint ?? null,
+  }));
+}
+
+function phaseCompletionRoot(objective) {
+  return `objective:${objective?.fingerprint ?? 'missing'}`;
+}
+
 function assertPhaseProgressionValid(loopState, objective = loopState?.objective) {
   const phases = phasesOf(objective);
   const completed = Array.isArray(loopState?.completedPhases) ? loopState.completedPhases : [];
@@ -164,12 +184,55 @@ function assertPhaseProgressionValid(loopState, objective = loopState?.objective
       `ReviewLoop phase progression invalid: completedPhases length ${completed.length} does not match currentPhaseIndex ${index}`,
     );
   }
+  let previousProof = phaseCompletionRoot(objective);
   for (let i = 0; i < completed.length; i += 1) {
-    if (completed[i]?.id !== phases[i]?.id) {
+    const entry = completed[i];
+    const phase = phases[i];
+    if (entry?.id !== phase?.id) {
       throw new Error(
-        `ReviewLoop phase progression invalid: completed phase ${i} is ${JSON.stringify(completed[i]?.id)}; expected ${JSON.stringify(phases[i]?.id)}`,
+        `ReviewLoop phase progression invalid: completed phase ${i} is ${JSON.stringify(entry?.id)}; expected ${JSON.stringify(phase?.id)}`,
       );
     }
+
+    const expectedScope = currentReviewScope({ currentPhaseIndex: i }, objective);
+    const structurallyValid = entry?.title === phase.title
+      && entry?.phaseIndex === i
+      && Number.isInteger(entry?.round) && entry.round > 0
+      && typeof entry?.completedAt === 'string' && Boolean(entry.completedAt)
+      && entry?.reviewScopeFingerprint === expectedScope.fingerprint
+      && typeof entry?.gateFingerprint === 'string' && Boolean(entry.gateFingerprint)
+      && typeof entry?.reviewFingerprint === 'string' && Boolean(entry.reviewFingerprint)
+      && entry?.previousProof === previousProof
+      && typeof entry?.proof === 'string' && entry.proof === phaseCompletionEvidenceHash(entry);
+    if (!structurallyValid) {
+      throw new Error(
+        `ReviewLoop phase progression invalid: completed phase ${JSON.stringify(phase.id)} has no valid PHASE_PASS completion evidence`,
+      );
+    }
+
+    if (objective?.mode === REVIEW_MODES.PR) {
+      const matchingAudit = (loopState?.audit ?? []).find((record) =>
+        record?.result === 'PHASE_PASS'
+        && record?.round === entry.round
+        && record?.reviewScope?.id === phase.id
+        && record?.reviewScope?.fingerprint === entry.reviewScopeFingerprint
+        && record?.gate?.fingerprint === entry.gateFingerprint
+        && record?.review?.reviewedFingerprint === entry.reviewFingerprint
+        && record?.targetFingerprint === entry.auditTargetFingerprint
+        && record?.target?.reviewedHeadSha === entry.head
+        && record?.target?.finalObservedHeadSha === entry.head
+        && record?.target?.headStillCurrent === true
+        && record?.target?.gateRanOnReviewedHead === true
+        && record?.convergence?.verdict === REVIEW_VERDICTS.PASS
+      );
+      if (!matchingAudit) {
+        throw new Error(
+          `ReviewLoop phase progression invalid: completed PR phase ${JSON.stringify(phase.id)} is not bound to a successful exact-HEAD PHASE_PASS audit record`,
+        );
+      }
+    }
+
+    previousProof = entry.proof;
   }
   if (loopState?.state === REVIEW_LOOP_STATES.PASS && index !== phases.length) {
     throw new Error('ReviewLoop phase progression invalid: terminal PASS recorded before every frozen phase completed');
@@ -499,19 +562,34 @@ export function createReviewLoopController({
     });
   }
 
-  function completeCurrentPhase(loopState, review, telemetry, { head = null } = {}) {
-    const scope = currentReviewScope(loopState);
+  function completeCurrentPhase(
+    loopState,
+    review,
+    telemetry,
+    { head = null, gate = null, reviewScope = null, auditRecord = null } = {},
+  ) {
+    const scope = reviewScope ?? currentReviewScope(loopState);
     if (scope.type !== 'phase') return null;
+
+    const previous = (loopState.completedPhases ?? []).slice(-1)[0];
+    const completion = {
+      id: scope.id,
+      title: scope.title,
+      phaseIndex: scope.phaseIndex,
+      completedAt: new Date(clock()).toISOString(),
+      round: loopState.round,
+      head,
+      reviewScopeFingerprint: scope.fingerprint,
+      gateFingerprint: gate?.fingerprint ?? loopState.lastGateFingerprint ?? null,
+      reviewFingerprint: review?.reviewedFingerprint ?? loopState.lastReviewedFingerprint ?? null,
+      previousProof: previous?.proof ?? phaseCompletionRoot(loopState.objective),
+      auditTargetFingerprint: auditRecord?.targetFingerprint ?? null,
+    };
+    completion.proof = phaseCompletionEvidenceHash(completion);
 
     loopState.completedPhases = [
       ...(loopState.completedPhases ?? []),
-      {
-        id: scope.id,
-        title: scope.title,
-        completedAt: new Date(clock()).toISOString(),
-        round: loopState.round,
-        head,
-      },
+      completion,
     ];
     loopState.currentPhaseIndex = scope.phaseIndex + 1;
 
@@ -1318,7 +1396,7 @@ export function createReviewLoopController({
 
     if (decision.verdict === REVIEW_VERDICTS.PASS) {
       const telemetry = await spend.telemetry();
-      const phaseResult = completeCurrentPhase(loopState, review, telemetry);
+      const phaseResult = completeCurrentPhase(loopState, review, telemetry, { gate, reviewScope });
       if (phaseResult) {
         await saveLoop(loopState);
         return phaseResult;
@@ -1557,6 +1635,8 @@ export function createReviewLoopController({
         // Logical pool identity — the Worker-facing abstraction never changes.
         reviewer: 'internal pool',
         status: review.status,
+        reviewedFingerprint: review.reviewedFingerprint ?? null,
+        reviewedHead: review.reviewedHead ?? null,
         blockingFindings: review.blockingFindings?.length ?? 0,
         findingSignatures: review.findingSignatures ?? [],
         // Every PHYSICAL Reviewer attempt bound to this exact reviewedHeadSha:
@@ -1961,14 +2041,19 @@ export function createReviewLoopController({
           return prHumanRequired(loopState, `PR PASS invariant not satisfied: ${invariantFailure}`);
         }
         const isPhasePass = reviewScope.type === 'phase';
-        appendAuditRecord({
+        const passAuditRecord = appendAuditRecord({
           loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
           observedHeadSha: observedHead, finalObservedHeadSha: finalHead,
           headStillCurrent: true, result: isPhasePass ? 'PHASE_PASS' : 'PASS',
           reviewScope,
         });
         if (isPhasePass) {
-          const phaseResult = completeCurrentPhase(loopState, review, telemetry, { head: observedHead });
+          const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
+            head: observedHead,
+            gate,
+            reviewScope,
+            auditRecord: passAuditRecord,
+          });
           await saveLoop(loopState);
           return phaseResult;
         }
