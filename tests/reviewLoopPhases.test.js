@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { MemoryPersistence, makeHarness, finding } from './helpers/reviewLoopHarness.js';
+import { resolveReviewLoopLimits } from '../src/reviewloop/reviewSpend.js';
 
 const phases = [
   {
@@ -160,6 +161,14 @@ test('phase-specific verification commands join the zero-token deterministic Gat
   assert.equal(result.status, 'PHASE_PASS');
   assert.deepEqual(seenCommands[1], ['echo global', 'echo phase-1']);
   assert.equal(reviewerCalls, 1);
+
+  const final = await controller.review({ loopId });
+  assert.equal(final.status, 'PASS');
+  assert.deepEqual(
+    seenCommands[2],
+    ['echo global', 'echo phase-1'],
+    'final Gate re-runs frozen phase verification so later work cannot regress it',
+  );
 });
 
 test('phase plan is covered by immutable objective fingerprint', async () => {
@@ -182,4 +191,16 @@ test('ordinary task without phases preserves the existing single PASS behavior',
   const r = await controller.review({ loopId });
   assert.equal(r.status, 'PASS');
   assert.equal(r.completedPhase, undefined);
+});
+
+test('coarse physical-call ceilings scale with frozen gate count while task-wide token ceilings do not', () => {
+  const one = resolveReviewLoopLimits({}, { gateCount: 1 });
+  const three = resolveReviewLoopLimits({}, { gateCount: 3 });
+
+  assert.equal(three.maxReviewerCalls, one.maxReviewerCalls * 3);
+  assert.equal(three.maxSupervisorCalls, one.maxSupervisorCalls * 3);
+  assert.equal(three.maxUsageVolume, one.maxUsageVolume);
+  assert.equal(three.maxCostUsd, one.maxCostUsd);
+  assert.equal(three.maxSingleCallUsage, one.maxSingleCallUsage);
+  assert.equal(three.maxContextOverheadTokens, one.maxContextOverheadTokens);
 });
