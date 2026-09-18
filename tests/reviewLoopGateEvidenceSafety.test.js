@@ -342,3 +342,85 @@ for (const mode of ['LOCAL', 'PR']) {
     assert.deepEqual(after.objective, objective, 'never truncate or mutate a frozen contract during reload');
   });
 }
+
+
+test('LOCAL failing Gate that mutates the tree invalidates previously bound exact-code proof', async () => {
+  const w = world('LOCAL', [{ findings: [finding('P1', 'a.js', 'Proof needs improvement.')] }, { findings: [] }]);
+  const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: [req()] });
+  assert.equal((await w.controller.review({ loopId, evidence: [proof('runtime', 'Proof for code A.')] })).status, 'REWORK');
+  assert.equal((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords[0].evidenceFingerprint, 'A');
+
+  w.gate('FAIL');
+  w.mutate(['B']);
+  const failed = await w.restart().review({ loopId });
+  assert.equal(failed.status, 'REWORK');
+  assert.equal(failed.gate.verdict, 'FAIL');
+  assert.deepEqual((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords, []);
+  assert.equal(w.calls.reviewer, 1, 'a failing Gate must not spend Reviewer calls');
+
+  w.gate('PASS');
+  const missing = await w.restart().review({ loopId });
+  assert.equal(missing.status, 'REWORK');
+  assert.deepEqual(missing.missingEvidenceRequirements.map((r) => r.id), ['runtime']);
+  assert.equal(w.calls.reviewer, 1, 'old proof must not resurrect after the failing Gate mutation');
+
+  const fresh = await w.restart().review({ loopId, evidence: [proof('runtime', 'Fresh proof collected against code B.')] });
+  assert.equal(fresh.status, 'PASS');
+  assert.equal(w.calls.reviewer, 2);
+});
+
+test('historical explicit phase counts without execution-plan context do not force phased handoff', () => {
+  for (const text of [
+    'Repair compatibility including the 2 phases of the legacy handshake.',
+    'Document the subsystem including the 3 phases of its historical protocol.',
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, null);
+    assert.doesNotThrow(() => assertContractHandoff({ goal: text, phases: [] }));
+  }
+  assert.equal(declaredPhasePlan('Execution plan includes the 2 phases.').count, 2);
+  assert.throws(
+    () => assertContractHandoff({ goal: 'Execution plan includes the 2 phases.', phases: [] }),
+    /phases\[\] is empty/,
+  );
+});
+
+test('goal and contractText phase headings cannot combine across the source boundary', () => {
+  assert.doesNotThrow(() => assertContractHandoff({
+    goal: 'Phase 1 compatibility note.',
+    contractText: 'Phase 2 migration example.',
+    phases: [],
+  }));
+  assert.throws(() => assertContractHandoff({
+    goal: 'Full spec has 2 phases.',
+    contractText: 'Phase 1 Foundation\nPhase 2 Integration',
+    phases: [],
+  }), /phases\[\] is empty/);
+});
+
+test('declared plans reject mixed canonical/custom ids but allow consistently custom ids', () => {
+  const canonical = [
+    { ...phases[0], id: 'phase-1' },
+    { ...phases[1], id: 'phase-2' },
+  ];
+  assert.doesNotThrow(() => assertContractHandoff({ goal: 'Full spec has 2 phases.', phases: canonical }));
+  assert.throws(() => assertContractHandoff({
+    goal: 'Full spec has 2 phases.',
+    phases: [{ ...canonical[0] }, { ...canonical[1], id: 'integration' }],
+  }), /mixes canonical phase-N ids with custom ids/);
+  assert.doesNotThrow(() => assertContractHandoff({ goal: 'Full spec has 2 phases.', phases }));
+});
+
+test('blank optional artifactRef is normalized as absent for direct controller/library callers', () => {
+  const objective = { evidenceRequirements: [req()] };
+  const reviewScope = { type: 'task', id: 'task', fingerprint: '' };
+  const state = { evidenceRecords: [] };
+  bindEvidenceSubmissions({
+    loopState: state,
+    objective,
+    reviewScope,
+    submissions: [{ requirementId: 'runtime', summary: 'Verified behavior.', artifactRef: '   ' }],
+    evidenceFingerprint: 'code-A',
+  });
+  assert.equal(state.evidenceRecords.length, 1);
+  assert.equal(state.evidenceRecords[0].artifactRef, null);
+});

@@ -1312,7 +1312,7 @@ export function createReviewLoopController({
     // review path.)
     const postGateFn = collectPostGateDeltaFn
       ?? (collectWorkerDeltaFn === collectWorkerDelta ? collectWorkerDelta : null);
-    if (postGateFn && !signal?.aborted && gate.verdict !== GATE_VERDICTS.FAIL) {
+    if (postGateFn && !signal?.aborted) {
       // Collect + validate the post-Gate Worker delta. Fail closed on EVERY
       // failure — a throw, a missing result, a missing fingerprint, or
       // incomplete attribution. The fingerprint excludes completeness metadata,
@@ -1390,6 +1390,11 @@ export function createReviewLoopController({
           };
         }
 
+        // A failing Gate is already sufficient for REWORK. We still had to
+        // recollect and invalidate proof if it changed the tree, but must not
+        // run the failing mutator again in this round.
+        if (gate.verdict === GATE_VERDICTS.FAIL) break;
+
         stabiliseRuns += 1;
         if (stabiliseRuns > MAX_GATE_STABILISE) {
           return humanRequired(
@@ -1406,8 +1411,11 @@ export function createReviewLoopController({
         });
         gate.commandSource = commandSource;
         gate.executedCommands = [...gateCommands];
-        if (signal?.aborted || gate.verdict === GATE_VERDICTS.FAIL) break; // handled downstream
+        if (signal?.aborted) break;
 
+        // Recollect even after a FAIL: a failing formatter/codegen Gate may
+        // still have changed bytes, and stale exact-code evidence must be
+        // invalidated before returning the Gate failure.
         // eslint-disable-next-line no-await-in-loop
         pg = await collectPostGate();
         if (!pg.ok) {

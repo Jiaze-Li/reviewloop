@@ -39,7 +39,7 @@ export class EvidenceValidationError extends Error {
 const bytes = (value) => Buffer.byteLength(String(value), 'utf8');
 
 function assertEvidenceText(value, label, limit, { optional = false } = {}) {
-  if (optional && value == null) return;
+  if (optional && (value == null || (typeof value === 'string' && !value.trim()))) return;
   if (typeof value !== 'string' || !value.trim()) {
     throw new EvidenceValidationError(`${label} must be a nonempty string`);
   }
@@ -103,11 +103,11 @@ export function declaredPhasePlan(text) {
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
   const explicitCounts = [
-    ...[...s.matchAll(/\b(?:full\s+spec\s+has|including\s+the)\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bfull\s+spec\s+has\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]\d*)\s*(?:-\s*)?phases?\s+(?:execution\s+)?plan\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b(?:execution\s+)?plan\s+(?:has|with|contains)\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bexecution\s+plan\s+(?:has|with|contains|includes|including)\s+(?:the\s+)?([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];
 
@@ -185,7 +185,6 @@ export function referencesMissingPriorContract(text) {
 
 export function assertContractHandoff({ goal, contractText, phases } = {}) {
   const frozen = normalizeContractText(contractText);
-  const combined = [goal, frozen].filter(Boolean).join('\n');
   if (referencesMissingPriorContract(goal) && !frozen) {
     throw new Error(
       'reviewloop_begin: task refers to a spec/contract in prior conversation but no self-contained contractText was supplied',
@@ -196,21 +195,33 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       'reviewloop_begin: contractText is not self-contained; replace references to earlier conversation with the actual frozen contract',
     );
   }
-  const declaration = declaredPhasePlan(combined);
-  if (declaration.invalid) {
+  // Parse goal and frozen contract independently. Joining them before parsing
+  // can manufacture a fake phase sequence from one unrelated heading in each
+  // source. Counts may corroborate across sources, but headings never cross the
+  // source boundary.
+  const declarations = [goal, frozen].filter(Boolean).map((text) => declaredPhasePlan(text));
+  const invalidDeclaration = declarations.find((item) => item.invalid);
+  if (invalidDeclaration) {
     throw new Error(
-      `reviewloop_begin: phase plan declaration is inconsistent; ${declaration.invalid}`,
+      `reviewloop_begin: phase plan declaration is inconsistent; ${invalidDeclaration.invalid}`,
     );
   }
-  if (declaration.count != null) {
+  const declaredCounts = [...new Set(declarations.map((item) => item.count).filter((count) => count != null))];
+  if (declaredCounts.length > 1) {
+    throw new Error(
+      `reviewloop_begin: phase plan declaration is inconsistent; conflicting declared phase counts: ${declaredCounts.join(', ')}`,
+    );
+  }
+  const declaredCount = declaredCounts[0] ?? null;
+  if (declaredCount != null) {
     if (!Array.isArray(phases) || phases.length === 0) {
       throw new Error(
         'reviewloop_begin: task clearly declares a multi-phase execution plan but phases[] is empty; refusing to silently downgrade it to a single gate',
       );
     }
-    if (phases.length !== declaration.count) {
+    if (phases.length !== declaredCount) {
       throw new Error(
-        `reviewloop_begin: task declares ${declaration.count} phases but structured phases[] contains ${phases.length}; refusing to freeze a truncated or expanded phase plan`,
+        `reviewloop_begin: task declares ${declaredCount} phases but structured phases[] contains ${phases.length}; refusing to freeze a truncated or expanded phase plan`,
       );
     }
 
@@ -218,11 +229,17 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       const m = String(phase?.id ?? '').trim().match(/^phase[-_ ]?([1-9]\d*)$/i);
       return m ? Number(m[1]) : null;
     });
-    if (canonicalIds.every((n) => n != null)) {
-      const expected = Array.from({ length: declaration.count }, (_, i) => i + 1);
+    const canonicalCount = canonicalIds.filter((n) => n != null).length;
+    if (canonicalCount > 0 && canonicalCount < canonicalIds.length) {
+      throw new Error(
+        'reviewloop_begin: declared phase plan mixes canonical phase-N ids with custom ids; use either a complete canonical phase-1..phase-N sequence or consistently custom ids',
+      );
+    }
+    if (canonicalCount === canonicalIds.length) {
+      const expected = Array.from({ length: declaredCount }, (_, i) => i + 1);
       if (JSON.stringify(canonicalIds) !== JSON.stringify(expected)) {
         throw new Error(
-          `reviewloop_begin: canonical structured phase ids must be phase-1..phase-${declaration.count} in order; got ${canonicalIds.join(', ')}`,
+          `reviewloop_begin: canonical structured phase ids must be phase-1..phase-${declaredCount} in order; got ${canonicalIds.join(', ')}`,
         );
       }
     }
@@ -293,7 +310,7 @@ export function normalizeEvidenceSubmissions(raw = []) {
     return {
       requirementId,
       summary: entry.summary.trim(),
-      artifactRef: entry.artifactRef == null ? null : entry.artifactRef.trim(),
+      artifactRef: entry.artifactRef == null || !entry.artifactRef.trim() ? null : entry.artifactRef.trim(),
     };
   });
 }
