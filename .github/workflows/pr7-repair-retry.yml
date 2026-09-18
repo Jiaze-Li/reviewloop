@@ -35,11 +35,22 @@ jobs:
           blocks = re.findall(r"(?ms)^          python3 - <<'PY'\n(.*?)^          PY$", source)
           assert len(blocks)==2
           apply = textwrap.dedent(blocks[0])
-          # Correct two transcription insertions; the original SHA-256 check
-          # still verifies every decoded byte before executing the patch.
+          # The original hash verifies every decoded byte before execution.
           apply = apply.replace('fbUBUDt5s', 'fbUBDt5s').replace('RuvbVVb2X', 'RuvbVb2X')
           pathlib.Path('/tmp/pr7-create-candidate.py').write_text(textwrap.dedent(blocks[1]))
           exec(compile(apply, '<verified-patch-transport>', 'exec'))
+          # Review preflights still enter the existing legal state machine,
+          # without incrementing a round or running any Gate/model operation.
+          p = pathlib.Path('src/reviewloop/controller.js')
+          s = p.read_text()
+          a = '      if (!(err instanceof ContractValidationError)) throw err;\n      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err.message);'
+          b = '      if (!(err instanceof ContractValidationError)) throw err;\n      // Preflight is a review operation even when it does not run the Gate.\n      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, \'frozen contract preflight\');\n      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err.message);'
+          assert s.count(a)==1
+          s = s.replace(a,b)
+          a = '        if (!(err instanceof EvidenceValidationError)) throw err;\n        return evidenceRework({'
+          b = '        if (!(err instanceof EvidenceValidationError)) throw err;\n        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, \'PR evidence preflight\');\n        return evidenceRework({'
+          assert s.count(a)==1
+          p.write_text(s.replace(a,b))
           pathlib.Path('.github/workflows/pr7-repair-retry.yml').unlink()
           PY
           git diff --check
@@ -48,16 +59,23 @@ jobs:
       - name: Preserve a credential-free test workspace
         run: tar --exclude=.git --exclude=.reviewloop --exclude=.reviewloop-runtime -czf /tmp/pr7-workspace.tgz .
       - name: Full deterministic tests
-        run: npm test
+        run: |
+          set +e
+          npm test > /tmp/pr7-full-tests.log 2>&1
+          result=$?
+          tail -30 /tmp/pr7-full-tests.log
+          exit "$result"
       - name: Full doctor
         if: success() || failure()
         run: npm run doctor
-      - name: Upload test workspace for inspection
+      - name: Upload test workspace and full log for inspection
         if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: pr7-test-workspace
-          path: /tmp/pr7-workspace.tgz
+          path: |
+            /tmp/pr7-workspace.tgz
+            /tmp/pr7-full-tests.log
           retention-days: 3
           if-no-files-found: ignore
       - name: Create tested candidate objects; never update a reference
