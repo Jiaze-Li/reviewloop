@@ -245,9 +245,12 @@ for (const text of [
   });
 }
 test('noncontiguous or conflicting declared phase plans still fail closed', () => {
-  for (const text of ['Execution Plan: Phase 1 foundation. Phase 3 integration.', 'Full spec has 3 phases.\nPhase 1 Foundation\nPhase 2 Integration']) {
-    assert.throws(() => assertContractHandoff({ goal: text, phases }), /inconsistent/);
-  }
+  assert.throws(() => assertContractHandoff({
+    goal: 'Execution Plan: Phase 1 foundation. Phase 3 integration.', phases,
+  }), /inconsistent/);
+  assert.throws(() => assertContractHandoff({
+    goal: 'Full spec has 3 phases.\nPhase 1 Foundation\nPhase 2 Integration', phases,
+  }), /declares 3 phases.*contains 2|truncated/i);
 });
 
 test('contract limit is UTF-8, rejects raw padding, and never truncates accepted text', async () => {
@@ -563,7 +566,9 @@ test('evidencePromptLines renders the normalized submissions it validates', () =
   });
   const rendered = lines.join('\n');
   assert.match(rendered, /- runtime: verified behavior \[ref\.txt\]/);
-  assert.doesNotMatch(rendered, /  runtime | verified behavior | ref\.txt /);
+  assert.equal(rendered.includes('-  runtime :'), false);
+  assert.equal(rendered.includes(':  verified behavior '), false);
+  assert.equal(rendered.includes('[ ref.txt ]'), false);
 });
 
 test('invalid evidence requirements fail before LOCAL baseline or Gate side effects', async () => {
