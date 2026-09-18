@@ -1,0 +1,66 @@
+name: PR7 repair verification retry
+on:
+  push:
+    branches: [vnext-contract-evidence-resume]
+    paths: [.github/workflows/pr7-repair-retry.yml]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: pr7-repair-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Apply hash-pinned candidate without updating branches
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = Jiaze-Li/reviewloop
+          test "$GITHUB_REF" = refs/heads/vnext-contract-evidence-resume
+          git merge-base --is-ancestor 30b686a9c6b88b93b8c71cbee3802ec8cc557ff7 HEAD
+          git diff --exit-code 30b686a9c6b88b93b8c71cbee3802ec8cc557ff7 HEAD -- src tests README.md
+          python3 - <<'PY'
+          import pathlib, re, textwrap
+          source = pathlib.Path('.github/workflows/pr7-repair-once.yml').read_text()
+          blocks = re.findall(r"(?ms)^          python3 - <<'PY'\n(.*?)^          PY$", source)
+          assert len(blocks)==2
+          apply = textwrap.dedent(blocks[0])
+          # Correct two transcription insertions; the original SHA-256 check
+          # still verifies every decoded byte before executing the patch.
+          apply = apply.replace('fbUBUDt5s', 'fbUBDt5s').replace('RuvbVVb2X', 'RuvbVb2X')
+          pathlib.Path('/tmp/pr7-create-candidate.py').write_text(textwrap.dedent(blocks[1]))
+          exec(compile(apply, '<verified-patch-transport>', 'exec'))
+          pathlib.Path('.github/workflows/pr7-repair-retry.yml').unlink()
+          PY
+          git diff --check
+          git diff --stat
+      - run: npm ci
+      - name: Preserve a credential-free test workspace
+        run: tar --exclude=.git --exclude=.reviewloop --exclude=.reviewloop-runtime -czf /tmp/pr7-workspace.tgz .
+      - name: Full deterministic tests
+        run: npm test
+      - name: Full doctor
+        if: success() || failure()
+        run: npm run doctor
+      - name: Upload test workspace for inspection
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr7-test-workspace
+          path: /tmp/pr7-workspace.tgz
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Create tested candidate objects; never update a reference
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 /tmp/pr7-create-candidate.py
