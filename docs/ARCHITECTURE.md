@@ -598,7 +598,7 @@ either in one bounded call or split into deterministic chunks that are EACH
 reviewed and metered; `PASS` requires every chunk to have been reviewed
 successfully. Evidence too large to chunk within the cap → `REVIEW_TOO_LARGE` →
 `HUMAN_REQUIRED`. Each completed chunk's result is durably checkpointed
-(keyed to `sha(deltaFingerprint :: gateFingerprint)`); a crash mid-round
+(keyed to `sha(deltaFingerprint :: gateFingerprint :: reviewScopeFingerprint)`); a crash mid-round
 resumes at the next unreviewed chunk without re-calling the model for the ones
 already done.
 
@@ -610,7 +610,7 @@ have reached the provider (`RESERVED` / `CANCELLED_PRE_DISPATCH`, or
 `SETTLED_KNOWN` with `settlementReason === PROVEN_PRE_SEND_ZERO` — set from an
 explicit pre-send provenance flag, never inferred from a zero token count); a
 first attempt on already-consumed evidence is denied — so a re-call on an
-identical `(diff+gate)` state across crash/resume yields exactly one physical
+identical `(diff+gate+review-scope)` state across crash/resume yields exactly one physical
 Reviewer dispatch, and a post-send provider error is never a licence to retry.
 `NO NEW INFORMATION → NO NEW MODEL CALL` holds.
 
