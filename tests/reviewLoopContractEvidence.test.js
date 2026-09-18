@@ -156,7 +156,7 @@ test('reviewer and supervisor prompts keep the mandatory goal when contractText 
     },
   });
   assert.match(reviewerPrompt, /ORIGINAL TASK GOAL .*Preserve the actual success definition\./);
-  assert.match(reviewerPrompt, /FROZEN TASK CONTRACT .*Phase\/evidence details/);
+  assert.ok(reviewerPrompt.includes('FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\nPhase/evidence details'));
 
   let supervisorPrompt = '';
   const supervisorInvoke = buildSupervisorInvoke();
@@ -172,7 +172,7 @@ test('reviewer and supervisor prompts keep the mandatory goal when contractText 
     },
   });
   assert.match(supervisorPrompt, /ORIGINAL TASK GOAL .*Preserve the actual success definition\./);
-  assert.match(supervisorPrompt, /FROZEN TASK CONTRACT .*Phase\/evidence details/);
+  assert.ok(supervisorPrompt.includes('FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\nPhase/evidence details'));
 });
 
 test('required final runtime evidence blocks Reviewer spend until submitted', async () => {
