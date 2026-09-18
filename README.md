@@ -78,6 +78,19 @@ the relevant gate: missing evidence returns REWORK with zero Reviewer spend, and
 submitted evidence is bound to the exact code fingerprint and review scope before
 the Reviewer judges whether the proof is actually sufficient.
 
+`contractText` is limited to 64 KiB of UTF-8 input and is rejected, never
+silently truncated. Keep the contract self-contained with every acceptance
+criterion intact. PR evidence input is validated before worktree/Gate execution;
+invalid input returns `REWORK` with `gate.verdict: NOT_RUN` and no model spend.
+A Gate FAIL (including repeated-failure `NO_PROGRESS`) returns an explicit
+`evidenceSubmission.status: NOT_ACCEPTED` receipt with reason `GATE_FAILED`:
+proof was not saved and must be re-submitted after repairing the Gate.
+When LOCAL Gate stabilization changes the tree, current-scope proof is invalidated
+and pre-Gate submissions return `REWORK`/`CODE_CHANGED`; re-collect proof on the
+stabilized code. Only the latest record per frozen requirement is retained
+(including on reload), with its original code/scope binding. Completed phase
+proof hashes, audits and task-wide budgets are not pruned or reset.
+
 After `PHASE_PASS`, ReviewLoop returns a durable `resumePacket` containing the
 next phase, inherited invariants, repository identity and evidence summary. A
 Worker may use that packet as a safe context-compaction/refresh boundary while

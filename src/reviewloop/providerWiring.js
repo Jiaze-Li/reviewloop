@@ -33,7 +33,7 @@ import {
   verifyEffectiveAgyAgent,
 } from './adapters/agyCustomAgentCapability.js';
 import { createGithubReviewBackend } from './githubBackend.js';
-import { evidencePromptLines } from './contractEvidence.js';
+import { evidencePromptLines, normalizeContractText } from './contractEvidence.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 export { narrowReviewTransportCwd, narrowAgyGeminiDir, detectAgyCustomAgentSupport };
@@ -530,7 +530,7 @@ export function buildReviewerInvoke() {
       'You are an INDEPENDENT code reviewer.',
       `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
       objective.contractText
-        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${objective.contractText}`
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
         : '',
       objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
       ...reviewScopePromptLines(reviewScope),
@@ -568,7 +568,7 @@ export function buildSupervisorInvoke() {
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
       `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
       objective.contractText
-        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${objective.contractText}`
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
         : '',
       ...reviewScopePromptLines(reviewScope),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,

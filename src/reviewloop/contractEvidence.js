@@ -9,6 +9,14 @@ import { createHash } from 'node:crypto';
 
 const EVIDENCE_TYPES = new Set(['runtime', 'artifact', 'manual', 'other']);
 
+export const CONTRACT_TEXT_MAX_BYTES = 64 * 1024;
+export class ContractValidationError extends Error {
+  constructor() {
+    super(`reviewloop_begin: contractText exceeds the ${CONTRACT_TEXT_MAX_BYTES}-byte UTF-8 limit; supply a concise self-contained contract preserving all acceptance criteria, never a truncated contract or a reference to chat history`);
+    this.name = 'ContractValidationError';
+  }
+}
+
 // UTF-8 byte limits, enforced before binding/persisting or spending model tokens.
 // Reject rather than truncate proof: the Reviewer must see everything accepted.
 export const EVIDENCE_LIMITS = Object.freeze({
@@ -69,7 +77,10 @@ const list = (value) => (Array.isArray(value) ? value : (value == null ? [] : [v
   .filter(Boolean);
 
 export function normalizeContractText(value) {
-  return value == null ? '' : String(value).trim();
+  const text = value == null ? '' : String(value);
+  // Check the raw input too: whitespace padding is not a budget escape hatch.
+  if (bytes(text) > CONTRACT_TEXT_MAX_BYTES) throw new ContractValidationError();
+  return text.trim();
 }
 
 function uniqueSortedPhaseNumbers(text) {
@@ -108,10 +119,22 @@ export function declaredPhasePlan(text) {
   let scopedNumbers = headingNumbers;
   let source = headingNumbers.length >= 2 ? 'phase headings' : null;
   if (scopedNumbers.length < 2) {
-    const planIndex = s.search(/\bexecution\s+plan\b/i);
-    if (planIndex >= 0) {
-      scopedNumbers = uniqueSortedPhaseNumbers(s.slice(planIndex));
-      if (scopedNumbers.length >= 2) source = 'execution plan';
+    // An execution-plan mention is not a delimiter for all later prose.
+    // Accept an inline enumeration only when the heading is immediately
+    // followed by phase clauses. Historical references elsewhere stay prose.
+    for (const match of s.matchAll(/\bexecution[ \t]+plan[ \t]*:[ \t]*([^\r\n]*)/ig)) {
+      const clauses = match[1].split(/[.;]/).map((part) => part.trim()).filter(Boolean);
+      const labels = [];
+      for (const clause of clauses) {
+        if (!/^phase[ \t]+[1-9]\d*\b/i.test(clause)) break;
+        labels.push(clause);
+      }
+      const numbers = uniqueSortedPhaseNumbers(labels.map((clause) => clause.match(/^phase[ \t]+[1-9]\d*\b/i)[0]).join('\n'));
+      if (labels.length >= 2 && numbers.length >= 2) {
+        scopedNumbers = numbers;
+        source = 'inline phase clauses';
+        break;
+      }
     }
   }
 
@@ -294,6 +317,41 @@ export function requiredEvidenceForScope(objective, reviewScope) {
     .filter((r) => r.required !== false);
 }
 
+// This validates intent, not code binding. Never persist proof at preflight:
+// the exact reviewed code fingerprint is only known after snapshot/Gate checks.
+export function validateEvidenceSubmissions({ objective, reviewScope, submissions = [] } = {}) {
+  const normalized = normalizeEvidenceSubmissions(submissions);
+  const requirements = new Map((objective?.evidenceRequirements ?? []).map((r) => [r.id, r]));
+  for (const item of normalized) {
+    const requirement = requirements.get(item.requirementId);
+    if (!requirement) {
+      throw new EvidenceValidationError(`evidence references unknown requirement "${item.requirementId}"`);
+    }
+    if (!gateMatches(requirement, reviewScope)) {
+      throw new EvidenceValidationError(`evidence "${item.requirementId}" does not belong to the current gate`);
+    }
+  }
+  const ids = new Set(normalized.map((item) => item.requirementId));
+  evidencePromptLines({
+    requirements: evidenceRequirementsForScope(objective, reviewScope)
+      .filter((r) => r.required !== false || ids.has(r.id)),
+    submissions: normalized,
+  });
+  return normalized;
+}
+
+// A requirement is frozen to one gate, so only its latest proof is useful.
+// Use append order, not caller timestamps. Never resurrect an older proof when
+// code reverts. Completed-phase hashes/audits remain separate and unchanged.
+export function latestEvidenceRecords(records, objective) {
+  const knownIds = new Set((objective?.evidenceRequirements ?? []).map((r) => r.id));
+  const latest = new Map();
+  for (const record of records ?? []) {
+    if (knownIds.has(record?.requirementId)) latest.set(record.requirementId, record);
+  }
+  return [...latest.values()];
+}
+
 export function bindEvidenceSubmissions({
   loopState,
   objective,
@@ -303,12 +361,12 @@ export function bindEvidenceSubmissions({
   head = null,
   now = new Date().toISOString(),
 } = {}) {
-  const normalized = normalizeEvidenceSubmissions(submissions);
+  const normalized = validateEvidenceSubmissions({ objective, reviewScope, submissions });
   if (!normalized.length) return;
   const requirements = new Map((objective?.evidenceRequirements ?? []).map((r) => [r.id, r]));
   // Stage the complete batch. No accepted prefix or over-budget replacement
   // may leak into durable state when any later item fails validation.
-  let nextRecords = [...(loopState.evidenceRecords ?? [])];
+  let nextRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
   for (const item of normalized) {
     const requirement = requirements.get(item.requirementId);
     if (!requirement) {
@@ -329,10 +387,7 @@ export function bindEvidenceSubmissions({
       recordedAt: now,
     };
     nextRecords = [
-      ...nextRecords.filter((r) =>
-        !(r.requirementId === item.requirementId
-          && r.reviewScopeFingerprint === record.reviewScopeFingerprint
-          && r.evidenceFingerprint === evidenceFingerprint)),
+      ...nextRecords.filter((r) => r.requirementId !== item.requirementId),
       record,
     ];
   }
@@ -344,7 +399,7 @@ export function bindEvidenceSubmissions({
 
 export function evidenceStatusForScope({ loopState, objective, reviewScope, evidenceFingerprint } = {}) {
   const required = requiredEvidenceForScope(objective, reviewScope);
-  const records = (loopState?.evidenceRecords ?? []).filter((r) =>
+  const records = latestEvidenceRecords(loopState?.evidenceRecords, objective).filter((r) =>
     r.reviewScopeFingerprint === (reviewScope?.fingerprint ?? '')
       && r.evidenceFingerprint === evidenceFingerprint);
   const byId = new Map(records.map((r) => [r.requirementId, r]));

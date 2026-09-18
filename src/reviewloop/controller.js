@@ -55,6 +55,11 @@ import { chunkDiffForReview } from './diffChunker.js';
 import {
   assertContractHandoff,
   EvidenceValidationError,
+  ContractValidationError,
+  normalizeContractText,
+  validateEvidenceSubmissions,
+  latestEvidenceRecords,
+  requiredEvidenceForScope,
   bindEvidenceSubmissions,
   evidenceStatusForScope,
   reviewerEvidenceBundle,
@@ -383,30 +388,42 @@ export function createReviewLoopController({
     }
   }
 
+  function unacceptedEvidence(evidence, reason) {
+    return {
+      status: 'NOT_ACCEPTED',
+      reason,
+      submittedCount: Array.isArray(evidence) ? evidence.length : null,
+      retryRequired: reason === 'CODE_CHANGED' || (Array.isArray(evidence) ? evidence.length > 0 : evidence != null),
+    };
+  }
+
+  async function evidenceRework({ loopState, gate, head = null, reason, missing = [], receipt = null }) {
+    recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason);
+    await saveLoop(loopState);
+    return {
+      ...compactReworkPayload({
+        loopState,
+        review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
+        gate,
+      }),
+      head,
+      reason,
+      missingEvidenceRequirements: missing,
+      ...(receipt ? { evidenceSubmission: receipt } : {}),
+      nextAction: 'Correct or produce the evidence for this gate, then call reviewloop_review again in this same loop. Submit concise factual summaries and artifact references, not raw logs.',
+      telemetry: await durableTelemetry(loopState.loopId),
+      safetyEvents,
+    };
+  }
+
   async function enforceEvidenceObligations({
     loopState, objective, reviewScope, delta, gate, submissions = [], head = null,
   }) {
     const evidenceFingerprint = delta?.fingerprint ?? head ?? 'unknown';
-    const rework = async (reason, missing = []) => {
-      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason);
-      await saveLoop(loopState);
-      return {
-        blocked: true,
-        result: {
-          ...compactReworkPayload({
-            loopState,
-            review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
-            gate,
-          }),
-          head,
-          reason,
-          missingEvidenceRequirements: missing,
-          nextAction: 'Correct or produce the evidence for this gate, then call reviewloop_review again in this same loop. Submit concise factual summaries and artifact references, not raw logs.',
-          telemetry: await durableTelemetry(loopState.loopId),
-          safetyEvents,
-        },
-      };
-    };
+    const rework = async (reason, missing = []) => ({
+      blocked: true,
+      result: await evidenceRework({ loopState, gate, head, reason, missing }),
+    });
     try {
       // Binding validates the whole batch and prospective aggregate before
       // changing records. Invalid input cannot persist an accepted prefix.
@@ -883,6 +900,20 @@ export function createReviewLoopController({
       return terminalResult(loopState);
     }
 
+    try {
+      normalizeContractText(objective.contractText);
+    } catch (err) {
+      if (!(err instanceof ContractValidationError)) throw err;
+      // Preflight is a review operation even when it does not run the Gate.
+      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen contract preflight');
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err.message);
+      await saveLoop(loopState);
+      return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
+    }
+    // Migrate old multi-version histories without changing any proof binding,
+    // completed phase, objective or task-wide spend counter.
+    loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
+
     if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, evidence, signal });
     return reviewLocal({ loopState, evidence, signal });
   }
@@ -1261,6 +1292,7 @@ export function createReviewLoopController({
         });
       }
     }
+    let gateMutatedTree = false;
     let gate = await runGateFn({
       cwd, commands: gateCommands, runner: gateRunner, env, signal,
       baselineGateEvidence: trustedBaselineGateEvidence,
@@ -1325,6 +1357,12 @@ export function createReviewLoopController({
       const MAX_GATE_STABILISE = 3;
       let stabiliseRuns = 0;
       while (pg.delta.fingerprint !== delta.fingerprint) {
+        gateMutatedTree = true;
+        // No proof for this scope survives a code change made during review.
+        // In particular, do not re-label the caller's pre-Gate evidence with
+        // the post-Gate fingerprint, or reuse history if the Gate later reverts.
+        loopState.evidenceRecords = (loopState.evidenceRecords ?? [])
+          .filter((record) => record.reviewScopeFingerprint !== reviewScope.fingerprint);
         collectSafetyEvent({
           code: 'GATE_MUTATED_TRACKED_FILES',
           severity: 'NON_BLOCKING',
@@ -1408,6 +1446,7 @@ export function createReviewLoopController({
           loopId: loopState.loopId,
           round: loopState.round,
           reason: 'submitted state is identical to the last review; no Reviewer/Supervisor call made',
+          evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
           lastReview: compactLastReview(loopState),
           telemetry: await durableTelemetry(loopState.loopId),
           safetyEvents,
@@ -1421,9 +1460,20 @@ export function createReviewLoopController({
       return {
         ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),
         reason: 'deterministic Gate failed with a new regression; fix it before Reviewer runs',
+        evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
         telemetry: await durableTelemetry(loopState.loopId),
         safetyEvents,
       };
+    }
+
+    if (gateMutatedTree && ((Array.isArray(evidence) ? evidence.length > 0 : evidence != null)
+      || requiredEvidenceForScope(objective, reviewScope).length > 0)) {
+      return evidenceRework({
+        loopState, gate, head: delta.currentHead ?? null,
+        reason: 'the deterministic Gate changed the code during review; pre-Gate evidence was not accepted. Produce fresh evidence against the stabilized tree and retry in this loop',
+        missing: requiredEvidenceForScope(objective, reviewScope),
+        receipt: unacceptedEvidence(evidence, 'CODE_CHANGED'),
+      });
     }
 
     // Runtime/artifact/manual proof is part of the logical review state.
@@ -1957,10 +2007,26 @@ export function createReviewLoopController({
       }
       if (!observedHead) return prHumanRequired(loopState, `cannot resolve the live HEAD for PR #${prNumber}`);
 
+      // Validate the complete input before any disposable worktree or Gate
+      // execution. This proves only shape/requirement/scope/budget, not runtime
+      // sufficiency or exact-code binding. A bad tail rejects the whole batch.
+      let validatedEvidence;
+      try {
+        validatedEvidence = validateEvidenceSubmissions({ objective, reviewScope, submissions: rebind === 0 ? evidence : [] });
+      } catch (err) {
+        if (!(err instanceof EvidenceValidationError)) throw err;
+        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'PR evidence preflight');
+        return evidenceRework({
+          loopState, head: observedHead, gate: { verdict: 'NOT_RUN', failureIdentities: [] },
+          reason: err.message,
+          receipt: unacceptedEvidence(evidence, 'INVALID_EVIDENCE'),
+        });
+      }
+
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
         && loopState.lastReview?.status === 'ACTIONABLE'
-        && Array.isArray(evidence) && evidence.length === 0) {
+        && validatedEvidence.length === 0) {
         await saveLoop(loopState);
         return {
           status: 'PUSH_REQUIRED', loopId: loopState.loopId, head: observedHead,
@@ -2061,6 +2127,7 @@ export function createReviewLoopController({
             status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
             head: observedHead,
             reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
+            evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
             lastReview: compactLastReview(loopState),
             telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
           };
@@ -2075,6 +2142,7 @@ export function createReviewLoopController({
           ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),
           head: observedHead,
           reason: 'deterministic Gate failed with a regression; fix it before the Reviewer runs',
+          evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
           telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
         };
       }
@@ -2091,7 +2159,7 @@ export function createReviewLoopController({
         // A HEAD rebind makes evidence supplied for the original reviewed SHA
         // stale. Never silently rebind the same runtime/manual claim to a new
         // PR HEAD inside this one call.
-        submissions: rebind === 0 ? evidence : [],
+        submissions: validatedEvidence,
         head: observedHead,
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;

@@ -73,7 +73,7 @@ export function createReviewLoopMcpServer({
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
         prNumber: z.number().int().optional().describe('PR number — review the PR (base -> exact HEAD) instead of the local worktree'),
         constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
-        contractText: z.string().min(1).optional().describe('complete self-contained frozen task contract when one exists; never replace it with a reference to earlier conversation'),
+        contractText: z.string().min(1).optional().describe('complete self-contained frozen task contract, at most 65536 UTF-8 bytes; never truncate acceptance criteria or replace them with a reference to earlier conversation'),
         evidenceRequirements: z.array(z.object({
           id: z.string().min(1),
           type: z.enum(['runtime', 'artifact', 'manual', 'other']).optional(),
@@ -176,6 +176,7 @@ export function createReviewLoopMcpServer({
         supervisorGuidance: z.string().nullable().optional(),
         head: z.string().nullable().optional(),
         nextAction: z.string().nullable().optional(),
+        evidenceSubmission: z.record(z.string(), z.any()).optional().describe('explicit NOT_ACCEPTED receipt on Gate failure, code mutation or invalid input; evidence must be re-submitted'),
         missingEvidenceRequirements: z.array(z.record(z.string(), z.any())).optional(),
         resumePacket: z.record(z.string(), z.any()).nullable().optional(),
         contextRefreshSafe: z.boolean().optional(),
