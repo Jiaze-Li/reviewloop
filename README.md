@@ -34,7 +34,7 @@ The Worker calls two MCP tools:
 
 | tool | when | cost |
 |---|---|---|
-| `reviewloop_begin({ goal, cwd, prNumber?, phases? })` | before the first edit | 0 model calls |
+| `reviewloop_begin({ goal, cwd, prNumber?, constraints?, phases?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
 | `reviewloop_review({ loopId })` | when the current gate is ready | Gate (0) + Reviewer if justified |
 
 `reviewloop_review` returns one of: `PHASE_PASS` (non-terminal; continue the
@@ -70,6 +70,15 @@ A `PHASE_PASS` resets only gate-local convergence state; it does **not** reset
 task-wide Reviewer/Supervisor spend, the Token Sentinel, provider accounting,
 the original baseline, or the immutable objective. The final `PASS` is the only
 successful terminal state.
+
+Top-level `verificationCommands` are the **global/whole-task** mechanical
+checks: they are frozen at `reviewloop_begin` and remain part of every phase
+gate and the final gate. A phase's own `phases[].verificationCommands` are
+**phase-local only** and are not replayed at the final gate, because later
+phases may intentionally replace intermediate implementations. Any mechanical
+requirement that must still hold at final completion belongs in the top-level
+global verification plan; semantic requirements that later phases must preserve
+belong in `carryForwardInvariants`.
 
 For one-command machine setup after pulling the repository:
 
