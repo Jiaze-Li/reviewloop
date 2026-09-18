@@ -803,12 +803,21 @@ export function createReviewLoopController({
     if (resumeCheckpoint && resumeCheckpoint.deltaGateKey === deltaGateKey
       && Number.isInteger(resumeCheckpoint.round)) {
       loopState.round = resumeCheckpoint.round;
+      // Backward compatibility: persisted loops/checkpoints from before
+      // gate-local convergence existed have only the task-global round. For a
+      // no-phase legacy loop that round WAS the convergence budget, so migrate
+      // it forward instead of silently resetting paid-review allowance.
       loopState.gateRound = Number.isInteger(resumeCheckpoint.gateRound)
         ? resumeCheckpoint.gateRound
-        : (loopState.gateRound ?? 0);
+        : (Number.isInteger(loopState.gateRound)
+          ? loopState.gateRound
+          : resumeCheckpoint.round);
     } else {
+      const priorGateRound = Number.isInteger(loopState.gateRound)
+        ? loopState.gateRound
+        : loopState.round;
       loopState.round += 1;
-      loopState.gateRound = (loopState.gateRound ?? 0) + 1;
+      loopState.gateRound = priorGateRound + 1;
     }
 
     // Durable per-chunk checkpoint. Keyed to the exact review state INCLUDING
