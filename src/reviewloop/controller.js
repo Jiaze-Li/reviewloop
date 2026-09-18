@@ -91,8 +91,9 @@ function phasesOf(objective) {
 function currentReviewScope(loopState, objective = loopState?.objective) {
   const phases = phasesOf(objective);
   if (!phases.length) {
-    const scope = { type: 'task', id: 'task', title: 'Full task' };
-    return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
+    // Empty fingerprint preserves pre-phase no-new-information/checkpoint
+    // identities for ordinary tasks across an upgrade.
+    return { type: 'task', id: 'task', title: 'Full task', fingerprint: '' };
   }
 
   const rawIndex = Number.isInteger(loopState?.currentPhaseIndex) ? loopState.currentPhaseIndex : 0;
@@ -133,6 +134,11 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
     verificationCommands: phases.flatMap((p) => p.verificationCommands ?? []),
   };
   return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
+}
+
+function scopeBoundFingerprint(parts, reviewScope) {
+  const base = parts.map((v) => String(v ?? '')).join('::');
+  return sha256Hex(reviewScope?.fingerprint ? `${base}::${reviewScope.fingerprint}` : base);
 }
 
 function reviewGateCount(objective) {
@@ -750,7 +756,10 @@ export function createReviewLoopController({
     // reconsider new evidence, only re-chunked old evidence. `deltaGateKey` is
     // tracked separately from the layout-inclusive `checkpointKey` so round
     // reuse survives a re-chunk.
-    const deltaGateKey = sha256Hex(`${delta.fingerprint}::${gate.fingerprint}::${reviewScope.fingerprint}`);
+    const deltaGateKey = scopeBoundFingerprint(
+      [delta.fingerprint, gate.fingerprint],
+      reviewScope,
+    );
     const chunkLayoutHash = sha256Hex(`${chunks.length}::${chunks.map((c) => c.hash).join('::')}`);
     const checkpointKey = sha256Hex(`${deltaGateKey}::${chunkLayoutHash}`);
     const resumeCheckpoint = loopState.chunkReviewCheckpoint;
@@ -827,7 +836,7 @@ export function createReviewLoopController({
       const reviewStateEvidence = await spend.registerEvidence({
         kind: 'reviewstate',
         taskId: chunkId,
-        diffHash: sha256Hex(`${chunk.hash}::${gate.fingerprint}::${reviewScope.fingerprint}`),
+        diffHash: scopeBoundFingerprint([chunk.hash, gate.fingerprint], reviewScope),
       });
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
