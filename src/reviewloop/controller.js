@@ -127,9 +127,10 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       objective: p.objective,
       exitCriteria: p.exitCriteria ?? [],
       carryForwardInvariants: p.carryForwardInvariants ?? [],
+      verificationCommands: p.verificationCommands ?? [],
     })),
     phaseCount: phases.length,
-    verificationCommands: [],
+    verificationCommands: phases.flatMap((p) => p.verificationCommands ?? []),
   };
   return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
 }
@@ -141,7 +142,8 @@ function reviewGateCount(objective) {
 
 function mergeScopedGateCommands(commands, reviewScope) {
   const base = Array.isArray(commands) ? commands : [];
-  const scoped = reviewScope?.type === 'phase' && Array.isArray(reviewScope.verificationCommands)
+  const scoped = (reviewScope?.type === 'phase' || reviewScope?.type === 'final')
+    && Array.isArray(reviewScope.verificationCommands)
     ? reviewScope.verificationCommands
     : [];
   return [...new Set([...base, ...scoped].map(String).filter(Boolean))];
@@ -828,7 +830,9 @@ export function createReviewLoopController({
       // included). Multiple evidenceIds no longer multiply dispatch eligibility.
       // eslint-disable-next-line no-await-in-loop
       const reviewStateEvidence = await spend.registerEvidence({
-        kind: 'reviewstate', taskId: chunkId, diffHash: sha256Hex(`${chunk.hash}::${gate.fingerprint}`),
+        kind: 'reviewstate',
+        taskId: chunkId,
+        diffHash: sha256Hex(`${chunk.hash}::${gate.fingerprint}::${reviewScope.fingerprint}`),
       });
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
@@ -1043,7 +1047,9 @@ export function createReviewLoopController({
       cwd, commands: gateCommands, runner: gateRunner, env, signal,
       baselineGateEvidence: trustedBaselineGateEvidence,
     });
-    gate.commandSource = commandSource;
+      gate.commandSource = commandSource;
+      gate.executedCommands = [...gateCommands];
+    gate.executedCommands = [...gateCommands];
 
     // The review-time Gate may itself have mutated tracked files (a formatter, a
     // snapshot writer, a codegen step). The delta was collected BEFORE it ran,
@@ -1492,7 +1498,7 @@ export function createReviewLoopController({
         fingerprint: objective.fingerprint,
       },
       gate: gate ? {
-        commands: objective.verificationPlan?.commands ?? [],
+        commands: gate.executedCommands ?? objective.verificationPlan?.commands ?? [],
         commandSource: gate.commandSource ?? null,
         fingerprint: gate.fingerprint ?? null,
         verdict: gate.verdict ?? null,
