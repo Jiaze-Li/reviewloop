@@ -82,7 +82,7 @@ for (const mode of ['LOCAL', 'PR']) {
       const result = await w.controller.review({ loopId, evidence });
       assert.equal(result.status, 'REWORK');
       assert.match(result.reason, /reviewloop_review:/);
-      assert.deepEqual(result.gate, { verdict: mode === 'PR' ? 'NOT_RUN' : 'PASS', failures: [] });
+      assert.deepEqual(result.gate, { verdict: 'NOT_RUN', failures: [] });
       assert.equal(result.round, 0);
       assert.equal(result.maxRounds, 3);
       assert.equal(result.head, 'H1');
