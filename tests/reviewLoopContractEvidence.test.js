@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
+import { bindEvidenceSubmissions, reviewerEvidenceBundle } from '../src/reviewloop/contractEvidence.js';
 import { MemoryPersistence, makeHarness, finding } from './helpers/reviewLoopHarness.js';
 
 const phases = [
@@ -63,6 +64,59 @@ test('structured phase handoff preserves descriptive phase verification evidence
     ],
   );
   assert.match(raw.reviewLoop.objective.contractText, /Execution Plan/);
+});
+
+
+test('evidence requirements target one explicit gate; ambiguous all-scope is rejected', async () => {
+  const { controller } = makeHarness();
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Evidence-scoped task.',
+      contractText: 'Goal: evidence-scoped task.',
+      cwd: '/r',
+      evidenceRequirements: [{
+        id: 'runtime',
+        type: 'runtime',
+        description: 'Run the runtime check.',
+        gate: 'all',
+      }],
+    }),
+    /unknown gate "all"/i,
+  );
+});
+
+test('submitted optional evidence keeps its requirement description for Reviewer context', () => {
+  const objective = {
+    evidenceRequirements: [{
+      id: 'optional-diagnostic',
+      type: 'artifact',
+      description: 'Optional diagnostic trace that can strengthen review confidence.',
+      gate: 'task',
+      required: false,
+      covers: [],
+    }],
+  };
+  const reviewScope = { type: 'task', id: 'task', fingerprint: '' };
+  const loopState = { evidenceRecords: [] };
+  bindEvidenceSubmissions({
+    loopState,
+    objective,
+    reviewScope,
+    submissions: [{
+      requirementId: 'optional-diagnostic',
+      summary: 'Attached the diagnostic trace.',
+      artifactRef: 'trace.txt',
+    }],
+    evidenceFingerprint: 'code-1',
+    head: 'H1',
+    now: '2026-09-18T00:00:00Z',
+  });
+  const bundle = reviewerEvidenceBundle({
+    loopState, objective, reviewScope, evidenceFingerprint: 'code-1',
+  });
+  assert.equal(bundle.requirements.length, 1);
+  assert.equal(bundle.requirements[0].description, objective.evidenceRequirements[0].description);
+  assert.equal(bundle.submissions[0].requirementId, 'optional-diagnostic');
 });
 
 test('required final runtime evidence blocks Reviewer spend until submitted', async () => {
