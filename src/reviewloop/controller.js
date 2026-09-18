@@ -1993,19 +1993,6 @@ export function createReviewLoopController({
       const { delta } = snap;
       let { gate } = snap;
 
-      const evidenceCheck = await enforceEvidenceObligations({
-        loopState,
-        objective,
-        reviewScope,
-        delta,
-        // A HEAD rebind makes evidence supplied for the original reviewed SHA
-        // stale. Never silently rebind the same runtime/manual claim to a new
-        // PR HEAD inside this one call.
-        submissions: rebind === 0 ? evidence : [],
-        head: observedHead,
-      });
-      if (evidenceCheck.blocked) return evidenceCheck.result;
-
       if (signal?.aborted) {
         return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
       }
@@ -2040,6 +2027,19 @@ export function createReviewLoopController({
           telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
         };
       }
+
+      const evidenceCheck = await enforceEvidenceObligations({
+        loopState,
+        objective,
+        reviewScope,
+        delta,
+        // A HEAD rebind makes evidence supplied for the original reviewed SHA
+        // stale. Never silently rebind the same runtime/manual claim to a new
+        // PR HEAD inside this one call.
+        submissions: rebind === 0 ? evidence : [],
+        head: observedHead,
+      });
+      if (evidenceCheck.blocked) return evidenceCheck.result;
 
       const spend = spendFor(loopState.loopId, objective);
       let reviewOut;
