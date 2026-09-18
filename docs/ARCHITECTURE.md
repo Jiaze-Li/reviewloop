@@ -89,8 +89,10 @@ The optional phase plan is fingerprinted into the immutable
 `ReviewObjective`. Phase ids/order/objectives/exit criteria/invariants may not
 be edited after `reviewloop_begin`. Phase-specific exact verification commands,
 when provided, are frozen in the phase plan and are appended to the ordinary
-deterministic Gate for that phase. The final gate uses the ordinary frozen
-whole-task Gate plan.
+deterministic Gate for that phase. The final whole-task gate runs the ordinary
+frozen Gate plan plus the union of all frozen phase-specific verification
+commands, so a later phase cannot silently regress an earlier phase's
+mechanical invariant.
 
 Reviewer/Supervisor prompts receive an explicit current review scope. During a
 phase they judge only that phase's exit criteria plus global constraints and
