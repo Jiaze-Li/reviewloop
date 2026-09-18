@@ -167,8 +167,8 @@ test('phase-specific verification commands join the zero-token deterministic Gat
   assert.equal(final.status, 'PASS');
   assert.deepEqual(
     seenCommands[2],
-    ['echo global', 'echo phase-1'],
-    'final Gate re-runs frozen phase verification so later work cannot regress it',
+    ['echo global'],
+    'final Gate uses only the frozen whole-task/global verification plan',
   );
 });
 
