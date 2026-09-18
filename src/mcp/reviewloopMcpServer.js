@@ -179,7 +179,7 @@ export function createReviewLoopMcpServer({
         missingEvidenceRequirements: z.array(z.record(z.string(), z.any())).optional(),
         resumePacket: z.record(z.string(), z.any()).nullable().optional(),
         contextRefreshSafe: z.boolean().optional(),
-        evidenceRecords: z.array(z.record(z.string(), z.any())).optional(),
+        evidenceRecordCount: z.number().int().nonnegative().optional(),
         telemetry: z.record(z.string(), z.any()).optional(),
       },
     },
