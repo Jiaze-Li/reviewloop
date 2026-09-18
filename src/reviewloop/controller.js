@@ -1471,11 +1471,14 @@ export function createReviewLoopController({
 
     if (decision.verdict === REVIEW_VERDICTS.PASS) {
       const telemetry = await spend.telemetry();
-      const phaseResult = completeCurrentPhase(loopState, review, telemetry, { gate, reviewScope });
+      const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
+        head: delta.currentHead ?? null, gate, reviewScope,
+      });
       if (phaseResult) {
         await saveLoop(loopState);
         return phaseResult;
       }
+      loopState.resumePacket = null;
       recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
       await saveLoop(loopState);
       return passResult(loopState, review, telemetry);
@@ -2146,6 +2149,7 @@ export function createReviewLoopController({
           await saveLoop(loopState);
           return phaseResult;
         }
+        loopState.resumePacket = null;
         recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
         await saveLoop(loopState);
         await maybePublishPrResult({
@@ -2199,7 +2203,6 @@ export function createReviewLoopController({
 
   // ---- result shaping ------------------------------------------------
   function passResult(loopState, review, telemetry) {
-    loopState.resumePacket = null;
     return {
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
       reviewer: review.reviewer,
