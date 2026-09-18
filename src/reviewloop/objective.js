@@ -53,6 +53,12 @@ function freezeDeep(value) {
 // into the immutable ReviewObjective so a later review round cannot skip,
 // reorder, weaken, or rewrite phase acceptance boundaries.
 const RESERVED_PHASE_IDS = new Set(['task', 'final']);
+export const PHASE_VERIFICATION_EVIDENCE_LIMITS = Object.freeze({
+  items: 32,
+  itemBytes: 4096,
+  totalBytes: 16 * 1024,
+});
+const utf8Bytes = (value) => Buffer.byteLength(String(value), 'utf8');
 
 export function normalizePhasePlan(phases = []) {
   if (phases == null) return [];
@@ -81,6 +87,17 @@ export function normalizePhasePlan(phases = []) {
     if (!exitCriteria.length) {
       throw new Error(`createReviewObjective: phase "${id}" requires at least one exit criterion`);
     }
+    const verificationEvidence = list(raw.verificationEvidence);
+    if (verificationEvidence.length > PHASE_VERIFICATION_EVIDENCE_LIMITS.items
+      || verificationEvidence.some((item) => utf8Bytes(item) > PHASE_VERIFICATION_EVIDENCE_LIMITS.itemBytes)
+      || utf8Bytes(verificationEvidence.join('\n')) > PHASE_VERIFICATION_EVIDENCE_LIMITS.totalBytes) {
+      throw new Error(
+        `createReviewObjective: phase "${id}" verificationEvidence exceeds `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.items} items, `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.itemBytes} bytes per item, or `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.totalBytes} bytes total; keep descriptive proof requirements concise`,
+      );
+    }
 
     return {
       id,
@@ -93,7 +110,7 @@ export function normalizePhasePlan(phases = []) {
       verificationCommands: list(raw.verificationCommands),
       // Descriptive/non-command evidence required to prove this phase. These
       // survive structured handoff even when they are not shell commands.
-      verificationEvidence: list(raw.verificationEvidence),
+      verificationEvidence,
     };
   });
 }

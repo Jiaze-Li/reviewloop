@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
+import { PHASE_VERIFICATION_EVIDENCE_LIMITS } from '../src/reviewloop/objective.js';
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
   assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions,
@@ -423,4 +424,63 @@ test('blank optional artifactRef is normalized as absent for direct controller/l
   });
   assert.equal(state.evidenceRecords.length, 1);
   assert.equal(state.evidenceRecords[0].artifactRef, null);
+});
+
+
+test('Gate mutation with no submitted evidence reports missing proof, not a fake NOT_ACCEPTED receipt', async () => {
+  const w = world('LOCAL');
+  const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: [req()] });
+  w.mutate(['B']);
+  const result = await w.controller.review({ loopId });
+  assert.equal(result.status, 'REWORK');
+  assert.deepEqual(result.missingEvidenceRequirements.map((r) => r.id), ['runtime']);
+  assert.equal(result.evidenceSubmission, undefined);
+  assert.match(result.reason, /required evidence missing/);
+  assert.equal(w.calls.reviewer, 0);
+});
+
+test('generic phase headings and plain phase-plan prose do not declare the current task without strong plan context', () => {
+  for (const text of [
+    'Phase 1 Legacy protocol\nPhase 2 Current protocol',
+    'Document the 2 phases plan used by the old subsystem.',
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, null);
+    assert.doesNotThrow(() => assertContractHandoff({ goal: text, phases: [] }));
+  }
+});
+
+test('numbered Markdown phase lists under Execution Plan are fail-closed declarations', () => {
+  const text = 'Execution Plan:\n1. Phase 1 Foundation\n2. Phase 2 Integration';
+  assert.equal(declaredPhasePlan(text).count, 2);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  assert.doesNotThrow(() => assertContractHandoff({ goal: text, phases }));
+});
+
+test('missing prior-contract references are detected across line breaks', async () => {
+  const h = makeHarness();
+  await assert.rejects(() => h.controller.begin({
+    cwd: '/r',
+    goal: 'Full specification was provided\nin the previous conversation.',
+  }), /no self-contained contractText|prior conversation/i);
+  assert.equal(h.calls.baseline, 0);
+  assert.equal(h.calls.gate, 0);
+});
+
+test('phase verificationEvidence is bounded per item and in aggregate before baseline/model work', async () => {
+  const perItem = 'x'.repeat(PHASE_VERIFICATION_EVIDENCE_LIMITS.itemBytes + 1);
+  const aggregate = Array.from({ length: 5 }, (_, i) =>
+    `proof-${i}-${'x'.repeat(3500)}`);
+  for (const verificationEvidence of [[perItem], aggregate]) {
+    const h = makeHarness();
+    await assert.rejects(() => h.controller.begin({
+      cwd: '/r',
+      goal: 'Bound phase evidence.',
+      phases: [{
+        id: 'p1', title: 'P1', objective: 'Do P1.',
+        exitCriteria: ['P1 complete.'], verificationEvidence,
+      }],
+    }), /verificationEvidence exceeds/);
+    assert.equal(h.calls.baseline, 0);
+    assert.equal(h.calls.gate, 0);
+  }
 });

@@ -105,19 +105,27 @@ export function declaredPhasePlan(text) {
   const explicitCounts = [
     ...[...s.matchAll(/\bfull\s+spec\s+has\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b([2-9]\d*)\s*(?:-\s*)?phases?\s+(?:execution\s+)?plan\b/ig)]
+    ...[...s.matchAll(/\b([2-9]\d*)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\bexecution\s+plan\s+(?:has|with|contains|includes|including)\s+(?:the\s+)?([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];
 
+  // Phase headings are declarations only inside strong task-plan context.
+  // Generic prose/documents often contain "Phase 1"/"Phase 2" headings that
+  // describe historical protocols rather than this task. An explicit count
+  // already declares a plan; otherwise require an Execution Plan heading.
+  const planHeading = /^\s{0,3}(?:#{1,6}\s*)?execution[ \t]+plan[ \t]*:?[ \t]*$/im.exec(s);
+  const headingText = explicitCounts.length
+    ? s
+    : (planHeading ? s.slice(planHeading.index + planHeading[0].length) : '');
   const headingNumbers = [...new Set(
-    [...s.matchAll(/^\s{0,3}(?:#{1,6}\s*)?(?:[-*]\s*)?phase\s+([1-9]\d*)\b/gim)]
+    [...headingText.matchAll(/^\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
       .map((m) => Number(m[1])),
   )].sort((a, b) => a - b);
 
   let scopedNumbers = headingNumbers;
-  let source = headingNumbers.length >= 2 ? 'phase headings' : null;
+  let source = headingNumbers.length >= 2 ? 'execution-plan phase headings' : null;
   if (scopedNumbers.length < 2) {
     // An execution-plan mention is not a delimiter for all later prose.
     // Accept an inline enumeration only when the heading is immediately
@@ -179,7 +187,7 @@ export function clearlyDeclaresPhasePlan(text) {
 
 export function referencesMissingPriorContract(text) {
   const s = String(text ?? '');
-  return /\b(?:full|complete|original)\s+(?:spec|specification|contract).*\b(?:provided|given|stated).*\b(?:earlier|previous|original task message|conversation)\b/i.test(s)
+  return /\b(?:full|complete|original)\s+(?:spec|specification|contract)\b[\s\S]{0,500}?\b(?:provided|given|stated)\b[\s\S]{0,500}?\b(?:earlier|previous|original task message|conversation)\b/i.test(s)
     || /\b(?:see|refer to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation|spec|contract)\b/i.test(s);
 }
 

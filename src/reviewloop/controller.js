@@ -1474,8 +1474,7 @@ export function createReviewLoopController({
       };
     }
 
-    if (gateMutatedTree && ((Array.isArray(evidence) ? evidence.length > 0 : evidence != null)
-      || requiredEvidenceForScope(objective, reviewScope).length > 0)) {
+    if (gateMutatedTree && (Array.isArray(evidence) ? evidence.length > 0 : evidence != null)) {
       return evidenceRework({
         loopState, gate, head: delta.currentHead ?? null,
         reason: 'the deterministic Gate changed the code during review; pre-Gate evidence was not accepted. Produce fresh evidence against the stabilized tree and retry in this loop',
