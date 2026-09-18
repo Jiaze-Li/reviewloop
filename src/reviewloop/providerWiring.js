@@ -562,7 +562,7 @@ export function buildReviewerInvoke() {
 
 export function buildSupervisorInvoke() {
   return async ({
-    objective, blockingFindings, reviewScope = null, transport, model, signal,
+    objective, blockingFindings, reviewScope = null, evidence = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
@@ -571,6 +571,7 @@ export function buildSupervisorInvoke() {
         ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
         : '',
       ...reviewScopePromptLines(reviewScope),
+      ...evidencePromptLines(evidence),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
       'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',

@@ -91,3 +91,16 @@ test('package.json is renamed to reviewloop with reviewloop bins', () => {
   assert.deepEqual(Object.keys(pkg.bin).sort(), ['reviewloop', 'reviewloop-mcp']);
   assert.match(pkg.description, /ReviewLoop/);
 });
+
+
+test('Supervisor receives the same current evidence bundle in LOCAL and PR convergence paths', () => {
+  const controller = readFileSync(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8');
+  const convergenceCalls = controller.match(
+    /runSupervisor\(\{\s*spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck\.bundle, signal,?\s*\}\)/g,
+  ) ?? [];
+  assert.equal(convergenceCalls.length, 2, 'LOCAL and PR Supervisor escalations must both carry current evidence');
+  assert.match(
+    controller,
+    /supervisorFn\(\{\s*objective, blockingFindings: review\.blockingFindings, gate, reviewScope, evidence: evidenceBundle,/,
+  );
+});

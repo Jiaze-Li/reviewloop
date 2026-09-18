@@ -1599,7 +1599,7 @@ export function createReviewLoopController({
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
       const sup = await runSupervisor({
-        spend, loopState, objective, review, gate, reviewScope, signal,
+        spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
       });
       if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
       const outcome = await applySupervisorOutcome({
@@ -1653,7 +1653,8 @@ export function createReviewLoopController({
   // Supervisor, exception-only. Returns { guidance } | { humanRequired, reason }
   // | { denied, error }.
   async function runSupervisor({
-    spend, loopState, objective, review, gate, reviewScope = currentReviewScope(loopState, objective), signal,
+    spend, loopState, objective, review, gate, reviewScope = currentReviewScope(loopState, objective),
+    evidenceBundle = null, signal,
   }) {
     const physicalCalls = [];
     if (signal?.aborted) {
@@ -1684,7 +1685,7 @@ export function createReviewLoopController({
         invoke: ({
           selection, attempt, family, provider,
         }) => Promise.resolve(supervisorFn({
-          objective, blockingFindings: review.blockingFindings, gate, reviewScope,
+          objective, blockingFindings: review.blockingFindings, gate, reviewScope, evidence: evidenceBundle,
           round: loopState.round, priorSignatures: loopState.findingSignatureHistory, selection, signal,
         })).then((out) => {
           physicalCalls.push({
@@ -2265,7 +2266,7 @@ export function createReviewLoopController({
       let supervisorPhysicalCalls = [];
       if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
         const sup = await runSupervisor({
-          spend, loopState, objective, review, gate, reviewScope, signal,
+          spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
         });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());

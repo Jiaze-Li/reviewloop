@@ -7,7 +7,8 @@ import {
 } from '../src/reviewloop/objective.js';
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
-  assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions, evidencePromptLines,
+  assertContractHandoff, declaredPhasePlan, referencesMissingPriorContract,
+  bindEvidenceSubmissions, evidencePromptLines,
   latestEvidenceRecords, evidenceStatusForScope,
 } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
@@ -596,4 +597,60 @@ test('resume task-definition aggregate bound rejects oversized goal and configur
     assert.equal(h.calls.baseline, 0);
     assert.equal(h.calls.gate, 0);
   }
+});
+
+
+test('explicit phase count remains authoritative over unrelated historical phase prose', () => {
+  const text = [
+    'Full specification has 3 phases.',
+    'Historical migration note: Execution plan: Phase 1 shipped last quarter. Phase 2 is out of scope.',
+  ].join('\n');
+  const declaration = declaredPhasePlan(text);
+  assert.equal(declaration.count, 3);
+  assert.equal(declaration.invalid, null);
+});
+
+test('complete specification consists-of is an explicit fail-closed phase declaration', () => {
+  const text = 'Complete specification consists of 3 phases: Phase 1 foundation; Phase 2 integration; Phase 3 finish.';
+  assert.equal(declaredPhasePlan(text).count, 3);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+});
+
+test('unrelated earlier-conversation references do not masquerade as a missing task contract', () => {
+  const ordinary = 'Refactor the auth module; for naming conventions, refer to the earlier conversation about style.';
+  assert.equal(referencesMissingPriorContract(ordinary), false);
+  assert.doesNotThrow(() => assertContractHandoff({ goal: ordinary, phases: [] }));
+
+  for (const missing of [
+    'See the earlier specification for the task.',
+    'See the earlier conversation for the full specification.',
+    'The full specification was provided in the previous conversation.',
+  ]) {
+    assert.equal(referencesMissingPriorContract(missing), true);
+  }
+});
+
+test('Supervisor provider prompt receives the same evidence context as Reviewer', async () => {
+  let prompt = '';
+  await buildSupervisorInvoke()({
+    objective: { goal: 'Repair persistent blocker.', contractText: 'Runtime proof remains binding.' },
+    blockingFindings: [{ severity: 'P1', title: 'Persistent runtime mismatch.' }],
+    evidence: {
+      requirements: [{
+        id: 'runtime-ui', type: 'runtime', required: true,
+        description: 'Exercise the production UI interaction.', covers: ['AC1'],
+      }],
+      submissions: [{
+        requirementId: 'runtime-ui',
+        summary: 'Completed the real interaction.',
+        artifactRef: 'run://evidence-1',
+      }],
+    },
+    transport: async (value) => {
+      prompt = value;
+      return { text: '{"guidance":"repair code, preserve proof","recommendation":"REWORK"}' };
+    },
+  });
+  assert.match(prompt, /runtime-ui \[runtime; required\]: Exercise the production UI interaction\./);
+  assert.match(prompt, /runtime-ui: Completed the real interaction\. \[run:\/\/evidence-1\]/);
 });

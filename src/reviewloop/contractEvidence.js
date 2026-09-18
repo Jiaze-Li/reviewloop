@@ -103,7 +103,7 @@ export function declaredPhasePlan(text) {
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
   const explicitCounts = [
-    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+has\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|consists\s+of)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
@@ -126,7 +126,7 @@ export function declaredPhasePlan(text) {
 
   let scopedNumbers = headingNumbers;
   let source = headingNumbers.length >= 2 ? 'execution-plan phase headings' : null;
-  if (scopedNumbers.length < 2) {
+  if (scopedNumbers.length < 2 && explicitCounts.length === 0) {
     // An execution-plan mention is not a delimiter for all later prose.
     // Accept an inline enumeration only when the heading is immediately
     // followed by phase clauses. Historical references elsewhere stay prose.
@@ -187,8 +187,9 @@ export function clearlyDeclaresPhasePlan(text) {
 
 export function referencesMissingPriorContract(text) {
   const s = String(text ?? '');
-  return /\b(?:full|complete|original)\s+(?:spec|specification|contract)\b[\s\S]{0,500}?\b(?:provided|given|stated)\b[\s\S]{0,500}?\b(?:earlier|previous|original task message|conversation)\b/i.test(s)
-    || /\b(?:see|refer to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation|spec|contract)\b/i.test(s);
+  return /\b(?:full|complete|original)\s+(?:spec|specification|contract|acceptance\s+criteria|task\s+requirements)\b[\s\S]{0,500}?\b(?:provided|given|stated|is|was)\b[\s\S]{0,160}?\b(?:in\s+)?(?:the\s+)?(?:earlier|previous|original\s+task\s+message|conversation)\b/i.test(s)
+    || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:spec|specification|contract|task\s+message)\b/i.test(s)
+    || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b[\s\S]{0,200}?\b(?:for|containing|with)\s+(?:the\s+)?(?:full|complete|original)?\s*(?:spec|specification|contract|acceptance\s+criteria|requirements)\b/i.test(s);
 }
 
 export function assertContractHandoff({ goal, contractText, phases } = {}) {
