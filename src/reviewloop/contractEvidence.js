@@ -73,7 +73,7 @@ export function normalizeEvidenceRequirements(raw = [], phaseIds = []) {
       throw new Error(`createReviewObjective: evidence requirement "${id}" has unsupported type "${type}"`);
     }
     const gate = String(entry.gate ?? 'final').trim();
-    if (gate !== 'final' && gate !== 'all' && gate !== 'task' && !phases.has(gate)) {
+    if (gate !== 'final' && gate !== 'task' && !phases.has(gate)) {
       throw new Error(
         `createReviewObjective: evidence requirement "${id}" targets unknown gate "${gate}"`,
       );
@@ -110,15 +110,18 @@ export function normalizeEvidenceSubmissions(raw = []) {
 
 function gateMatches(requirement, reviewScope) {
   const id = reviewScope?.id ?? 'task';
-  if (requirement.gate === 'all') return true;
   if (requirement.gate === 'final') return reviewScope?.type === 'final' || reviewScope?.type === 'task';
   if (requirement.gate === 'task') return reviewScope?.type === 'task';
   return requirement.gate === id;
 }
 
+function evidenceRequirementsForScope(objective, reviewScope) {
+  return (objective?.evidenceRequirements ?? []).filter((r) => gateMatches(r, reviewScope));
+}
+
 export function requiredEvidenceForScope(objective, reviewScope) {
-  return (objective?.evidenceRequirements ?? [])
-    .filter((r) => r.required !== false && gateMatches(r, reviewScope));
+  return evidenceRequirementsForScope(objective, reviewScope)
+    .filter((r) => r.required !== false);
 }
 
 export function bindEvidenceSubmissions({
@@ -177,8 +180,14 @@ export function evidenceStatusForScope({ loopState, objective, reviewScope, evid
 
 export function reviewerEvidenceBundle({ loopState, objective, reviewScope, evidenceFingerprint } = {}) {
   const status = evidenceStatusForScope({ loopState, objective, reviewScope, evidenceFingerprint });
+  const submittedIds = new Set(status.records.map((r) => r.requirementId));
+  // Required obligations are always shown. Optional obligations are shown only
+  // when the Worker actually submitted evidence for them, so the Reviewer gets
+  // the description needed to judge that claim without prompt clutter.
+  const requirements = evidenceRequirementsForScope(objective, reviewScope)
+    .filter((r) => r.required !== false || submittedIds.has(r.id));
   return {
-    requirements: status.required,
+    requirements,
     submissions: status.records.map((r) => ({
       requirementId: r.requirementId,
       type: r.type,
