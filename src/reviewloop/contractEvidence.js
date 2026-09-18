@@ -230,7 +230,12 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       return m ? Number(m[1]) : null;
     });
     const canonicalCount = canonicalIds.filter((n) => n != null).length;
-    if (canonicalCount > 0 && canonicalCount < canonicalIds.length) {
+    const rawPhaseIds = phases.map((phase) => String(phase?.id ?? '').trim().toLowerCase());
+    const containsReservedScopeId = rawPhaseIds.some((id) => id === 'final' || id === 'task');
+    // Reserved scope ids have their own stronger validation in objective
+    // normalization. Do not mask that diagnostic merely because another id is
+    // canonical; mixed ordinary custom/canonical ids are still rejected here.
+    if (canonicalCount > 0 && canonicalCount < canonicalIds.length && !containsReservedScopeId) {
       throw new Error(
         'reviewloop_begin: declared phase plan mixes canonical phase-N ids with custom ids; use either a complete canonical phase-1..phase-N sequence or consistently custom ids',
       );
