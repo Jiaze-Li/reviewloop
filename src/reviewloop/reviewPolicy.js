@@ -189,5 +189,9 @@ export function compactReworkPayload({ loopState, review, gate, supervisorGuidan
 }
 
 export function reviewFingerprint({ deltaFingerprint, gateFingerprint, reviewScopeFingerprint = '' }) {
-  return sha256(`${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}::${reviewScopeFingerprint ?? ''}`);
+  const base = `${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}`;
+  // Preserve the exact legacy fingerprint for ordinary non-phase tasks so an
+  // in-flight pre-phase ReviewLoop cannot spend again merely because the
+  // controller was upgraded. Only phase/final scopes add a third identity.
+  return sha256(reviewScopeFingerprint ? `${base}::${reviewScopeFingerprint}` : base);
 }
