@@ -141,6 +141,38 @@ function scopeBoundFingerprint(parts, reviewScope) {
   return sha256Hex(reviewScope?.fingerprint ? `${base}::${reviewScope.fingerprint}` : base);
 }
 
+function assertPhaseProgressionValid(loopState, objective = loopState?.objective) {
+  const phases = phasesOf(objective);
+  const completed = Array.isArray(loopState?.completedPhases) ? loopState.completedPhases : [];
+
+  if (!phases.length) {
+    // Legacy/no-phase loops may predate these fields entirely.
+    if (completed.length) throw new Error('ReviewLoop phase progression invalid: no phase plan but completed phases are present');
+    return true;
+  }
+
+  const index = loopState?.currentPhaseIndex;
+  if (!Number.isInteger(index) || index < 0 || index > phases.length) {
+    throw new Error(`ReviewLoop phase progression invalid: currentPhaseIndex ${JSON.stringify(index)} is outside 0..${phases.length}`);
+  }
+  if (completed.length !== index) {
+    throw new Error(
+      `ReviewLoop phase progression invalid: completedPhases length ${completed.length} does not match currentPhaseIndex ${index}`,
+    );
+  }
+  for (let i = 0; i < completed.length; i += 1) {
+    if (completed[i]?.id !== phases[i]?.id) {
+      throw new Error(
+        `ReviewLoop phase progression invalid: completed phase ${i} is ${JSON.stringify(completed[i]?.id)}; expected ${JSON.stringify(phases[i]?.id)}`,
+      );
+    }
+  }
+  if (loopState?.state === REVIEW_LOOP_STATES.PASS && index !== phases.length) {
+    throw new Error('ReviewLoop phase progression invalid: terminal PASS recorded before every frozen phase completed');
+  }
+  return true;
+}
+
 function reviewGateCount(objective) {
   const n = phasesOf(objective).length;
   return n ? n + 1 : 1; // one gate per phase + one final whole-task gate
@@ -448,6 +480,7 @@ export function createReviewLoopController({
     const objective = rehydrateObjective(raw.objective);
     assertObjectiveNotWeakened(objective, raw.objective);
     raw.objective = objective;
+    assertPhaseProgressionValid(raw, objective);
     return raw;
   }
 
