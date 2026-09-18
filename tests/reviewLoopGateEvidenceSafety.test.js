@@ -294,9 +294,9 @@ test('LOCAL mutation with omitted mandatory evidence still fails closed on the n
   w.mutate(['B']);
   const result = await w.controller.review({ loopId });
   assert.equal(result.status, 'REWORK');
-  assert.equal(result.evidenceSubmission.reason, 'CODE_CHANGED');
-  assert.equal(result.evidenceSubmission.submittedCount, 0);
-  assert.equal(result.evidenceSubmission.retryRequired, true);
+  assert.deepEqual(result.missingEvidenceRequirements.map((r) => r.id), ['runtime']);
+  assert.equal(result.evidenceSubmission, undefined);
+  assert.match(result.reason, /required evidence missing/);
   assert.equal(w.calls.reviewer, 0);
 });
 

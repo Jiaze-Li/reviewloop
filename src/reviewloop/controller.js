@@ -22,6 +22,7 @@ import { DEFAULT_ROLE_POLICY } from '../orchestrator/roleRouting.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
 import {
   createReviewObjective,
+  normalizePhasePlan,
   rehydrateObjective,
   assertObjectiveNotWeakened,
   baselineGateEvidenceIdentity,
@@ -468,6 +469,11 @@ export function createReviewLoopController({
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
     const frozenContractText = assertContractHandoff({ goal, contractText, phases });
+    // Validate bounded structured phase metadata before baseline/Gate work.
+    // createReviewObjective normalizes again when freezing the objective; this
+    // early pass is deliberately side-effect free and prevents invalid
+    // verificationEvidence from spending repository work first.
+    normalizePhasePlan(phases);
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
     const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     const mode = prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL;
