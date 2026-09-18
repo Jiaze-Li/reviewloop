@@ -521,15 +521,16 @@ function reviewScopePromptLines(reviewScope) {
   return [];
 }
 
-function buildReviewerInvoke() {
+export function buildReviewerInvoke() {
   return async ({
     objective, diff, changedFiles, gate, reviewScope = null, evidence = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are an INDEPENDENT code reviewer.',
+      `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
       objective.contractText
-        ? `FROZEN TASK CONTRACT (authoritative; self-contained):\n${objective.contractText}`
-        : `ORIGINAL TASK: ${objective.goal}`,
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${objective.contractText}`
+        : '',
       objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
       ...reviewScopePromptLines(reviewScope),
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
@@ -566,15 +567,16 @@ function buildReviewerInvoke() {
   };
 }
 
-function buildSupervisorInvoke() {
+export function buildSupervisorInvoke() {
   return async ({
     objective, blockingFindings, reviewScope = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
+      `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
       objective.contractText
-        ? `FROZEN TASK CONTRACT (authoritative; self-contained):\n${objective.contractText}`
-        : `ORIGINAL TASK: ${objective.goal}`,
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${objective.contractText}`
+        : '',
       ...reviewScopePromptLines(reviewScope),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
       'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
