@@ -432,11 +432,6 @@ export function createReviewLoopController({
       phaseCount: phasesOf(objective).length,
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
-      reviewScope: {
-        type: reviewScope?.type ?? 'task',
-        id: reviewScope?.id ?? 'task',
-        fingerprint: reviewScope?.fingerprint ?? null,
-      },
     };
   }
 
