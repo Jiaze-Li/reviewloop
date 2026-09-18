@@ -109,6 +109,19 @@ function makeTempGitRepo(baselineFiles) {
   };
 }
 
+function makeTempRuntimeRoot() {
+  // The real ReviewLoop runtime lives outside the reviewed worktree
+  // (~/.reviewloop). Keep certification state outside the temp git repo too;
+  // otherwise ReviewLoop correctly sees its own workflow/lock files as
+  // untracked Worker output on platforms where whole-path anti-symlink reads
+  // fail closed.
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'reviewloop-live-runtime-'));
+  return {
+    dir,
+    cleanup: () => { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ } },
+  };
+}
+
 async function readSpendRecords(ctl, loopId) {
   try {
     const wf = await ctl._persistence.readWorkflowState(loopId);
@@ -131,7 +144,8 @@ const defaultDeps = Object.freeze({
 export async function runReviewerCertification({ env = process.env, deps = {} } = {}) {
   const d = { ...defaultDeps, ...deps };
   const repo = makeTempGitRepo({ [CERT_FILE]: 'before\n' });
-  const runtimeRoot = path.join(repo.dir, '.reviewloop-runtime');
+  const runtime = makeTempRuntimeRoot();
+  const runtimeRoot = runtime.dir;
   const failures = [];
 
   try {
@@ -233,6 +247,7 @@ export async function runReviewerCertification({ env = process.env, deps = {} } 
       },
     };
   } finally {
+    runtime.cleanup();
     repo.cleanup();
   }
 }
@@ -249,7 +264,8 @@ const SYNTHETIC_BLOCKER = Object.freeze({
 export async function runSupervisorCertification({ env = process.env, deps = {} } = {}) {
   const d = { ...defaultDeps, ...deps };
   const repo = makeTempGitRepo({ [CERT_FILE]: 'before\n' });
-  const runtimeRoot = path.join(repo.dir, '.reviewloop-runtime');
+  const runtime = makeTempRuntimeRoot();
+  const runtimeRoot = runtime.dir;
   const failures = [];
 
   try {
@@ -366,6 +382,7 @@ export async function runSupervisorCertification({ env = process.env, deps = {} 
       },
     };
   } finally {
+    runtime.cleanup();
     repo.cleanup();
   }
 }
