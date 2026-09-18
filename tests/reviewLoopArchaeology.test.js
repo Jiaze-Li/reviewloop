@@ -78,10 +78,10 @@ test('no silent diff truncation and no unwired PR backend remain', () => {
 test('the PR target reuses the ONE review engine (no second Reviewer state machine)', async () => {
   const controller = readFileSync(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8');
   // Both targets flow through the same evidence -> Reviewer routing path.
-  assert.match(
-    controller,
-    /runReviewerOverEvidence\(\{\s*spend, loopState, objective, delta, gate, reviewScope, signal,?\s*\}\)/,
-  );
+  const sharedCalls = controller.match(
+    /runReviewerOverEvidence\(\{\s*spend, loopState, objective, delta, gate, reviewScope,\s*evidenceBundle: evidenceCheck\.bundle, signal,?\s*\}\)/g,
+  ) ?? [];
+  assert.equal(sharedCalls.length, 2, 'LOCAL and PR must both use the same evidence-aware Reviewer engine');
   assert.doesNotMatch(controller, /createPrReviewController|PR_REVIEW_OUTCOMES|ExternalModelTriggerAuthority/);
 });
 
