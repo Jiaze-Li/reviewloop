@@ -251,3 +251,63 @@ test('phase progression requires completed phase ids to match the frozen prefix'
     /phase progression invalid/,
   );
 });
+
+test('legacy no-phase loop without gateRound keeps its already-spent convergence rounds', async () => {
+  const blocker = { findings: [finding('P1', 'a.js', 'persistent legacy bug')] };
+  const { controller, persistence } = makeHarness({
+    deltas: [
+      { fingerprint: 'legacy-d1', diff: 'legacy 1' },
+      { fingerprint: 'legacy-d2', diff: 'legacy 2' },
+      { fingerprint: 'legacy-d3', diff: 'legacy 3' },
+    ],
+    reviews: [blocker, blocker, blocker],
+    supervisorReplies: [{ guidance: 'try once', recommendation: 'REWORK' }],
+  });
+  const { loopId } = await controller.begin({ goal: 'legacy task', cwd: '/r' });
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+
+  const raw = await persistence.readWorkflowState(loopId);
+  assert.equal(raw.reviewLoop.round, 2);
+  delete raw.reviewLoop.gateRound; // simulate durable state written pre-phase
+  await persistence.writeWorkflowState(loopId, raw);
+
+  const third = await controller.review({ loopId });
+  assert.equal(third.status, 'HUMAN_REQUIRED');
+  assert.equal(third.gateRound, 3, 'legacy round 2 must migrate to gateRound 2 before the third review');
+});
+
+test('legacy checkpoint without gateRound resumes at its previously assigned round', async () => {
+  const { controller, persistence, calls } = makeHarness({
+    deltas: [
+      { fingerprint: 'same', diff: 'same evidence' },
+      { fingerprint: 'same', diff: 'same evidence' },
+    ],
+    reviews: [{ findings: [] }],
+  });
+  const { loopId } = await controller.begin({ goal: 'legacy checkpoint task', cwd: '/r' });
+
+  // Build a synthetic pre-phase checkpoint for logical round 2. No chunk result
+  // is retained, so the resumed call must dispatch the Reviewer but must reuse
+  // the already-assigned convergence round rather than reset it.
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.round = 2;
+  delete raw.reviewLoop.gateRound;
+  raw.reviewLoop.chunkReviewCheckpoint = {
+    key: 'stale-layout-key',
+    deltaGateKey: null,
+    chunkTotal: 1,
+    chunks: {},
+    round: 2,
+  };
+  await persistence.writeWorkflowState(loopId, raw);
+
+  // Let the controller create the current logical checkpoint; the no-phase
+  // migration path must never reduce convergence state below the legacy round.
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'PASS');
+  const after = await persistence.readWorkflowState(loopId);
+  assert.ok(after.reviewLoop.gateRound >= 2);
+  assert.equal(calls.reviewer, 1);
+});
