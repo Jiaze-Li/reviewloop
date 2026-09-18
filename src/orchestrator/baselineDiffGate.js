@@ -105,9 +105,29 @@ export function diffBaselineFailures(baselineEvidence, currentEvidence) {
     };
   }
 
-  const baselineSet = new Set(baseline.identities);
-  const newFailures = current.identities.filter((id) => !baselineSet.has(id));
-  const ignoredBaselineFailures = current.identities.filter((id) => baselineSet.has(id));
+  // Baseline suppression is COMMAND-LOCAL, never a union across the
+  // whole Gate. A current failing command that did not itself fail at baseline
+  // is new by definition, even if another baseline command happened to emit
+  // the same test/assertion identity. This matters for phase-local verification:
+  // those commands are appended only at phase review time and therefore have
+  // no begin-time baseline execution to suppress against.
+  const newFailureSet = new Set();
+  const ignoredBaselineFailureSet = new Set();
+  for (const [command, info] of current.byCommand) {
+    const baseInfo = baseline.byCommand.get(command);
+    if (!baseInfo) {
+      for (const id of info.identities) newFailureSet.add(id);
+      continue;
+    }
+    const baseIds = new Set(baseInfo.identities);
+    for (const id of info.identities) {
+      if (baseIds.has(id)) ignoredBaselineFailureSet.add(id);
+      else newFailureSet.add(id);
+    }
+  }
+
+  const newFailures = [...newFailureSet].sort();
+  const ignoredBaselineFailures = [...ignoredBaselineFailureSet].sort();
 
   return {
     verdict: newFailures.length === 0

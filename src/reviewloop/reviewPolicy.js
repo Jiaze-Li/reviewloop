@@ -118,7 +118,9 @@ export function normalizeReview({
 export function decideConvergence({ loopState, review }) {
   const objective = loopState.objective;
   const maxRounds = objective?.maxReviewRounds ?? 3;
-  const round = loopState.round; // already incremented for this fresh review
+  // Convergence budget is per review gate. `loopState.round` remains the
+  // task-global audit round, while gateRound resets after PHASE_PASS.
+  const round = loopState.gateRound ?? loopState.round; // already incremented for this fresh review
 
   if (review.status === 'FAILED') {
     return {
@@ -143,7 +145,7 @@ export function decideConvergence({ loopState, review }) {
   if (round >= maxRounds) {
     return {
       verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
-      reason: `still ${blockingCount} blocking finding(s) after ${round} review round(s)`,
+      reason: `still ${blockingCount} blocking finding(s) after ${round} review round(s) in this gate`,
       invokeSupervisor: false,
     };
   }
@@ -165,20 +167,31 @@ export function decideConvergence({ loopState, review }) {
 
 // Compact payload returned to the Worker on REWORK — never a raw evidence blob.
 export function compactReworkPayload({ loopState, review, gate, supervisorGuidance = null }) {
+  const phases = loopState.objective?.phases ?? [];
+  const phaseIndex = loopState.currentPhaseIndex;
+  const currentPhase = Number.isInteger(phaseIndex) && phaseIndex < phases.length
+    ? phases[phaseIndex]?.id ?? null
+    : (Number.isInteger(phaseIndex) && phaseIndex === phases.length ? 'final' : null);
   return {
     status: 'REWORK',
     loopId: loopState.loopId,
     round: loopState.round,
+    gateRound: loopState.gateRound ?? loopState.round,
+    currentPhase,
     maxRounds: loopState.objective?.maxReviewRounds ?? 3,
     gateRepairCount: loopState.gateRepairCount ?? 0,
     blockingFindings: review.blockingFindings,
     nonBlockingCount: review.nonBlockingFindings.length + (review.nonBlockingOmitted ?? 0),
     gate: gate ? { verdict: gate.verdict, failures: gate.failureIdentities?.slice(0, 10) ?? [] } : null,
     supervisorGuidance,
-    nextAction: 'Fix the blocking findings in this same session, then call reviewloop_review again.',
+    nextAction: 'Fix the blocking findings for the current review gate in this same session, then call reviewloop_review again.',
   };
 }
 
-export function reviewFingerprint({ deltaFingerprint, gateFingerprint }) {
-  return sha256(`${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}`);
+export function reviewFingerprint({ deltaFingerprint, gateFingerprint, reviewScopeFingerprint = '' }) {
+  const base = `${deltaFingerprint ?? ''}::${gateFingerprint ?? ''}`;
+  // Preserve the exact legacy fingerprint for ordinary non-phase tasks so an
+  // in-flight pre-phase ReviewLoop cannot spend again merely because the
+  // controller was upgraded. Only phase/final scopes add a third identity.
+  return sha256(reviewScopeFingerprint ? `${base}::${reviewScopeFingerprint}` : base);
 }

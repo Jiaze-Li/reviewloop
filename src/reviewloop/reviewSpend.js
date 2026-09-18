@@ -11,7 +11,8 @@
 //
 // The aggregate ReviewLoop budget (call counts, usageVolume, costUsd) is
 // DURABLE and keyed by loopId: it accumulates across every reviewloop_review
-// round, across the Supervisor call, and across a process restart/resume. A
+// round, every phase gate, Supervisor calls, and process restart/resume. Phase
+// boundaries never reset the task-wide spend or Token Sentinel. A
 // crash after provider settlement but before controller state save can never
 // reset the budget to zero — the durable reservation ledger is cross-checked
 // on load and any settled/blocking reservation without a matching spend record
@@ -131,13 +132,26 @@ function boundedThreshold(env, key, fallback, hardCap) {
   return Math.min(n, hardCap);
 }
 
-export function resolveReviewLoopLimits(env = process.env) {
+export function resolveReviewLoopLimits(env = process.env, { gateCount = 1 } = {}) {
+  const gates = Number.isInteger(gateCount) && gateCount > 0 ? gateCount : 1;
   return {
+    // Cost / aggregate usage remain TASK-WIDE across all phase gates.
     maxCostUsd: num(env, REVIEWLOOP_ENV.MAX_COST_USD, REVIEWLOOP_DEFAULTS.MAX_COST_USD),
     maxUsageVolume: num(env, REVIEWLOOP_ENV.MAX_USAGE_VOLUME, REVIEWLOOP_DEFAULTS.MAX_USAGE_VOLUME),
+    // Convergence rounds are PER GATE; the coarse physical-call ceilings gain
+    // headroom proportional to the frozen number of gates. Explicit env
+    // overrides remain absolute operator limits.
     maxReviewRounds: num(env, REVIEWLOOP_ENV.MAX_REVIEW_ROUNDS, REVIEWLOOP_DEFAULTS.MAX_REVIEW_ROUNDS),
-    maxReviewerCalls: num(env, REVIEWLOOP_ENV.MAX_REVIEWER_CALLS, REVIEWLOOP_DEFAULTS.MAX_REVIEWER_CALLS),
-    maxSupervisorCalls: num(env, REVIEWLOOP_ENV.MAX_SUPERVISOR_CALLS, REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS),
+    maxReviewerCalls: num(
+      env,
+      REVIEWLOOP_ENV.MAX_REVIEWER_CALLS,
+      REVIEWLOOP_DEFAULTS.MAX_REVIEWER_CALLS * gates,
+    ),
+    maxSupervisorCalls: num(
+      env,
+      REVIEWLOOP_ENV.MAX_SUPERVISOR_CALLS,
+      REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS * gates,
+    ),
     maxSingleCallUsage: boundedThreshold(
       env, REVIEWLOOP_ENV.MAX_SINGLE_CALL_USAGE,
       REVIEWLOOP_DEFAULTS.MAX_SINGLE_CALL_USAGE, TOKEN_SENTINEL_HARD_CAPS.MAX_SINGLE_CALL_USAGE,
@@ -638,10 +652,11 @@ export function createReviewLoopSpend({
   loopId,
   persistence = null,
   env = process.env,
+  gateCount = 1,
   onEvent,
   recordSafetyEvent,
 } = {}) {
-  const limits = resolveReviewLoopLimits(env);
+  const limits = resolveReviewLoopLimits(env, { gateCount });
   const spendStore = new ReviewLoopSpendStore(persistence);
   const anomalyStore = new ReviewLoopTokenAnomalyStore(persistence);
 

@@ -1,49 +1,54 @@
 # ReviewLoop Worker Contract
 
-Contract version: 3
+Contract version: 4
 
-The one source of truth for how a coding agent uses ReviewLoop. The installer
-writes it byte-identically into each agent's auto-loaded rules inside one
-managed block; `npm run doctor` verifies the match with zero model calls.
+You are the Worker: the coding agent the user is talking to. You implement,
+test, lint, build, debug and use git normally. ReviewLoop independently
+verifies; it does not write application code or replace you.
 
-## You are the Worker
+## Start
 
-- You are the Worker: the coding agent the user is talking to right now.
-- Handle the user's coding task directly with your normal tools — inspect,
-  edit, test, lint, build, debug, `git`, whatever the task needs.
-- ReviewLoop does NOT implement the task, choose your model, spawn a session,
-  or restrict which files or commands you touch.
+For non-trivial code work, call `reviewloop_begin({ goal, cwd, ... })` BEFORE
+the first edit so the baseline is captured.
 
-## Using ReviewLoop
+If the task contract has explicit phases, pass the ordered frozen plan in
+`phases`. Preserve each phase's id/title, objective, exit criteria,
+carry-forward invariants, and any exact executable verification commands.
+Do not invent, reorder, omit, or merge contract phases. Pass global constraints
+when the task states them. For a PR target, also pass `prNumber`.
 
-- For non-trivial code work, call `reviewloop_begin({ goal, cwd })` BEFORE your
-  first edit to capture the pre-edit baseline. Pass `prNumber` to review an open
-  PR (PR base -> exact PR HEAD) with the same engine instead of the worktree.
-- Do the work.
-- When your implementation is ready, call `reviewloop_review({ loopId })`.
-  - `PASS` → report completion.
-  - `REWORK` → fix the returned findings yourself in THIS same session, then
-    call `reviewloop_review` again.
-  - `HUMAN_REQUIRED` → **STOP.** This ends the task: report the blocker and
-    findings to the user and wait. Do not `reviewloop_begin` again, switch
-    session, or push a new HEAD for a fresh counter — budget spent.
-  - `WAITING_FOR_REVIEW` → transient (a lease is held, or the PR HEAD kept
-    moving); call `reviewloop_review` again once state settles.
-  - `PUSH_REQUIRED` / `NO_PROGRESS` → change or push real state first.
+One user task = one `loopId`. Never start a new ReviewLoop merely because a
+phase passed.
 
-## Execution budget
+## Work / review loop
 
-- One user instruction buys ONE ReviewLoop budget: at most 3 automatic review
-  rounds. Three rounds without converging → `HUMAN_REQUIRED`, task over.
-- Only a NEW user message ("continue PR #4") starts a new task, which may open a
-  fresh `reviewloop_begin` with a fresh 3-round budget.
+Do the current phase, or the whole task when no phases exist. When the current
+scope is ready, call `reviewloop_review({ loopId })`.
 
-## Rules
+- `PHASE_PASS`: current phase passed; task is NOT done. Continue the returned
+  next phase in the same session and same loop. If `finalGatePending` is true,
+  call review again for the final whole-task gate after required final checks.
+- `PASS`: final whole-task gate passed; report completion.
+- `REWORK`: fix the returned findings in this same session, then review again.
+- `HUMAN_REQUIRED`: STOP and report the blocker/findings to the user. Do not
+  open a fresh loop to bypass a spent convergence or safety budget.
+- `WAITING_FOR_REVIEW`: transient; wait for state to settle, then review again.
+- `PUSH_REQUIRED` / `NO_PROGRESS`: change or push real state first.
 
-- In PR mode, push your fix when the user's task authorizes it; ReviewLoop
-  reviews the pushed PR HEAD and never pushes, merges, or force-pushes for you.
-- Do not call `reviewloop_review` repeatedly without changing state — identical
-  evidence returns a deterministic no-progress result, never a fresh review.
-- Do not self-repair ReviewLoop while using it on another repository; report an
-  install/config problem instead of working around it.
-- ReviewLoop never force-pushes, auto-merges, or weakens the objective.
+Do not repeatedly review identical evidence without a real state/scope change.
+
+## Budgets and safety
+
+The deterministic Gate is mechanical and uses zero model tokens. Gate FAIL is
+a repair cycle and does not consume a Reviewer round.
+
+Each phase gate and the final gate gets its own convergence budget (default:
+3 fresh Reviewer rounds). Persistent blockers may invoke Supervisor guidance
+within that gate; failure to converge ends at `HUMAN_REQUIRED`.
+
+Model-spend safety is task-wide and durable. `PHASE_PASS` never resets token/
+cost limits, the Token Sentinel, provider accounting, durable ledgers, the
+original baseline, or the immutable objective. Only a NEW user instruction may
+start a new task and fresh `reviewloop_begin`.
+
+ReviewLoop never force-pushes or auto-merges.

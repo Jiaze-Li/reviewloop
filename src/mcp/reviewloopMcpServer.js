@@ -3,8 +3,8 @@
 // Deliberately TINY agent-facing surface — every exposed tool/schema is
 // always-loaded Worker context. Exactly two normal Worker-facing tools:
 //
-//   reviewloop_begin(goal, cwd, prNumber?)
-//       Register the immutable review objective and capture the baseline
+//   reviewloop_begin(goal, cwd, prNumber?, phases?)
+//       Register the immutable task objective + optional phase plan and capture the baseline
 //       (LOCAL) or bind the exact PR snapshot: repository, prNumber, base SHA,
 //       HEAD SHA (PR). Zero model calls.
 //
@@ -13,8 +13,8 @@
 //       justified) -> convergence policy -> Supervisor (only on non-
 //       convergence). For a PR target the same engine runs over the PR
 //       base -> exact HEAD diff, with a pre-PASS live-HEAD recheck. Returns
-//       PASS | REWORK | HUMAN_REQUIRED | WAITING_FOR_REVIEW | NO_PROGRESS |
-//       PUSH_REQUIRED.
+//       PHASE_PASS | PASS | REWORK | HUMAN_REQUIRED | WAITING_FOR_REVIEW |
+//       NO_PROGRESS | PUSH_REQUIRED. PHASE_PASS is non-terminal; PASS is final.
 //
 // Status / dashboard / stop live on the human `reviewloop` CLI, not here.
 
@@ -67,11 +67,23 @@ export function createReviewLoopMcpServer({
     'reviewloop_begin',
     {
       description:
-        'Register a ReviewLoop session for a non-trivial coding task BEFORE your first edit so the baseline is captured. Pass prNumber to review an open PR instead (PR base -> exact PR HEAD). ReviewLoop does not implement the task — you do, in this session. Returns a loopId. Zero model calls.',
+        'Register one ReviewLoop session for a non-trivial coding task BEFORE your first edit so the baseline is captured. If the task contract has explicit execution phases, pass the frozen phase plan here; do not open a new loop between phases. Pass prNumber to review an open PR instead (PR base -> exact PR HEAD). ReviewLoop does not implement the task — you do, in this session. Returns a loopId. Zero model calls.',
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
         prNumber: z.number().int().optional().describe('PR number — review the PR (base -> exact HEAD) instead of the local worktree'),
+        constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
+        verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
+        blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1 and P2'),
+        maxReviewRounds: z.number().int().positive().optional().describe('maximum fresh Reviewer rounds PER gate (each phase gate and the final gate); defaults to 3'),
+        phases: z.array(z.object({
+          id: z.string().min(1),
+          title: z.string().min(1).optional(),
+          objective: z.string().min(1),
+          exitCriteria: z.array(z.string().min(1)).min(1),
+          carryForwardInvariants: z.array(z.string().min(1)).optional(),
+          verificationCommands: z.array(z.string().min(1)).optional(),
+        })).optional().describe('ordered frozen phase plan from the task contract; omit for ordinary single-gate tasks'),
       },
       outputSchema: {
         loopId: z.string(),
@@ -82,13 +94,29 @@ export function createReviewLoopMcpServer({
         prBaseSha: z.string().nullable().optional(),
         repository: z.string().nullable().optional(),
         reviewer: z.string(),
+        phaseCount: z.number().int().optional(),
+        currentPhase: z.string().optional(),
       },
     },
-    async ({ goal, cwd: reqCwd, prNumber }, extra) => {
+    async ({
+      goal,
+      cwd: reqCwd,
+      prNumber,
+      constraints,
+      verificationCommands,
+      blockingSeverities,
+      maxReviewRounds,
+      phases,
+    }, extra) => {
       const res = await ctl.begin({
         goal,
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
         prNumber: prNumber ?? null,
+        constraints: constraints ?? [],
+        verificationCommands: verificationCommands ?? null,
+        blockingSeverities,
+        maxReviewRounds,
+        phases: phases ?? [],
         signal: extra?.signal,
       });
       const structured = {
@@ -100,6 +128,8 @@ export function createReviewLoopMcpServer({
         prBaseSha: res.prBaseSha ?? null,
         repository: res.repository ?? null,
         reviewer: res.reviewer,
+        phaseCount: res.phaseCount ?? 0,
+        currentPhase: res.currentPhase ?? 'task',
       };
       return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
     },
@@ -109,7 +139,7 @@ export function createReviewLoopMcpServer({
     'reviewloop_review',
     {
       description:
-        'Run one ReviewLoop round for a loopId: deterministic Gate, then independent Reviewer if justified, then convergence policy. PASS -> done. REWORK -> fix the returned findings yourself in THIS session and call again. HUMAN_REQUIRED -> surface the blocker. WAITING_FOR_REVIEW -> transient (loop lease held, or the PR HEAD kept moving); call again once state settles. Blocks locally with zero model tokens while waiting.',
+        'Run one ReviewLoop round for the current gate: deterministic Gate, then independent Reviewer if justified, then convergence policy. PHASE_PASS -> current phase passed; continue the next phase in THIS SAME loop and call again when ready. PASS -> the entire task passed the final gate and is done. REWORK -> fix the returned findings yourself in THIS session and call again. HUMAN_REQUIRED -> stop and surface the blocker. WAITING_FOR_REVIEW -> transient; call again once state settles. The deterministic Gate itself uses zero model tokens.',
       inputSchema: {
         loopId: z.string().min(1).describe('the loopId from reviewloop_begin'),
       },
@@ -117,7 +147,11 @@ export function createReviewLoopMcpServer({
         status: z.string(),
         loopId: z.string(),
         round: z.number().optional(),
+        gateRound: z.number().optional(),
         reason: z.string().nullable().optional(),
+        completedPhase: z.record(z.string(), z.any()).optional(),
+        nextPhase: z.record(z.string(), z.any()).nullable().optional(),
+        finalGatePending: z.boolean().optional(),
         blockingFindings: z.array(z.record(z.string(), z.any())).optional(),
         nonBlockingFindings: z.array(z.record(z.string(), z.any())).optional(),
         supervisorGuidance: z.string().nullable().optional(),

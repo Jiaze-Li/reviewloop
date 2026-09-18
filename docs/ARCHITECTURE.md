@@ -56,6 +56,61 @@ Preserved generic primitives: `ModelSpendAuthority`, `ReservationLedger`,
 evidence collector, normalized review, `baselineDiffGate`,
 `gateFailureIdentity`, process-tree cleanup.
 
+## Phase-aware task lifecycle
+
+A ReviewLoop session may carry an optional frozen ordered phase plan. This does
+**not** add Planner/Executor roles and does not create nested ReviewLoop
+sessions. The invariant is:
+
+```
+one user task
+= one loopId
+= one immutable task objective
+= one original baseline
+= N phase gates + one final whole-task gate
+```
+
+Each phase gate runs the same engine: deterministic Gate (zero model tokens) →
+independent Reviewer → same-session Worker repair → exception-only Supervisor
+on non-convergence. A clean phase returns `PHASE_PASS`, advances the durable
+`currentPhaseIndex`, clears only gate-local convergence state, and returns the
+loop to `READY_FOR_WORK`. It is non-terminal. After the last phase,
+`currentPhaseIndex === phases.length` denotes the final whole-task gate; only
+a clean final gate transitions to terminal `PASS`.
+
+The task-global `round` remains monotonic for audit / operation identity.
+`gateRound` is the convergence counter and resets on PHASE_PASS. Likewise,
+finding-signature history, Supervisor-invoked state and Gate-repair count are
+gate-local. The original baseline, immutable objective, durable spend,
+reservation/information ledgers, provider health/accounting and Token Sentinel
+never reset at a phase boundary.
+
+The optional phase plan is fingerprinted into the immutable
+`ReviewObjective`. Phase ids/order/objectives/exit criteria/invariants may not
+be edited after `reviewloop_begin`. Phase-specific exact verification commands,
+when provided, are frozen in the phase plan and are appended to the ordinary
+deterministic Gate for that phase. They are phase-local: the final whole-task
+gate runs the ordinary frozen global Gate plan, because a later phase may
+legitimately replace an intermediate implementation. Top-level
+`reviewloop_begin.verificationCommands` are the explicit whole-task mechanical
+plan and therefore remain active through the final gate. Requirements that must
+survive later phases belong in carry-forward invariants (Reviewer scope) or that
+global verification plan (mechanical Gate).
+
+A persisted `completedPhases` prefix is not trusted merely because its ids and
+index line up. Every completion carries a chained PHASE_PASS evidence hash bound
+to the immutable objective, exact review-scope fingerprint, deterministic Gate
+fingerprint and Reviewer fingerprint. In PR mode the completion must additionally
+match a durable PHASE_PASS audit record whose exact-HEAD checks succeeded
+(`headStillCurrent` and `gateRanOnReviewedHead`). Missing, fabricated or
+corrupted progression therefore fails closed before the next gate can run.
+
+Reviewer/Supervisor prompts receive an explicit current review scope. During a
+phase they judge only that phase's exit criteria plus global constraints and
+already-established invariants; unfinished later-phase work is not a blocker.
+The final gate judges the cumulative diff against the complete task and all
+phase contracts.
+
 ## One review engine, two targets
 
 There is a single review path. `reviewloop_review` attributes evidence, runs
@@ -556,7 +611,7 @@ either in one bounded call or split into deterministic chunks that are EACH
 reviewed and metered; `PASS` requires every chunk to have been reviewed
 successfully. Evidence too large to chunk within the cap → `REVIEW_TOO_LARGE` →
 `HUMAN_REQUIRED`. Each completed chunk's result is durably checkpointed
-(keyed to `sha(deltaFingerprint :: gateFingerprint)`); a crash mid-round
+(keyed to `sha(deltaFingerprint :: gateFingerprint :: reviewScopeFingerprint)`); a crash mid-round
 resumes at the next unreviewed chunk without re-calling the model for the ones
 already done.
 
@@ -568,7 +623,7 @@ have reached the provider (`RESERVED` / `CANCELLED_PRE_DISPATCH`, or
 `SETTLED_KNOWN` with `settlementReason === PROVEN_PRE_SEND_ZERO` — set from an
 explicit pre-send provenance flag, never inferred from a zero token count); a
 first attempt on already-consumed evidence is denied — so a re-call on an
-identical `(diff+gate)` state across crash/resume yields exactly one physical
+identical `(diff+gate+review-scope)` state across crash/resume yields exactly one physical
 Reviewer dispatch, and a post-send provider error is never a licence to retry.
 `NO NEW INFORMATION → NO NEW MODEL CALL` holds.
 

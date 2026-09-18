@@ -30,7 +30,10 @@ export const TERMINAL_STATES = Object.freeze([
 // error — it re-enters REVIEWING when the external result arrives.
 const TRANSITIONS = Object.freeze({
   READY_FOR_WORK: ['REVIEWING', 'STOPPED', 'FAILED'],
-  REVIEWING: ['PASS', 'REWORK', 'SUPERVISING', 'WAITING_FOR_REVIEW', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED'],
+  // REVIEWING -> READY_FOR_WORK is the non-terminal PHASE_PASS transition:
+  // the current phase gate is certified and the same loop continues with the
+  // next phase (or the final whole-task gate).
+  REVIEWING: ['READY_FOR_WORK', 'PASS', 'REWORK', 'SUPERVISING', 'WAITING_FOR_REVIEW', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED'],
   WAITING_FOR_REVIEW: ['REVIEWING', 'WAITING_FOR_REVIEW', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED'],
   REWORK: ['REVIEWING', 'STOPPED', 'FAILED'],
   SUPERVISING: ['REWORK', 'REVIEWING', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED'],
@@ -60,8 +63,17 @@ export function initialLoopState(objective) {
     loopId: objective.loopId,
     state: REVIEW_LOOP_STATES.READY_FOR_WORK,
     objective,
-    round: 0, // FRESH Reviewer rounds only — a deterministic Gate FAIL never advances this
-    gateRepairCount: 0, // deterministic Gate FAIL -> REWORK cycles (separate from `round`)
+    // Global monotonically-increasing Reviewer round number. It is used for
+    // audit / operation identity and never resets between phases.
+    round: 0,
+    // Convergence is scoped to the CURRENT gate. This resets after PHASE_PASS
+    // so each phase gate (and the final gate) gets its own maxReviewRounds.
+    gateRound: 0,
+    gateRepairCount: 0, // phase/gate-local deterministic Gate FAIL cycles
+    // A non-empty objective.phases plan starts at phase 0. After the last
+    // phase passes, currentPhaseIndex === phases.length means "final gate".
+    currentPhaseIndex: Array.isArray(objective.phases) && objective.phases.length ? 0 : null,
+    completedPhases: [],
     reviewerCalls: 0,
     supervisorCalls: 0,
     // deterministic no-new-information tracking
@@ -69,7 +81,8 @@ export function initialLoopState(objective) {
     lastReviewedPrHead: null,
     lastGateFingerprint: null,
     // convergence tracking
-    findingSignatureHistory: [], // [{ round, signatures: [] }]
+    // Gate-local convergence history. Cleared after PHASE_PASS.
+    findingSignatureHistory: [], // [{ round, gateRound, signatures: [] }]
     supervisorInvoked: false,
     // Set true only when the CONVERGENCE POLICY ends the loop (3 review rounds
     // spent, findings still blocking). Makes HUMAN_REQUIRED truly terminal — a

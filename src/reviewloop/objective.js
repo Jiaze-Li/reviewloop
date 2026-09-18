@@ -48,6 +48,47 @@ function freezeDeep(value) {
   return value;
 }
 
+// Normalize an optional phase plan supplied by the Worker. The plan is frozen
+// into the immutable ReviewObjective so a later review round cannot skip,
+// reorder, weaken, or rewrite phase acceptance boundaries.
+export function normalizePhasePlan(phases = []) {
+  if (phases == null) return [];
+  if (!Array.isArray(phases)) throw new Error('createReviewObjective: phases must be an array');
+
+  const seen = new Set();
+  return phases.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`createReviewObjective: phase ${index + 1} must be an object`);
+    }
+    const id = String(raw.id ?? `phase-${index + 1}`).trim();
+    if (!id) throw new Error(`createReviewObjective: phase ${index + 1} has an empty id`);
+    if (seen.has(id)) throw new Error(`createReviewObjective: duplicate phase id "${id}"`);
+    seen.add(id);
+
+    const objective = String(raw.objective ?? '').trim();
+    if (!objective) throw new Error(`createReviewObjective: phase "${id}" requires an objective`);
+
+    const list = (value) => (Array.isArray(value) ? value : (value == null ? [] : [value]))
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    const exitCriteria = list(raw.exitCriteria);
+    if (!exitCriteria.length) {
+      throw new Error(`createReviewObjective: phase "${id}" requires at least one exit criterion`);
+    }
+
+    return {
+      id,
+      title: String(raw.title ?? id).trim() || id,
+      objective,
+      exitCriteria,
+      carryForwardInvariants: list(raw.carryForwardInvariants),
+      // Only exact executable commands belong here. Descriptive verification
+      // prose stays in the phase objective / exit criteria for the Reviewer.
+      verificationCommands: list(raw.verificationCommands),
+    };
+  });
+}
+
 // Build the immutable objective record. `mode` is LOCAL unless a PR number is
 // supplied. Every mode uses the internal Reviewer pool.
 export function createReviewObjective({
@@ -66,7 +107,11 @@ export function createReviewObjective({
   prBaseSha = null,
   reviewedHeadSha = null,
   constraints = [],
+  phases = [],
   blockingSeverities = DEFAULT_BLOCKING_SEVERITIES,
+  // In phase-aware mode this is the convergence budget PER review gate
+  // (each phase gate and the final whole-task gate), not one budget shared
+  // across the entire task.
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
   verificationPlan = null,
   baselineGateEvidence = null,
@@ -92,6 +137,7 @@ export function createReviewObjective({
   const rounds = Number.isInteger(maxReviewRounds) && maxReviewRounds > 0
     ? maxReviewRounds
     : DEFAULT_MAX_REVIEW_ROUNDS;
+  const normalizedPhases = normalizePhasePlan(phases);
 
   const objective = {
     loopId: String(loopId),
@@ -114,6 +160,7 @@ export function createReviewObjective({
       ? (reviewedHeadSha ?? prHead ?? null)
       : null,
     constraints: normalizedConstraints,
+    phases: normalizedPhases,
     blockingSeverities: blocking,
     maxReviewRounds: rounds,
     // The deterministic Gate's verification plan, FROZEN at reviewloop_begin.
@@ -154,6 +201,9 @@ function fingerprintFields(o) {
     blockingSeverities: o.blockingSeverities ?? [],
     maxReviewRounds: o.maxReviewRounds,
   };
+  // Backward compatibility: legacy objectives had no phase plan, so an empty
+  // plan is intentionally omitted from the fingerprint.
+  if (Array.isArray(o.phases) && o.phases.length) base.phases = o.phases;
   if (o.verificationPlan) base.verificationPlan = o.verificationPlan;
   // PR target identity — load-bearing for "which PR snapshot is under review".
   // Only folded in when present, so a LOCAL / pre-existing objective keeps its
@@ -248,6 +298,9 @@ export function assertObjectiveNotWeakened(original, candidate) {
   const candConstraints = new Set(candidate.constraints ?? []);
   for (const c of original.constraints ?? []) {
     if (!candConstraints.has(c)) problems.push(`constraint dropped: ${c}`);
+  }
+  if (JSON.stringify(candidate.phases ?? []) !== JSON.stringify(original.phases ?? [])) {
+    problems.push('phase plan changed');
   }
   if (original.verificationPlan) {
     if (!candidate.verificationPlan) {

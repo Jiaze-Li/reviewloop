@@ -84,6 +84,176 @@ function sha256Hex(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
 }
 
+function phasesOf(objective) {
+  return Array.isArray(objective?.phases) ? objective.phases : [];
+}
+
+function currentReviewScope(loopState, objective = loopState?.objective) {
+  const phases = phasesOf(objective);
+  if (!phases.length) {
+    // Empty fingerprint preserves pre-phase no-new-information/checkpoint
+    // identities for ordinary tasks across an upgrade.
+    return { type: 'task', id: 'task', title: 'Full task', fingerprint: '' };
+  }
+
+  const rawIndex = Number.isInteger(loopState?.currentPhaseIndex) ? loopState.currentPhaseIndex : 0;
+  const index = Math.max(0, Math.min(rawIndex, phases.length));
+  if (index < phases.length) {
+    const phase = phases[index];
+    const preserveInvariants = phases
+      .slice(0, index)
+      .flatMap((p) => p.carryForwardInvariants ?? []);
+    const scope = {
+      type: 'phase',
+      id: phase.id,
+      title: phase.title,
+      objective: phase.objective,
+      exitCriteria: phase.exitCriteria ?? [],
+      carryForwardInvariants: phase.carryForwardInvariants ?? [],
+      preserveInvariants,
+      verificationCommands: phase.verificationCommands ?? [],
+      phaseIndex: index,
+      phaseCount: phases.length,
+    };
+    return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
+  }
+
+  const scope = {
+    type: 'final',
+    id: 'final',
+    title: 'Final whole-task gate',
+    completedPhaseSummaries: phases.map((p) => ({
+      id: p.id,
+      title: p.title,
+      objective: p.objective,
+      exitCriteria: p.exitCriteria ?? [],
+      carryForwardInvariants: p.carryForwardInvariants ?? [],
+      verificationCommands: p.verificationCommands ?? [],
+    })),
+    phaseCount: phases.length,
+    // Phase-local verification may certify an intermediate implementation
+    // that a later phase intentionally replaces. The final Gate therefore runs
+    // the frozen whole-task/global verification plan only. Lasting semantics
+    // belong in carry-forward invariants or global verification.
+    verificationCommands: [],
+  };
+  return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
+}
+
+function scopeBoundFingerprint(parts, reviewScope) {
+  const base = parts.map((v) => String(v ?? '')).join('::');
+  return sha256Hex(reviewScope?.fingerprint ? `${base}::${reviewScope.fingerprint}` : base);
+}
+
+function phaseCompletionEvidenceHash(entry) {
+  return sha256Hex(JSON.stringify({
+    id: entry.id,
+    title: entry.title,
+    phaseIndex: entry.phaseIndex,
+    completedAt: entry.completedAt,
+    round: entry.round,
+    head: entry.head ?? null,
+    reviewScopeFingerprint: entry.reviewScopeFingerprint,
+    gateFingerprint: entry.gateFingerprint,
+    reviewFingerprint: entry.reviewFingerprint,
+    previousProof: entry.previousProof,
+    auditTargetFingerprint: entry.auditTargetFingerprint ?? null,
+  }));
+}
+
+function phaseCompletionRoot(objective) {
+  return `objective:${objective?.fingerprint ?? 'missing'}`;
+}
+
+function assertPhaseProgressionValid(loopState, objective = loopState?.objective) {
+  const phases = phasesOf(objective);
+  const completed = Array.isArray(loopState?.completedPhases) ? loopState.completedPhases : [];
+
+  if (!phases.length) {
+    // Legacy/no-phase loops may predate these fields entirely.
+    if (completed.length) throw new Error('ReviewLoop phase progression invalid: no phase plan but completed phases are present');
+    return true;
+  }
+
+  const index = loopState?.currentPhaseIndex;
+  if (!Number.isInteger(index) || index < 0 || index > phases.length) {
+    throw new Error(`ReviewLoop phase progression invalid: currentPhaseIndex ${JSON.stringify(index)} is outside 0..${phases.length}`);
+  }
+  if (completed.length !== index) {
+    throw new Error(
+      `ReviewLoop phase progression invalid: completedPhases length ${completed.length} does not match currentPhaseIndex ${index}`,
+    );
+  }
+  let previousProof = phaseCompletionRoot(objective);
+  for (let i = 0; i < completed.length; i += 1) {
+    const entry = completed[i];
+    const phase = phases[i];
+    if (entry?.id !== phase?.id) {
+      throw new Error(
+        `ReviewLoop phase progression invalid: completed phase ${i} is ${JSON.stringify(entry?.id)}; expected ${JSON.stringify(phase?.id)}`,
+      );
+    }
+
+    const expectedScope = currentReviewScope({ currentPhaseIndex: i }, objective);
+    const structurallyValid = entry?.title === phase.title
+      && entry?.phaseIndex === i
+      && Number.isInteger(entry?.round) && entry.round > 0
+      && typeof entry?.completedAt === 'string' && Boolean(entry.completedAt)
+      && entry?.reviewScopeFingerprint === expectedScope.fingerprint
+      && typeof entry?.gateFingerprint === 'string' && Boolean(entry.gateFingerprint)
+      && typeof entry?.reviewFingerprint === 'string' && Boolean(entry.reviewFingerprint)
+      && entry?.previousProof === previousProof
+      && typeof entry?.proof === 'string' && entry.proof === phaseCompletionEvidenceHash(entry);
+    if (!structurallyValid) {
+      throw new Error(
+        `ReviewLoop phase progression invalid: completed phase ${JSON.stringify(phase.id)} has no valid PHASE_PASS completion evidence`,
+      );
+    }
+
+    if (objective?.mode === REVIEW_MODES.PR) {
+      const matchingAudit = (loopState?.audit ?? []).find((record) =>
+        record?.result === 'PHASE_PASS'
+        && record?.round === entry.round
+        && record?.reviewScope?.id === phase.id
+        && record?.reviewScope?.fingerprint === entry.reviewScopeFingerprint
+        && record?.gate?.fingerprint === entry.gateFingerprint
+        && record?.review?.reviewedFingerprint === entry.reviewFingerprint
+        && record?.targetFingerprint === entry.auditTargetFingerprint
+        && record?.target?.reviewedHeadSha === entry.head
+        && record?.target?.finalObservedHeadSha === entry.head
+        && record?.target?.headStillCurrent === true
+        && record?.target?.gateRanOnReviewedHead === true
+        && record?.convergence?.verdict === REVIEW_VERDICTS.PASS
+      );
+      if (!matchingAudit) {
+        throw new Error(
+          `ReviewLoop phase progression invalid: completed PR phase ${JSON.stringify(phase.id)} is not bound to a successful exact-HEAD PHASE_PASS audit record`,
+        );
+      }
+    }
+
+    previousProof = entry.proof;
+  }
+  if (loopState?.state === REVIEW_LOOP_STATES.PASS && index !== phases.length) {
+    throw new Error('ReviewLoop phase progression invalid: terminal PASS recorded before every frozen phase completed');
+  }
+  return true;
+}
+
+function reviewGateCount(objective) {
+  const n = phasesOf(objective).length;
+  return n ? n + 1 : 1; // one gate per phase + one final whole-task gate
+}
+
+function mergeScopedGateCommands(commands, reviewScope) {
+  const base = Array.isArray(commands) ? commands : [];
+  const scoped = (reviewScope?.type === 'phase' || reviewScope?.type === 'final')
+    && Array.isArray(reviewScope.verificationCommands)
+    ? reviewScope.verificationCommands
+    : [];
+  return [...new Set([...base, ...scoped].map(String).filter(Boolean))];
+}
+
 function compactBaselineSummary(baseline) {
   return {
     head: baseline.head,
@@ -205,7 +375,7 @@ export function createReviewLoopController({
   async function begin({
     goal, cwd, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
-    constraints = [], signal = null,
+    constraints = [], phases = [], signal = null,
   } = {}) {
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
@@ -343,7 +513,7 @@ export function createReviewLoopController({
     const objective = createReviewObjective({
       loopId, goal, repository, mode, prNumber, reviewer, baseline, prHead,
       prBaseSha, reviewedHeadSha: prHead,
-      constraints, blockingSeverities, maxReviewRounds: resolvedMaxRounds,
+      constraints, phases, blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       verificationPlan,
       baselineGateEvidence: baselineGate,
     });
@@ -364,6 +534,8 @@ export function createReviewLoopController({
       prBaseSha: prBaseSha ?? null,
       repository: repository.name ?? null,
       reviewer: objective.reviewer,
+      phaseCount: phasesOf(objective).length,
+      currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
     };
   }
@@ -375,13 +547,91 @@ export function createReviewLoopController({
     const objective = rehydrateObjective(raw.objective);
     assertObjectiveNotWeakened(objective, raw.objective);
     raw.objective = objective;
+    assertPhaseProgressionValid(raw, objective);
     return raw;
   }
 
-  function spendFor(loopId) {
+  function spendFor(loopId, objective = null) {
     return createReviewLoopSpend({
-      loopId, persistence, env, onEvent, recordSafetyEvent: collectSafetyEvent,
+      loopId,
+      persistence,
+      env,
+      gateCount: reviewGateCount(objective),
+      onEvent,
+      recordSafetyEvent: collectSafetyEvent,
     });
+  }
+
+  function completeCurrentPhase(
+    loopState,
+    review,
+    telemetry,
+    { head = null, gate = null, reviewScope = null, auditRecord = null } = {},
+  ) {
+    const scope = reviewScope ?? currentReviewScope(loopState);
+    if (scope.type !== 'phase') return null;
+
+    const previous = (loopState.completedPhases ?? []).slice(-1)[0];
+    const completion = {
+      id: scope.id,
+      title: scope.title,
+      phaseIndex: scope.phaseIndex,
+      completedAt: new Date(clock()).toISOString(),
+      round: loopState.round,
+      head,
+      reviewScopeFingerprint: scope.fingerprint,
+      gateFingerprint: gate?.fingerprint ?? loopState.lastGateFingerprint ?? null,
+      reviewFingerprint: review?.reviewedFingerprint ?? loopState.lastReviewedFingerprint ?? null,
+      previousProof: previous?.proof ?? phaseCompletionRoot(loopState.objective),
+      auditTargetFingerprint: auditRecord?.targetFingerprint ?? null,
+    };
+    completion.proof = phaseCompletionEvidenceHash(completion);
+
+    loopState.completedPhases = [
+      ...(loopState.completedPhases ?? []),
+      completion,
+    ];
+    loopState.currentPhaseIndex = scope.phaseIndex + 1;
+
+    // Reset only gate-local convergence/no-progress state. Task-wide audit,
+    // provider spend, token sentinel, baseline and objective stay intact.
+    loopState.gateRound = 0;
+    loopState.gateRepairCount = 0;
+    loopState.findingSignatureHistory = [];
+    loopState.supervisorInvoked = false;
+    loopState.lastSupervisorGuidance = null;
+    loopState.lastReviewedFingerprint = null;
+    loopState.lastReviewedPrHead = null;
+    loopState.lastGateFingerprint = null;
+    loopState.lastReview = null;
+    loopState.chunkReviewCheckpoint = null;
+
+    const nextScope = currentReviewScope(loopState);
+    recordTransition(
+      loopState,
+      REVIEW_LOOP_STATES.READY_FOR_WORK,
+      `phase ${scope.id} passed; continue to ${nextScope.type === 'final' ? 'final whole-task gate' : `phase ${nextScope.id}`}`,
+    );
+
+    return {
+      status: 'PHASE_PASS',
+      loopId: loopState.loopId,
+      round: loopState.round,
+      gateRound: 0,
+      completedPhase: { id: scope.id, title: scope.title, index: scope.phaseIndex },
+      nextPhase: nextScope.type === 'phase'
+        ? { id: nextScope.id, title: nextScope.title, index: nextScope.phaseIndex }
+        : null,
+      finalGatePending: nextScope.type === 'final',
+      reviewer: review?.reviewer ?? null,
+      nonBlockingFindings: review?.nonBlockingFindings ?? [],
+      nonBlockingOmitted: review?.nonBlockingOmitted ?? 0,
+      nextAction: nextScope.type === 'final'
+        ? 'All implementation phases passed. Do not report task completion yet; call reviewloop_review again for the final whole-task gate.'
+        : `Continue with ${nextScope.id}${nextScope.title ? ` (${nextScope.title}` + ')' : ''}; when that phase is ready, call reviewloop_review again. Do not start a new ReviewLoop.`,
+      telemetry: telemetry ?? emptyTelemetry(),
+      safetyEvents,
+    };
   }
 
   // One metered provider call with bounded failover. Each physical attempt
@@ -541,13 +791,10 @@ export function createReviewLoopController({
     const loopState = await loadLoop(loopId);
     const objective = loopState.objective;
 
-    // One user instruction buys ONE ReviewLoop execution budget (default 3
-    // review rounds). When the CONVERGENCE POLICY gives up — 3 rounds spent,
-    // findings still blocking — the loop is DONE: `budgetExhausted` is set and a
-    // further reviewloop_review returns the terminal result, never re-enters.
-    // Only a new user message (a brand-new reviewloop_begin) starts a fresh
-    // budget. A HUMAN_REQUIRED from a transient failure (a chunk-review crash, a
-    // provider blip) is NOT budget-exhausted and stays resumable.
+    // Each review GATE gets its own convergence budget (default 3 Reviewer
+    // rounds). A phase PHASE_PASS resets gate-local convergence state and keeps
+    // the same loop/baseline/task-wide token budget. If any gate exhausts its
+    // convergence budget, the whole task stops at HUMAN_REQUIRED.
     if (isTerminal(loopState.state)
       && (loopState.state !== REVIEW_LOOP_STATES.HUMAN_REQUIRED || loopState.budgetExhausted)) {
       return terminalResult(loopState);
@@ -559,7 +806,7 @@ export function createReviewLoopController({
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
   async function runReviewerOverEvidence({
-    spend, loopState, objective, delta, gate, signal,
+    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective), signal,
   }) {
     // Every PHYSICAL Reviewer attempt for this call — one entry per failover
     // retry AND per chunk, success or failure. Never collapsed into a single
@@ -588,7 +835,8 @@ export function createReviewLoopController({
         return durable.length ? durable : inMemory;
       } catch { return inMemory; }
     };
-    // Round is bound to the LOGICAL review state (delta + gate fingerprint),
+    // Global round + gateRound are bound to the LOGICAL review state
+    // (delta + gate fingerprint + review-scope fingerprint),
     // NOT to how many times reviewloop_review was invoked. A crash/resume that
     // re-enters with the SAME logical review state — its durable per-chunk
     // checkpoint is still on record — reuses the round it already assigned and
@@ -623,15 +871,31 @@ export function createReviewLoopController({
     // reconsider new evidence, only re-chunked old evidence. `deltaGateKey` is
     // tracked separately from the layout-inclusive `checkpointKey` so round
     // reuse survives a re-chunk.
-    const deltaGateKey = sha256Hex(`${delta.fingerprint}::${gate.fingerprint}`);
+    const deltaGateKey = scopeBoundFingerprint(
+      [delta.fingerprint, gate.fingerprint],
+      reviewScope,
+    );
     const chunkLayoutHash = sha256Hex(`${chunks.length}::${chunks.map((c) => c.hash).join('::')}`);
     const checkpointKey = sha256Hex(`${deltaGateKey}::${chunkLayoutHash}`);
     const resumeCheckpoint = loopState.chunkReviewCheckpoint;
     if (resumeCheckpoint && resumeCheckpoint.deltaGateKey === deltaGateKey
       && Number.isInteger(resumeCheckpoint.round)) {
       loopState.round = resumeCheckpoint.round;
+      // Backward compatibility: persisted loops/checkpoints from before
+      // gate-local convergence existed have only the task-global round. For a
+      // no-phase legacy loop that round WAS the convergence budget, so migrate
+      // it forward instead of silently resetting paid-review allowance.
+      loopState.gateRound = Number.isInteger(resumeCheckpoint.gateRound)
+        ? resumeCheckpoint.gateRound
+        : (Number.isInteger(loopState.gateRound)
+          ? loopState.gateRound
+          : resumeCheckpoint.round);
     } else {
+      const priorGateRound = Number.isInteger(loopState.gateRound)
+        ? loopState.gateRound
+        : loopState.round;
       loopState.round += 1;
+      loopState.gateRound = priorGateRound + 1;
     }
 
     // Durable per-chunk checkpoint. Keyed to the exact review state INCLUDING
@@ -644,7 +908,13 @@ export function createReviewLoopController({
     let checkpoint = loopState.chunkReviewCheckpoint;
     if (!checkpoint || checkpoint.key !== checkpointKey || checkpoint.chunkTotal !== chunks.length) {
       checkpoint = {
-        key: checkpointKey, deltaGateKey, chunkTotal: chunks.length, chunks: {}, round: loopState.round,
+        key: checkpointKey,
+        deltaGateKey,
+        chunkTotal: chunks.length,
+        chunks: {},
+        round: loopState.round,
+        gateRound: loopState.gateRound,
+        reviewScopeFingerprint: reviewScope.fingerprint,
       };
       loopState.chunkReviewCheckpoint = checkpoint;
     } else if (!Number.isInteger(checkpoint.round)) {
@@ -688,7 +958,9 @@ export function createReviewLoopController({
       // included). Multiple evidenceIds no longer multiply dispatch eligibility.
       // eslint-disable-next-line no-await-in-loop
       const reviewStateEvidence = await spend.registerEvidence({
-        kind: 'reviewstate', taskId: chunkId, diffHash: sha256Hex(`${chunk.hash}::${gate.fingerprint}`),
+        kind: 'reviewstate',
+        taskId: chunkId,
+        diffHash: scopeBoundFingerprint([chunk.hash, gate.fingerprint], reviewScope),
       });
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
@@ -713,6 +985,7 @@ export function createReviewLoopController({
           diff: chunk.text,
           changedFiles: delta.changedFiles,
           gate,
+          reviewScope,
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
@@ -780,6 +1053,7 @@ export function createReviewLoopController({
   // ---- LOCAL mode --------------------------------------------------------
   async function reviewLocal({ loopState, signal }) {
     const objective = loopState.objective;
+    const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
     const baseline = objective.baseline;
 
@@ -866,6 +1140,11 @@ export function createReviewLoopController({
       gateCommands = discovered.commands;
       commandSource = discovered.source;
     }
+    const baseGateCommandCount = gateCommands?.length ?? 0;
+    gateCommands = mergeScopedGateCommands(gateCommands, reviewScope);
+    if (gateCommands.length > baseGateCommandCount) {
+      commandSource = `${commandSource} + frozen ${reviewScope.id} verification`;
+    }
     // The baseline Gate evidence can downgrade a review-time FAIL to WARN by
     // treating shared failures as pre-existing. It lives in workflow.json,
     // OUTSIDE the tamper-checked objective — so a state editor could inject the
@@ -897,6 +1176,7 @@ export function createReviewLoopController({
       baselineGateEvidence: trustedBaselineGateEvidence,
     });
     gate.commandSource = commandSource;
+    gate.executedCommands = [...gateCommands];
 
     // The review-time Gate may itself have mutated tracked files (a formatter, a
     // snapshot writer, a codegen step). The delta was collected BEFORE it ran,
@@ -997,6 +1277,7 @@ export function createReviewLoopController({
           baselineGateEvidence: trustedBaselineGateEvidence,
         });
         gate.commandSource = commandSource;
+        gate.executedCommands = [...gateCommands];
         if (signal?.aborted || gate.verdict === GATE_VERDICTS.FAIL) break; // handled downstream
 
         // eslint-disable-next-line no-await-in-loop
@@ -1021,7 +1302,11 @@ export function createReviewLoopController({
       };
     }
 
-    const fp = reviewFingerprint({ deltaFingerprint: delta.fingerprint, gateFingerprint: gate.fingerprint });
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+    });
 
     if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
       await saveLoop(loopState);
@@ -1054,7 +1339,7 @@ export function createReviewLoopController({
       };
     }
 
-    const spend = spendFor(loopState.loopId);
+    const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
     // review never consumes an extra round.
@@ -1062,7 +1347,7 @@ export function createReviewLoopController({
     let reviewOut;
     try {
       reviewOut = await runReviewerOverEvidence({
-        spend, loopState, objective, delta, gate, signal,
+        spend, loopState, objective, delta, gate, reviewScope, signal,
       });
     } catch (err) {
       if (err instanceof LeaseLostError) throw err; // read-only exit in review()
@@ -1093,13 +1378,13 @@ export function createReviewLoopController({
     const decision = decideConvergence({ loopState, review });
     loopState.findingSignatureHistory = [
       ...(loopState.findingSignatureHistory ?? []),
-      { round: loopState.round, signatures: review.findingSignatures },
+      { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
     ];
 
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
       const sup = await runSupervisor({
-        spend, loopState, objective, review, gate, signal,
+        spend, loopState, objective, review, gate, reviewScope, signal,
       });
       if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
       const outcome = await applySupervisorOutcome({
@@ -1110,9 +1395,15 @@ export function createReviewLoopController({
     }
 
     if (decision.verdict === REVIEW_VERDICTS.PASS) {
+      const telemetry = await spend.telemetry();
+      const phaseResult = completeCurrentPhase(loopState, review, telemetry, { gate, reviewScope });
+      if (phaseResult) {
+        await saveLoop(loopState);
+        return phaseResult;
+      }
       recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
       await saveLoop(loopState);
-      return passResult(loopState, review, await spend.telemetry());
+      return passResult(loopState, review, telemetry);
     }
     if (decision.verdict === REVIEW_VERDICTS.HUMAN_REQUIRED) {
       loopState.budgetExhausted = true; // 3 rounds spent, still blocking — terminal
@@ -1144,14 +1435,16 @@ export function createReviewLoopController({
   // Supervisor, exception-only. Returns { guidance } | { humanRequired, reason }
   // | { denied, error }.
   async function runSupervisor({
-    spend, loopState, objective, review, gate, signal,
+    spend, loopState, objective, review, gate, reviewScope = currentReviewScope(loopState, objective), signal,
   }) {
     const physicalCalls = [];
     if (signal?.aborted) {
       return { humanRequired: true, reason: 'the review was cancelled by the caller before the Supervisor ran', physicalCalls };
     }
     const findingsEvidence = await spend.registerEvidence({
-      kind: 'findings', taskId: loopState.loopId, signature: review.findingSignatures.join('|') || 'none',
+      kind: 'findings',
+      taskId: `${loopState.loopId}:${reviewScope.id}`,
+      signature: review.findingSignatures.join('|') || 'none',
     });
     let raw;
     try {
@@ -1161,7 +1454,7 @@ export function createReviewLoopController({
         routeFn: routeSupervisorFn,
         defaultFamily: 'agy:gemini-supervisor',
         defaultProvider: 'agy',
-        operationId: `${loopState.loopId}:supervise`,
+        operationId: `${loopState.loopId}:supervise:${reviewScope.id}:round-${loopState.round}`,
         workflowId: loopState.loopId,
         evidenceIds: [findingsEvidence.evidenceId],
         auditContext: { round: loopState.round, chunkIndex: null, chunkTotal: null },
@@ -1173,7 +1466,7 @@ export function createReviewLoopController({
         invoke: ({
           selection, attempt, family, provider,
         }) => Promise.resolve(supervisorFn({
-          objective, blockingFindings: review.blockingFindings, gate,
+          objective, blockingFindings: review.blockingFindings, gate, reviewScope,
           round: loopState.round, priorSignatures: loopState.findingSignatureHistory, selection, signal,
         })).then((out) => {
           physicalCalls.push({
@@ -1291,6 +1584,7 @@ export function createReviewLoopController({
     loopState, objective, delta, gate, review, decision, telemetry,
     observedHeadSha, finalObservedHeadSha, headStillCurrent, result,
     supervisorPhysicalCalls = [],
+    reviewScope = currentReviewScope(loopState, objective),
   }) {
     const target = {
       type: 'PR',
@@ -1319,6 +1613,11 @@ export function createReviewLoopController({
         baseSha: target.baseSha,
         reviewedHeadSha: target.reviewedHeadSha,
       })),
+      reviewScope: {
+        type: reviewScope?.type ?? 'task',
+        id: reviewScope?.id ?? 'task',
+        fingerprint: reviewScope?.fingerprint ?? null,
+      },
       objective: {
         goal: objective.goal,
         constraints: objective.constraints ?? [],
@@ -1327,7 +1626,7 @@ export function createReviewLoopController({
         fingerprint: objective.fingerprint,
       },
       gate: gate ? {
-        commands: objective.verificationPlan?.commands ?? [],
+        commands: gate.executedCommands ?? objective.verificationPlan?.commands ?? [],
         commandSource: gate.commandSource ?? null,
         fingerprint: gate.fingerprint ?? null,
         verdict: gate.verdict ?? null,
@@ -1336,6 +1635,8 @@ export function createReviewLoopController({
         // Logical pool identity — the Worker-facing abstraction never changes.
         reviewer: 'internal pool',
         status: review.status,
+        reviewedFingerprint: review.reviewedFingerprint ?? null,
+        reviewedHead: review.reviewedHead ?? null,
         blockingFindings: review.blockingFindings?.length ?? 0,
         findingSignatures: review.findingSignatures ?? [],
         // Every PHYSICAL Reviewer attempt bound to this exact reviewedHeadSha:
@@ -1396,6 +1697,7 @@ export function createReviewLoopController({
     await saveLoop(loopState);
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
+      gateRound: loopState.gateRound ?? loopState.round,
       reason,
       blockingFindings: loopState.lastReview?.blockingFindings ?? [],
       telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
@@ -1460,6 +1762,12 @@ export function createReviewLoopController({
         gateCommands = discovered.commands;
         commandSource = discovered.source;
       }
+      const prReviewScope = currentReviewScope(loopState, objective);
+      const baseGateCommandCount = gateCommands?.length ?? 0;
+      gateCommands = mergeScopedGateCommands(gateCommands, prReviewScope);
+      if (gateCommands.length > baseGateCommandCount) {
+        commandSource = `${commandSource} + frozen ${prReviewScope.id} verification`;
+      }
 
       // Capture the exact worktree state BEFORE the Gate runs. PR evidence
       // must correspond to the exact commit already pushed — unlike LOCAL,
@@ -1476,6 +1784,7 @@ export function createReviewLoopController({
         cwd: worktreeDir, commands: gateCommands, runner: gateRunner, env, signal,
       });
       gate.commandSource = commandSource;
+      gate.executedCommands = [...gateCommands];
 
       const postGateState = await captureWorktreeSnapshotFn({ worktreeDir });
       if (!postGateState.ok) {
@@ -1504,6 +1813,7 @@ export function createReviewLoopController({
 
   async function reviewPr({ loopState, signal }) {
     const objective = loopState.objective;
+    const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
     const prNumber = objective.prNumber;
     const MAX_HEAD_REBIND = 4;
@@ -1612,7 +1922,11 @@ export function createReviewLoopController({
         return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
       }
 
-      const fp = reviewFingerprint({ deltaFingerprint: delta.fingerprint, gateFingerprint: gate.fingerprint });
+      const fp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+      });
       if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
         await saveLoop(loopState);
         return {
@@ -1639,10 +1953,12 @@ export function createReviewLoopController({
         };
       }
 
-      const spend = spendFor(loopState.loopId);
+      const spend = spendFor(loopState.loopId, objective);
       let reviewOut;
       try {
-        reviewOut = await runReviewerOverEvidence({ spend, loopState, objective, delta, gate, signal });
+        reviewOut = await runReviewerOverEvidence({
+          spend, loopState, objective, delta, gate, reviewScope, signal,
+        });
       } catch (err) {
         if (err instanceof LeaseLostError) throw err;
         return spendDenialResult(loopState, err, await spend.telemetry());
@@ -1669,13 +1985,15 @@ export function createReviewLoopController({
       const decision = decideConvergence({ loopState, review });
       loopState.findingSignatureHistory = [
         ...(loopState.findingSignatureHistory ?? []),
-        { round: loopState.round, signatures: review.findingSignatures },
+        { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
       ];
 
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];
       if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
-        const sup = await runSupervisor({ spend, loopState, objective, review, gate, signal });
+        const sup = await runSupervisor({
+          spend, loopState, objective, review, gate, reviewScope, signal,
+        });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
         const outcome = await applySupervisorOutcome({
@@ -1722,11 +2040,23 @@ export function createReviewLoopController({
         if (invariantFailure) {
           return prHumanRequired(loopState, `PR PASS invariant not satisfied: ${invariantFailure}`);
         }
-        appendAuditRecord({
+        const isPhasePass = reviewScope.type === 'phase';
+        const passAuditRecord = appendAuditRecord({
           loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
           observedHeadSha: observedHead, finalObservedHeadSha: finalHead,
-          headStillCurrent: true, result: 'PASS',
+          headStillCurrent: true, result: isPhasePass ? 'PHASE_PASS' : 'PASS',
+          reviewScope,
         });
+        if (isPhasePass) {
+          const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
+            head: observedHead,
+            gate,
+            reviewScope,
+            auditRecord: passAuditRecord,
+          });
+          await saveLoop(loopState);
+          return phaseResult;
+        }
         recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
         await saveLoop(loopState);
         await maybePublishPrResult({
@@ -1781,7 +2111,8 @@ export function createReviewLoopController({
   // ---- result shaping ------------------------------------------------
   function passResult(loopState, review, telemetry) {
     return {
-      status: 'PASS', loopId: loopState.loopId, round: loopState.round, reviewer: review.reviewer,
+      status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
+      reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
       telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
     };
@@ -1790,6 +2121,7 @@ export function createReviewLoopController({
     const budgetExhausted = loopState.budgetExhausted === true;
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
+      gateRound: loopState.gateRound ?? loopState.round,
       // This HUMAN_REQUIRED is TERMINAL — the loop's review-round budget is
       // spent. The Worker must report to the user and stop: not another
       // reviewloop_review on this loop, not a fresh reviewloop_begin in the

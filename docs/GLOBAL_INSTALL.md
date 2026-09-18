@@ -1,5 +1,15 @@
 # ReviewLoop global install
 
+After cloning/pulling the repository, the recommended one-command setup is:
+
+```
+npm run setup
+```
+
+It refreshes the global integration and immediately runs the zero-model doctor.
+
+The individual commands remain available:
+
 ```
 npm run install-global      # or: reviewloop install
 npm run doctor

@@ -476,19 +476,63 @@ export function createReviewLoopProviderPool({
 // prefers routeReviewerFn/routeSupervisorFn so it can bind the real selected
 // family into the CallIntent and drive bounded failover.
 
+function reviewScopePromptLines(reviewScope) {
+  if (!reviewScope || reviewScope.type === 'task') return [];
+  if (reviewScope.type === 'phase') {
+    const lines = [
+      `CURRENT REVIEW SCOPE: PHASE ${reviewScope.id}${reviewScope.title ? ` — ${reviewScope.title}` : ''}`,
+      `PHASE OBJECTIVE: ${reviewScope.objective}`,
+      'PHASE EXIT CRITERIA:',
+      ...(reviewScope.exitCriteria ?? []).map((v) => `- ${v}`),
+    ];
+    if ((reviewScope.preserveInvariants ?? []).length) {
+      lines.push('INVARIANTS FROM COMPLETED PHASES THAT MUST REMAIN TRUE:');
+      lines.push(...reviewScope.preserveInvariants.map((v) => `- ${v}`));
+    }
+    if ((reviewScope.carryForwardInvariants ?? []).length) {
+      lines.push('INVARIANTS THIS PHASE MUST ESTABLISH FOR LATER PHASES:');
+      lines.push(...reviewScope.carryForwardInvariants.map((v) => `- ${v}`));
+    }
+    lines.push(
+      'Judge this phase only. Do NOT block it merely because work explicitly assigned to a later phase is not implemented yet.',
+      'Global task constraints still apply, and already-passed phase invariants must not regress.',
+    );
+    return lines;
+  }
+  if (reviewScope.type === 'final') {
+    const lines = [
+      'CURRENT REVIEW SCOPE: FINAL WHOLE-TASK GATE',
+      'All implementation phases have individually passed. Now judge the cumulative diff against the complete original task.',
+    ];
+    if ((reviewScope.completedPhaseSummaries ?? []).length) {
+      lines.push('PHASE CONTRACTS THAT MUST ALL STILL HOLD:');
+      for (const p of reviewScope.completedPhaseSummaries) {
+        lines.push(`- ${p.id}${p.title ? ` (${p.title})` : ''}: ${p.objective}`);
+        lines.push(...(p.exitCriteria ?? []).map((v) => `  - ${v}`));
+        lines.push(...(p.carryForwardInvariants ?? []).map((v) => `  - invariant: ${v}`));
+      }
+    }
+    return lines;
+  }
+  return [];
+}
+
 function buildReviewerInvoke() {
-  return async ({ objective, diff, changedFiles, gate, transport, model, signal }) => {
+  return async ({
+    objective, diff, changedFiles, gate, reviewScope = null, transport, model, signal,
+  }) => {
     const prompt = [
-      'You are an INDEPENDENT code reviewer. Judge ONLY against the original objective.',
-      `ORIGINAL OBJECTIVE: ${objective.goal}`,
-      objective.constraints?.length ? `CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
+      'You are an INDEPENDENT code reviewer.',
+      `ORIGINAL TASK: ${objective.goal}`,
+      objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
+      ...reviewScopePromptLines(reviewScope),
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
       '',
       'Return JSON: {"findings":[{"severity":"P1|P2|P3","file":"","line":0,"title":""}]}.',
-      'P1/P2 block completion. P3 does not.',
+      'P1/P2 block the CURRENT review scope. P3 does not.',
     ].filter(Boolean).join('\n');
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
@@ -508,12 +552,16 @@ function buildReviewerInvoke() {
 }
 
 function buildSupervisorInvoke() {
-  return async ({ objective, blockingFindings, transport, model, signal }) => {
+  return async ({
+    objective, blockingFindings, reviewScope = null, transport, model, signal,
+  }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
-      `ORIGINAL OBJECTIVE: ${objective.goal}`,
+      `ORIGINAL TASK: ${objective.goal}`,
+      ...reviewScopePromptLines(reviewScope),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
-      'Give concise repair guidance for the Worker, or recommend HUMAN_REQUIRED.',
+      'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
+      'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
       'Return JSON: {"guidance":"","recommendation":"REWORK|HUMAN_REQUIRED"}.',
     ].join('\n');
     const res = await transport(prompt, { signal });

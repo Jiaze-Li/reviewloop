@@ -34,14 +34,60 @@ The Worker calls two MCP tools:
 
 | tool | when | cost |
 |---|---|---|
-| `reviewloop_begin({ goal, cwd, prNumber?, reviewer? })` | before the first edit | 0 model calls |
-| `reviewloop_review({ loopId })` | when the implementation is ready | Gate (0) + Reviewer if justified |
+| `reviewloop_begin({ goal, cwd, prNumber?, constraints?, phases?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
+| `reviewloop_review({ loopId })` | when the current gate is ready | Gate (0) + Reviewer if justified |
 
-`reviewloop_review` returns one of: `PASS`, `REWORK` (fix the findings in the
-same session, call again), `HUMAN_REQUIRED`, `WAITING_FOR_REVIEW` (transient —
-call again once state settles), `NO_PROGRESS`, `PUSH_REQUIRED`.
+`reviewloop_review` returns one of: `PHASE_PASS` (non-terminal; continue the
+next frozen phase in the same loop), `PASS` (final whole-task certification),
+`REWORK` (fix the findings in the same session, call again), `HUMAN_REQUIRED`,
+`WAITING_FOR_REVIEW` (transient — call again once state settles),
+`NO_PROGRESS`, `PUSH_REQUIRED`.
 
 Full Worker contract: [`agent-policy/COMMON.md`](agent-policy/COMMON.md).
+
+
+## Phase-aware large tasks
+
+Large task contracts may supply an ordered frozen phase plan at
+`reviewloop_begin`. ReviewLoop keeps **one loopId, one original baseline and
+one immutable task objective** for the entire task:
+
+```
+Phase 1 work
+  -> deterministic Gate (0 model tokens)
+  -> Reviewer
+  -> PHASE_PASS
+Phase 2 work
+  -> same engine
+  -> PHASE_PASS
+Final whole-task gate
+  -> same engine
+  -> PASS
+```
+
+Each gate has its own convergence counter and Supervisor escalation opportunity.
+A `PHASE_PASS` resets only gate-local convergence state; it does **not** reset
+task-wide Reviewer/Supervisor spend, the Token Sentinel, provider accounting,
+the original baseline, or the immutable objective. The final `PASS` is the only
+successful terminal state.
+
+Top-level `verificationCommands` are the **global/whole-task** mechanical
+checks: they are frozen at `reviewloop_begin` and remain part of every phase
+gate and the final gate. A phase's own `phases[].verificationCommands` are
+**phase-local only** and are not replayed at the final gate, because later
+phases may intentionally replace intermediate implementations. Any mechanical
+requirement that must still hold at final completion belongs in the top-level
+global verification plan; semantic requirements that later phases must preserve
+belong in `carryForwardInvariants`.
+
+For one-command machine setup after pulling the repository:
+
+```
+npm run setup
+```
+
+This installs/refreshes the global MCP + Worker policy and then runs the
+zero-model `doctor` checks.
 
 ## PR target
 
