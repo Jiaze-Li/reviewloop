@@ -56,6 +56,48 @@ Preserved generic primitives: `ModelSpendAuthority`, `ReservationLedger`,
 evidence collector, normalized review, `baselineDiffGate`,
 `gateFailureIdentity`, process-tree cleanup.
 
+## Phase-aware task lifecycle
+
+A ReviewLoop session may carry an optional frozen ordered phase plan. This does
+**not** add Planner/Executor roles and does not create nested ReviewLoop
+sessions. The invariant is:
+
+```
+one user task
+= one loopId
+= one immutable task objective
+= one original baseline
+= N phase gates + one final whole-task gate
+```
+
+Each phase gate runs the same engine: deterministic Gate (zero model tokens) →
+independent Reviewer → same-session Worker repair → exception-only Supervisor
+on non-convergence. A clean phase returns `PHASE_PASS`, advances the durable
+`currentPhaseIndex`, clears only gate-local convergence state, and returns the
+loop to `READY_FOR_WORK`. It is non-terminal. After the last phase,
+`currentPhaseIndex === phases.length` denotes the final whole-task gate; only
+a clean final gate transitions to terminal `PASS`.
+
+The task-global `round` remains monotonic for audit / operation identity.
+`gateRound` is the convergence counter and resets on PHASE_PASS. Likewise,
+finding-signature history, Supervisor-invoked state and Gate-repair count are
+gate-local. The original baseline, immutable objective, durable spend,
+reservation/information ledgers, provider health/accounting and Token Sentinel
+never reset at a phase boundary.
+
+The optional phase plan is fingerprinted into the immutable
+`ReviewObjective`. Phase ids/order/objectives/exit criteria/invariants may not
+be edited after `reviewloop_begin`. Phase-specific exact verification commands,
+when provided, are frozen in the phase plan and are appended to the ordinary
+deterministic Gate for that phase. The final gate uses the ordinary frozen
+whole-task Gate plan.
+
+Reviewer/Supervisor prompts receive an explicit current review scope. During a
+phase they judge only that phase's exit criteria plus global constraints and
+already-established invariants; unfinished later-phase work is not a blocker.
+The final gate judges the cumulative diff against the complete task and all
+phase contracts.
+
 ## One review engine, two targets
 
 There is a single review path. `reviewloop_review` attributes evidence, runs
