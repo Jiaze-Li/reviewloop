@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Frozen task-contract handoff, evidence obligations, and phase resume packets.
 //
 // This module is deliberately provider-agnostic. It turns user-facing task
@@ -185,6 +187,31 @@ export function reviewerEvidenceBundle({ loopState, objective, reviewScope, evid
       recordedAt: r.recordedAt,
     })),
   };
+}
+
+export function evidenceBundleFingerprint(bundle) {
+  const requirements = [...(bundle?.requirements ?? [])]
+    .map((r) => ({
+      id: r.id,
+      type: r.type,
+      description: r.description,
+      gate: r.gate,
+      required: r.required !== false,
+      covers: [...(r.covers ?? [])].sort(),
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (!requirements.length) return '';
+  const submissions = [...(bundle?.submissions ?? [])]
+    .map((e) => ({
+      requirementId: e.requirementId,
+      type: e.type,
+      summary: e.summary,
+      artifactRef: e.artifactRef ?? null,
+    }))
+    .sort((a, b) => a.requirementId.localeCompare(b.requirementId));
+  return createHash('sha256')
+    .update(JSON.stringify({ requirements, submissions }))
+    .digest('hex');
 }
 
 export function buildResumePacket({ loopState, objective, completedScope, nextScope, head = null } = {}) {
