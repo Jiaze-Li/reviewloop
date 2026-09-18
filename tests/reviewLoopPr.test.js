@@ -50,6 +50,25 @@ function build({
   return { controller, persistence, calls };
 }
 
+const phasePlan = [
+  {
+    id: 'phase-1',
+    title: 'Core',
+    objective: 'Establish the core behavior.',
+    exitCriteria: ['Core behavior is correct.'],
+    carryForwardInvariants: ['Later phases preserve the core behavior.'],
+    verificationCommands: ['echo phase-1'],
+  },
+  {
+    id: 'phase-2',
+    title: 'Integration',
+    objective: 'Integrate the core behavior.',
+    exitCriteria: ['Integration is complete.'],
+    carryForwardInvariants: ['Final behavior preserves the core contract.'],
+    verificationCommands: ['echo phase-2'],
+  },
+];
+
 // A -- PR target uses the internal Reviewer pool, not an external trigger.
 test('A: PR review runs the internal Reviewer, not an external trigger', async () => {
   const backend = mockPrBackend({ heads: ['H1'] });
@@ -294,4 +313,111 @@ test('J: a failover round keeps every physical Reviewer attempt in the audit, no
 test('the controller exposes no push / merge / force-push operation', async () => {
   const src = await import('node:fs').then((fs) => fs.promises.readFile(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8'));
   assert.doesNotMatch(src, /git push|gh pr merge|forcePush|--force\b/);
+});
+
+
+// K -- phase-aware PR flow is covered end-to-end, including audit binding.
+test('K: PR phases produce PHASE_PASS -> PHASE_PASS -> final PASS in one loop', async () => {
+  const backend = mockPrBackend({ base: 'B1', heads: ['H1'] });
+  const { controller, persistence, calls } = build({
+    prBackend: backend,
+    reviews: [{ findings: [] }, { findings: [] }, { findings: [] }],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'phase-aware PR',
+    cwd: '/r',
+    prNumber: 4,
+    phases: phasePlan,
+  });
+
+  const p1 = await controller.review({ loopId });
+  assert.equal(p1.status, 'PHASE_PASS');
+  assert.equal(p1.completedPhase.id, 'phase-1');
+  assert.equal(p1.nextPhase.id, 'phase-2');
+
+  const p2 = await controller.review({ loopId });
+  assert.equal(p2.status, 'PHASE_PASS');
+  assert.equal(p2.completedPhase.id, 'phase-2');
+  assert.equal(p2.finalGatePending, true);
+
+  const final = await controller.review({ loopId });
+  assert.equal(final.status, 'PASS');
+  assert.equal(calls.reviewer, 3);
+
+  const persisted = await persistence.readWorkflowState(loopId);
+  assert.deepEqual(
+    persisted.reviewLoop.audit.map((record) => record.result),
+    ['PHASE_PASS', 'PHASE_PASS', 'PASS'],
+  );
+  assert.deepEqual(
+    persisted.reviewLoop.completedPhases.map((phase) => phase.id),
+    ['phase-1', 'phase-2'],
+  );
+  assert.ok(persisted.reviewLoop.completedPhases.every((phase) => phase.proof));
+  assert.ok(
+    persisted.reviewLoop.completedPhases.every((phase) =>
+      persisted.reviewLoop.audit.some((record) =>
+        record.result === 'PHASE_PASS'
+        && record.reviewScope.id === phase.id
+        && record.targetFingerprint === phase.auditTargetFingerprint
+      )),
+  );
+});
+
+// L -- a stale clean phase review cannot advance the phase; the new HEAD must be reviewed first.
+test('L: PR phase waits for exact-HEAD re-review before PHASE_PASS when HEAD moves', async () => {
+  const backend = mockPrBackend({
+    base: 'B1',
+    // begin=H1, first round observed=H1, pre-pass recheck=H2,
+    // rebind observed=H2, second pre-pass recheck=H2.
+    headScript: ['H1', 'H1', 'H2', 'H2', 'H2', 'H2'],
+  });
+  const { controller, persistence, calls } = build({
+    prBackend: backend,
+    reviews: [{ findings: [] }, { findings: [] }],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'moving phase PR',
+    cwd: '/r',
+    prNumber: 4,
+    phases: [phasePlan[0]],
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'PHASE_PASS');
+  assert.equal(calls.reviewer, 2, 'the stale H1 review is not reused to complete the phase');
+
+  const persisted = await persistence.readWorkflowState(loopId);
+  assert.equal(persisted.reviewLoop.completedPhases[0].head, 'H2');
+  assert.deepEqual(
+    persisted.reviewLoop.audit.map((record) => record.result),
+    ['REWORK', 'PHASE_PASS'],
+  );
+  assert.equal(persisted.reviewLoop.audit[0].target.headStillCurrent, false);
+  assert.equal(persisted.reviewLoop.audit[1].target.reviewedHeadSha, 'H2');
+});
+
+// M -- PR phase completion is rejected if its successful audit evidence is removed.
+test('M: completed PR phase must remain bound to its PHASE_PASS audit record', async () => {
+  const backend = mockPrBackend({ base: 'B1', heads: ['H1'] });
+  const { controller, persistence } = build({
+    prBackend: backend,
+    reviews: [{ findings: [] }, { findings: [] }],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'phase audit binding',
+    cwd: '/r',
+    prNumber: 4,
+    phases: [phasePlan[0]],
+  });
+
+  assert.equal((await controller.review({ loopId })).status, 'PHASE_PASS');
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.audit = [];
+  await persistence.writeWorkflowState(loopId, raw);
+
+  await assert.rejects(
+    () => controller.review({ loopId }),
+    /successful exact-HEAD PHASE_PASS audit record|phase progression invalid/,
+  );
 });
