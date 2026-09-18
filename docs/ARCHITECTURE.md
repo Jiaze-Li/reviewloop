@@ -91,9 +91,19 @@ be edited after `reviewloop_begin`. Phase-specific exact verification commands,
 when provided, are frozen in the phase plan and are appended to the ordinary
 deterministic Gate for that phase. They are phase-local: the final whole-task
 gate runs the ordinary frozen global Gate plan, because a later phase may
-legitimately replace an intermediate implementation. Requirements that must
-survive later phases belong in carry-forward invariants (Reviewer scope) or the
+legitimately replace an intermediate implementation. Top-level
+`reviewloop_begin.verificationCommands` are the explicit whole-task mechanical
+plan and therefore remain active through the final gate. Requirements that must
+survive later phases belong in carry-forward invariants (Reviewer scope) or that
 global verification plan (mechanical Gate).
+
+A persisted `completedPhases` prefix is not trusted merely because its ids and
+index line up. Every completion carries a chained PHASE_PASS evidence hash bound
+to the immutable objective, exact review-scope fingerprint, deterministic Gate
+fingerprint and Reviewer fingerprint. In PR mode the completion must additionally
+match a durable PHASE_PASS audit record whose exact-HEAD checks succeeded
+(`headStillCurrent` and `gateRanOnReviewedHead`). Missing, fabricated or
+corrupted progression therefore fails closed before the next gate can run.
 
 Reviewer/Supervisor prompts receive an explicit current review scope. During a
 phase they judge only that phase's exit criteria plus global constraints and
