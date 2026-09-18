@@ -353,12 +353,9 @@ export function buildResumePacket({ loopState, objective, completedScope, nextSc
       : null,
     finalGatePending: nextScope?.type === 'final',
     globalConstraints: objective?.constraints ?? [],
-    evidenceRecords: (loopState?.evidenceRecords ?? []).map((r) => ({
-      requirementId: r.requirementId,
-      gate: r.gate,
-      summary: r.summary,
-      artifactRef: r.artifactRef,
-      evidenceFingerprint: r.evidenceFingerprint,
-    })),
+    // Keep the Worker handoff bounded. Full evidence remains durable in loop
+    // state and available to ReviewLoop; raw summaries do not belong in the
+    // context-refresh packet.
+    evidenceRecordCount: (loopState?.evidenceRecords ?? []).length,
   };
 }
