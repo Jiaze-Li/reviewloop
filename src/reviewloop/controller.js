@@ -52,6 +52,13 @@ import {
 } from './reviewPolicy.js';
 import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.js';
 import { chunkDiffForReview } from './diffChunker.js';
+import {
+  assertContractHandoff,
+  bindEvidenceSubmissions,
+  evidenceStatusForScope,
+  reviewerEvidenceBundle,
+  buildResumePacket,
+} from './contractEvidence.js';
 
 const RUNTIME_ROOT = REVIEWLOOP_RUNTIME_ROOT;
 
@@ -112,6 +119,7 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       carryForwardInvariants: phase.carryForwardInvariants ?? [],
       preserveInvariants,
       verificationCommands: phase.verificationCommands ?? [],
+      verificationEvidence: phase.verificationEvidence ?? [],
       phaseIndex: index,
       phaseCount: phases.length,
     };
@@ -129,6 +137,7 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       exitCriteria: p.exitCriteria ?? [],
       carryForwardInvariants: p.carryForwardInvariants ?? [],
       verificationCommands: p.verificationCommands ?? [],
+      verificationEvidence: p.verificationEvidence ?? [],
     })),
     phaseCount: phases.length,
     // Phase-local verification may certify an intermediate implementation
@@ -372,13 +381,57 @@ export function createReviewLoopController({
     }
   }
 
+  async function enforceEvidenceObligations({
+    loopState, objective, reviewScope, delta, submissions = [], head = null,
+  }) {
+    const evidenceFingerprint = delta?.fingerprint ?? head ?? 'unknown';
+    bindEvidenceSubmissions({
+      loopState,
+      objective,
+      reviewScope,
+      submissions,
+      evidenceFingerprint,
+      head,
+      now: new Date(clock()).toISOString(),
+    });
+    const status = evidenceStatusForScope({
+      loopState, objective, reviewScope, evidenceFingerprint,
+    });
+    if (status.missing.length) {
+      const ids = status.missing.map((r) => r.id);
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'required completion evidence missing');
+      await saveLoop(loopState);
+      return {
+        blocked: true,
+        result: {
+          status: 'REWORK',
+          loopId: loopState.loopId,
+          round: loopState.round,
+          gateRound: loopState.gateRound ?? loopState.round,
+          reason: `required evidence missing for ${reviewScope.id}: ${ids.join(', ')}`,
+          missingEvidenceRequirements: status.missing,
+          nextAction: 'Produce the required evidence, then call reviewloop_review again with evidence[] bound to those requirement ids.',
+          telemetry: await durableTelemetry(loopState.loopId),
+          safetyEvents,
+        },
+      };
+    }
+    return {
+      blocked: false,
+      bundle: reviewerEvidenceBundle({
+        loopState, objective, reviewScope, evidenceFingerprint,
+      }),
+    };
+  }
+
   async function begin({
     goal, cwd, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
-    constraints = [], phases = [], signal = null,
+    constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
   } = {}) {
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
+    const frozenContractText = assertContractHandoff({ goal, contractText, phases });
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
     const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     const mode = prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL;
@@ -513,7 +566,8 @@ export function createReviewLoopController({
     const objective = createReviewObjective({
       loopId, goal, repository, mode, prNumber, reviewer, baseline, prHead,
       prBaseSha, reviewedHeadSha: prHead,
-      constraints, phases, blockingSeverities, maxReviewRounds: resolvedMaxRounds,
+      constraints, phases, contractText: frozenContractText, evidenceRequirements,
+      blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       verificationPlan,
       baselineGateEvidence: baselineGate,
     });
@@ -607,6 +661,13 @@ export function createReviewLoopController({
     loopState.chunkReviewCheckpoint = null;
 
     const nextScope = currentReviewScope(loopState);
+    loopState.resumePacket = buildResumePacket({
+      loopState,
+      objective: loopState.objective,
+      completedScope: scope,
+      nextScope,
+      head,
+    });
     recordTransition(
       loopState,
       REVIEW_LOOP_STATES.READY_FOR_WORK,
@@ -623,6 +684,8 @@ export function createReviewLoopController({
         ? { id: nextScope.id, title: nextScope.title, index: nextScope.phaseIndex }
         : null,
       finalGatePending: nextScope.type === 'final',
+      resumePacket: loopState.resumePacket,
+      contextRefreshSafe: true,
       reviewer: review?.reviewer ?? null,
       nonBlockingFindings: review?.nonBlockingFindings ?? [],
       nonBlockingOmitted: review?.nonBlockingOmitted ?? 0,
@@ -729,7 +792,7 @@ export function createReviewLoopController({
     throw lastErr ?? new Error(`ReviewLoop: no eligible ${role} provider`);
   }
 
-  async function review({ loopId, signal, onHeartbeat } = {}) {
+  async function review({ loopId, evidence = [], signal, onHeartbeat } = {}) {
     if (!loopId) throw new Error('reviewloop_review: loopId is required');
     // Serialize every reviewloop_review for this loopId. In-process: overlapping
     // calls run one after another (the second then hits the deterministic
@@ -761,7 +824,7 @@ export function createReviewLoopController({
       }
       activeLeaseGuards.set(loopId, lease.verifyHeld ?? (async () => true));
       try {
-        return await reviewInner({ loopId, signal });
+        return await reviewInner({ loopId, evidence, signal });
       } catch (err) {
         if (err instanceof LeaseLostError) {
           // The lease was reclaimed by another owner while this call ran. We
@@ -785,7 +848,7 @@ export function createReviewLoopController({
     });
   }
 
-  async function reviewInner({ loopId, signal }) {
+  async function reviewInner({ loopId, evidence, signal }) {
     // Per-invocation safety-event isolation: start this call with a clean list.
     safetyEvents = [];
     const loopState = await loadLoop(loopId);
@@ -800,13 +863,13 @@ export function createReviewLoopController({
       return terminalResult(loopState);
     }
 
-    if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, signal });
-    return reviewLocal({ loopState, signal });
+    if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, evidence, signal });
+    return reviewLocal({ loopState, evidence, signal });
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
   async function runReviewerOverEvidence({
-    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective), signal,
+    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective), evidenceBundle = null, signal,
   }) {
     // Every PHYSICAL Reviewer attempt for this call — one entry per failover
     // retry AND per chunk, success or failure. Never collapsed into a single
@@ -989,6 +1052,7 @@ export function createReviewLoopController({
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
+          evidence: evidenceBundle,
           selection,
           signal,
         })).then((out) => {
@@ -1051,7 +1115,7 @@ export function createReviewLoopController({
   }
 
   // ---- LOCAL mode --------------------------------------------------------
-  async function reviewLocal({ loopState, signal }) {
+  async function reviewLocal({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
@@ -1339,6 +1403,16 @@ export function createReviewLoopController({
       };
     }
 
+    const evidenceCheck = await enforceEvidenceObligations({
+      loopState,
+      objective,
+      reviewScope,
+      delta,
+      submissions: evidence,
+      head: delta.currentHead ?? null,
+    });
+    if (evidenceCheck.blocked) return evidenceCheck.result;
+
     const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
@@ -1347,7 +1421,8 @@ export function createReviewLoopController({
     let reviewOut;
     try {
       reviewOut = await runReviewerOverEvidence({
-        spend, loopState, objective, delta, gate, reviewScope, signal,
+        spend, loopState, objective, delta, gate, reviewScope,
+        evidenceBundle: evidenceCheck.bundle, signal,
       });
     } catch (err) {
       if (err instanceof LeaseLostError) throw err; // read-only exit in review()
@@ -1811,7 +1886,7 @@ export function createReviewLoopController({
     });
   }
 
-  async function reviewPr({ loopState, signal }) {
+  async function reviewPr({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
@@ -1918,6 +1993,19 @@ export function createReviewLoopController({
       const { delta } = snap;
       let { gate } = snap;
 
+      const evidenceCheck = await enforceEvidenceObligations({
+        loopState,
+        objective,
+        reviewScope,
+        delta,
+        // A HEAD rebind makes evidence supplied for the original reviewed SHA
+        // stale. Never silently rebind the same runtime/manual claim to a new
+        // PR HEAD inside this one call.
+        submissions: rebind === 0 ? evidence : [],
+        head: observedHead,
+      });
+      if (evidenceCheck.blocked) return evidenceCheck.result;
+
       if (signal?.aborted) {
         return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
       }
@@ -1957,7 +2045,8 @@ export function createReviewLoopController({
       let reviewOut;
       try {
         reviewOut = await runReviewerOverEvidence({
-          spend, loopState, objective, delta, gate, reviewScope, signal,
+          spend, loopState, objective, delta, gate, reviewScope,
+          evidenceBundle: evidenceCheck.bundle, signal,
         });
       } catch (err) {
         if (err instanceof LeaseLostError) throw err;
@@ -2110,10 +2199,12 @@ export function createReviewLoopController({
 
   // ---- result shaping ------------------------------------------------
   function passResult(loopState, review, telemetry) {
+    loopState.resumePacket = null;
     return {
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
+      evidenceRecords: loopState.evidenceRecords ?? [],
       telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
     };
   }
