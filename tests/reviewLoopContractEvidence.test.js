@@ -37,6 +37,97 @@ test('begin fails closed when task text clearly declares phases but phases[] is 
   );
 });
 
+test('begin rejects a nonempty but truncated structured phase plan', async () => {
+  const { controller } = makeHarness();
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Full spec has 3 phases.',
+      contractText: [
+        'Execution Plan',
+        'Phase 1 Foundation',
+        'Phase 2 Integration',
+        'Phase 3 Final wiring',
+      ].join('\n'),
+      cwd: '/r',
+      phases: [phases[0]],
+    }),
+    /declares 3 phases.*contains 1|truncated/i,
+  );
+});
+
+test('begin rejects a partially truncated structured phase plan', async () => {
+  const { controller } = makeHarness();
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Full spec has 3 phases.',
+      contractText: 'Execution Plan: Phase 1 Foundation. Phase 2 Integration. Phase 3 Final wiring.',
+      cwd: '/r',
+      phases,
+    }),
+    /declares 3 phases.*contains 2|truncated/i,
+  );
+});
+
+test('begin accepts a complete canonical structured phase plan', async () => {
+  const { controller } = makeHarness();
+  const threePhases = [
+    ...phases,
+    {
+      id: 'phase-3',
+      title: 'Final wiring',
+      objective: 'Complete the final wiring.',
+      exitCriteria: ['Final wiring is complete.'],
+      carryForwardInvariants: ['Final wiring preserves earlier behavior.'],
+    },
+  ];
+  const begun = await controller.begin({
+    goal: 'Full spec has 3 phases.',
+    contractText: [
+      'Execution Plan',
+      'Phase 1 Foundation',
+      'Phase 2 Integration',
+      'Phase 3 Final wiring',
+    ].join('\n'),
+    cwd: '/r',
+    phases: threePhases,
+  });
+  assert.equal(begun.phaseCount, 3);
+  assert.equal(begun.currentPhase, 'phase-1');
+});
+
+test('begin rejects out-of-order canonical structured phase ids', async () => {
+  const { controller } = makeHarness();
+  const wrongOrder = [
+    phases[0],
+    { ...phases[1], id: 'phase-3' },
+    {
+      id: 'phase-2',
+      title: 'Final wiring',
+      objective: 'Complete the final wiring.',
+      exitCriteria: ['Final wiring is complete.'],
+    },
+  ];
+  await assert.rejects(
+    () => controller.begin({
+      goal: 'Full spec has 3 phases.',
+      contractText: 'Execution Plan: Phase 1 Foundation. Phase 2 Integration. Phase 3 Final wiring.',
+      cwd: '/r',
+      phases: wrongOrder,
+    }),
+    /canonical structured phase ids.*phase-1\.\.phase-3|got 1, 3, 2/i,
+  );
+});
+
+test('incidental phase-number prose does not force phased execution', async () => {
+  const { controller } = makeHarness();
+  const begun = await controller.begin({
+    goal: 'Compare phase 1 and phase 2 behavior in the existing algorithm; this is not an execution plan.',
+    cwd: '/r',
+  });
+  assert.equal(begun.phaseCount, 0);
+  assert.equal(begun.currentPhase, 'task');
+});
+
 test('begin fails closed when task points to prior conversation instead of supplying the contract', async () => {
   const { controller } = makeHarness();
   await assert.rejects(
