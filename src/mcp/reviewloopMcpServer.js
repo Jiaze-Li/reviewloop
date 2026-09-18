@@ -78,7 +78,7 @@ export function createReviewLoopMcpServer({
           id: z.string().min(1),
           type: z.enum(['runtime', 'artifact', 'manual', 'other']).optional(),
           description: z.string().min(1),
-          gate: z.string().min(1).optional().describe('phase id, final, task, or all; defaults to final'),
+          gate: z.string().min(1).optional().describe('one phase id, final, or task; defaults to final. Duplicate requirements explicitly if the same proof is needed at multiple gates'),
           required: z.boolean().optional(),
           covers: z.array(z.string().min(1)).optional(),
         })).optional().describe('frozen non-command evidence obligations; required items mechanically block PASS until evidence is submitted'),
