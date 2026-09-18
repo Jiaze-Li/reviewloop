@@ -148,6 +148,51 @@ test('E: blocking PR finding -> REWORK, then the next HEAD -> a fresh round', as
   assert.equal(r2.round, 2);
 });
 
+
+test('revised runtime evidence can be re-reviewed on the same PR HEAD', async () => {
+  const backend = mockPrBackend({ heads: ['H1'] });
+  const { controller, calls } = build({
+    prBackend: backend,
+    gates: [
+      { verdict: 'PASS', fingerprint: 'same-gate' },
+      { verdict: 'PASS', fingerprint: 'same-gate' },
+    ],
+    reviews: [
+      { findings: [finding('P1', 'ui.js', 'runtime evidence is too weak')] },
+      { findings: [] },
+    ],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'PR runtime evidence task',
+    contractText: 'Goal: prove the runtime behavior on the reviewed PR.',
+    cwd: '/r',
+    prNumber: 4,
+    evidenceRequirements: [{
+      id: 'runtime-ui',
+      type: 'runtime',
+      description: 'Exercise the real production interaction.',
+      gate: 'final',
+    }],
+  });
+
+  const weak = await controller.review({
+    loopId,
+    evidence: [{ requirementId: 'runtime-ui', summary: 'Opened the app only.' }],
+  });
+  assert.equal(weak.status, 'REWORK');
+  assert.equal(calls.reviewer, 1);
+
+  const improved = await controller.review({
+    loopId,
+    evidence: [{
+      requirementId: 'runtime-ui',
+      summary: 'Completed the full production interaction and observed the required result.',
+    }],
+  });
+  assert.equal(improved.status, 'PASS');
+  assert.equal(calls.reviewer, 2, 'evidence-only progress must not require an unrelated push');
+});
+
 // F -- durable audit record.
 test('F: every PR round writes a recoverable, tamper-evident audit record', async () => {
   const backend = mockPrBackend({ base: 'BASEabc', heads: ['H1'] });
