@@ -2036,6 +2036,7 @@ export function createReviewLoopController({
     const budgetExhausted = loopState.budgetExhausted === true;
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
+      gateRound: loopState.gateRound ?? loopState.round,
       // This HUMAN_REQUIRED is TERMINAL — the loop's review-round budget is
       // spent. The Worker must report to the user and stop: not another
       // reviewloop_review on this loop, not a fresh reviewloop_begin in the
