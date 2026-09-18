@@ -1042,8 +1042,7 @@ export function createReviewLoopController({
       cwd, commands: gateCommands, runner: gateRunner, env, signal,
       baselineGateEvidence: trustedBaselineGateEvidence,
     });
-      gate.commandSource = commandSource;
-      gate.executedCommands = [...gateCommands];
+    gate.commandSource = commandSource;
     gate.executedCommands = [...gateCommands];
 
     // The review-time Gate may itself have mutated tracked files (a formatter, a
@@ -1145,6 +1144,7 @@ export function createReviewLoopController({
           baselineGateEvidence: trustedBaselineGateEvidence,
         });
         gate.commandSource = commandSource;
+        gate.executedCommands = [...gateCommands];
         if (signal?.aborted || gate.verdict === GATE_VERDICTS.FAIL) break; // handled downstream
 
         // eslint-disable-next-line no-await-in-loop
@@ -1649,6 +1649,7 @@ export function createReviewLoopController({
         cwd: worktreeDir, commands: gateCommands, runner: gateRunner, env, signal,
       });
       gate.commandSource = commandSource;
+      gate.executedCommands = [...gateCommands];
 
       const postGateState = await captureWorktreeSnapshotFn({ worktreeDir });
       if (!postGateState.ok) {
