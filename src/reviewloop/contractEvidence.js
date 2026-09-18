@@ -73,7 +73,7 @@ export function normalizeEvidenceRequirements(raw = [], phaseIds = []) {
       throw new Error(`createReviewObjective: evidence requirement "${id}" has unsupported type "${type}"`);
     }
     const gate = String(entry.gate ?? 'final').trim();
-    if (gate !== 'final' && gate !== 'task' && !phases.has(gate)) {
+    if (gate !== 'final' && !phases.has(gate)) {
       throw new Error(
         `createReviewObjective: evidence requirement "${id}" targets unknown gate "${gate}"`,
       );
@@ -110,8 +110,11 @@ export function normalizeEvidenceSubmissions(raw = []) {
 
 function gateMatches(requirement, reviewScope) {
   const id = reviewScope?.id ?? 'task';
-  if (requirement.gate === 'final') return reviewScope?.type === 'final' || reviewScope?.type === 'task';
-  if (requirement.gate === 'task') return reviewScope?.type === 'task';
+  // final is the task-completion gate for both unphased (task) and phased
+  // (final) loops. Phase-specific proof must name that exact phase id.
+  if (requirement.gate === 'final') {
+    return reviewScope?.type === 'final' || reviewScope?.type === 'task';
+  }
   return requirement.gate === id;
 }
 
@@ -244,6 +247,7 @@ export function buildResumePacket({ loopState, objective, completedScope, nextSc
         title: nextScope.title,
         objective: nextScope.objective,
         exitCriteria: nextScope.exitCriteria ?? [],
+        carryForwardInvariants: nextScope.carryForwardInvariants ?? [],
         verificationCommands: nextScope.verificationCommands ?? [],
         verificationEvidence: nextScope.verificationEvidence ?? [],
       }
