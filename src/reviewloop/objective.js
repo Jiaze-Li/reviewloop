@@ -7,6 +7,7 @@
 // ReviewLoop declare a larger original task complete.
 
 import { createHash } from 'node:crypto';
+import { normalizeContractText, normalizeEvidenceRequirements } from './contractEvidence.js';
 
 export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL', PR: 'PR' });
 
@@ -85,6 +86,9 @@ export function normalizePhasePlan(phases = []) {
       // Only exact executable commands belong here. Descriptive verification
       // prose stays in the phase objective / exit criteria for the Reviewer.
       verificationCommands: list(raw.verificationCommands),
+      // Descriptive/non-command evidence required to prove this phase. These
+      // survive structured handoff even when they are not shell commands.
+      verificationEvidence: list(raw.verificationEvidence),
     };
   });
 }
@@ -108,6 +112,8 @@ export function createReviewObjective({
   reviewedHeadSha = null,
   constraints = [],
   phases = [],
+  contractText = '',
+  evidenceRequirements = [],
   blockingSeverities = DEFAULT_BLOCKING_SEVERITIES,
   // In phase-aware mode this is the convergence budget PER review gate
   // (each phase gate and the final whole-task gate), not one budget shared
@@ -138,6 +144,11 @@ export function createReviewObjective({
     ? maxReviewRounds
     : DEFAULT_MAX_REVIEW_ROUNDS;
   const normalizedPhases = normalizePhasePlan(phases);
+  const normalizedContractText = normalizeContractText(contractText);
+  const normalizedEvidenceRequirements = normalizeEvidenceRequirements(
+    evidenceRequirements,
+    normalizedPhases.map((p) => p.id),
+  );
 
   const objective = {
     loopId: String(loopId),
@@ -161,6 +172,13 @@ export function createReviewObjective({
       : null,
     constraints: normalizedConstraints,
     phases: normalizedPhases,
+    // Optional complete user-facing task contract. When supplied it is the
+    // self-contained source the independent Reviewer receives; it must never
+    // be replaced by a reference to earlier chat history.
+    contractText: normalizedContractText || null,
+    // Non-command evidence obligations (runtime/artifact/manual) frozen with
+    // the objective so a later round cannot silently waive them.
+    evidenceRequirements: normalizedEvidenceRequirements,
     blockingSeverities: blocking,
     maxReviewRounds: rounds,
     // The deterministic Gate's verification plan, FROZEN at reviewloop_begin.
@@ -204,6 +222,10 @@ function fingerprintFields(o) {
   // Backward compatibility: legacy objectives had no phase plan, so an empty
   // plan is intentionally omitted from the fingerprint.
   if (Array.isArray(o.phases) && o.phases.length) base.phases = o.phases;
+  if (o.contractText) base.contractText = o.contractText;
+  if (Array.isArray(o.evidenceRequirements) && o.evidenceRequirements.length) {
+    base.evidenceRequirements = o.evidenceRequirements;
+  }
   if (o.verificationPlan) base.verificationPlan = o.verificationPlan;
   // PR target identity — load-bearing for "which PR snapshot is under review".
   // Only folded in when present, so a LOCAL / pre-existing objective keeps its
@@ -301,6 +323,12 @@ export function assertObjectiveNotWeakened(original, candidate) {
   }
   if (JSON.stringify(candidate.phases ?? []) !== JSON.stringify(original.phases ?? [])) {
     problems.push('phase plan changed');
+  }
+  if ((candidate.contractText ?? null) !== (original.contractText ?? null)) {
+    problems.push('frozen contract text changed');
+  }
+  if (JSON.stringify(candidate.evidenceRequirements ?? []) !== JSON.stringify(original.evidenceRequirements ?? [])) {
+    problems.push('evidence requirements changed');
   }
   if (original.verificationPlan) {
     if (!candidate.verificationPlan) {
