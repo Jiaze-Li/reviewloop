@@ -57,6 +57,7 @@ import {
   bindEvidenceSubmissions,
   evidenceStatusForScope,
   reviewerEvidenceBundle,
+  evidenceBundleFingerprint,
   buildResumePacket,
 } from './contractEvidence.js';
 
@@ -416,11 +417,13 @@ export function createReviewLoopController({
         },
       };
     }
+    const bundle = reviewerEvidenceBundle({
+      loopState, objective, reviewScope, evidenceFingerprint,
+    });
     return {
       blocked: false,
-      bundle: reviewerEvidenceBundle({
-        loopState, objective, reviewScope, evidenceFingerprint,
-      }),
+      bundle,
+      proofFingerprint: evidenceBundleFingerprint(bundle),
     };
   }
 
@@ -869,7 +872,8 @@ export function createReviewLoopController({
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
   async function runReviewerOverEvidence({
-    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective), evidenceBundle = null, signal,
+    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective),
+    evidenceBundle = null, evidenceProofFingerprint = '', signal,
   }) {
     // Every PHYSICAL Reviewer attempt for this call — one entry per failover
     // retry AND per chunk, success or failure. Never collapsed into a single
@@ -934,10 +938,10 @@ export function createReviewLoopController({
     // reconsider new evidence, only re-chunked old evidence. `deltaGateKey` is
     // tracked separately from the layout-inclusive `checkpointKey` so round
     // reuse survives a re-chunk.
-    const deltaGateKey = scopeBoundFingerprint(
-      [delta.fingerprint, gate.fingerprint],
-      reviewScope,
-    );
+    const reviewStateParts = evidenceProofFingerprint
+      ? [delta.fingerprint, gate.fingerprint, evidenceProofFingerprint]
+      : [delta.fingerprint, gate.fingerprint];
+    const deltaGateKey = scopeBoundFingerprint(reviewStateParts, reviewScope);
     const chunkLayoutHash = sha256Hex(`${chunks.length}::${chunks.map((c) => c.hash).join('::')}`);
     const checkpointKey = sha256Hex(`${deltaGateKey}::${chunkLayoutHash}`);
     const resumeCheckpoint = loopState.chunkReviewCheckpoint;
@@ -1023,7 +1027,12 @@ export function createReviewLoopController({
       const reviewStateEvidence = await spend.registerEvidence({
         kind: 'reviewstate',
         taskId: chunkId,
-        diffHash: scopeBoundFingerprint([chunk.hash, gate.fingerprint], reviewScope),
+        diffHash: scopeBoundFingerprint(
+          evidenceProofFingerprint
+            ? [chunk.hash, gate.fingerprint, evidenceProofFingerprint]
+            : [chunk.hash, gate.fingerprint],
+          reviewScope,
+        ),
       });
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
