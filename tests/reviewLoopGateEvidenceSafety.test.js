@@ -654,3 +654,33 @@ test('Supervisor provider prompt receives the same evidence context as Reviewer'
   assert.match(prompt, /runtime-ui \[runtime; required\]: Exercise the production UI interaction\./);
   assert.match(prompt, /runtime-ui: Completed the real interaction\. \[run:\/\/evidence-1\]/);
 });
+
+
+test('comma-separated inline Execution Plan clauses are fail-closed phase declarations', () => {
+  const text = 'Execution plan: Phase 1: foundation, Phase 2: integration.';
+  assert.equal(declaredPhasePlan(text).count, 2);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+});
+
+test('resume aggregate budget exceeds individually legal component maxima with framing slack', () => {
+  const componentMax = CONTRACT_TEXT_MAX_BYTES + PHASE_PLAN_MAX_BYTES + EVIDENCE_LIMITS.requirementsBytes;
+  assert.ok(
+    RESUME_TASK_DEFINITION_MAX_BYTES >= componentMax + (32 * 1024),
+    'aggregate resume budget must leave headroom beyond all individually legal component maxima',
+  );
+});
+
+test('LOCAL invalid evidence returns explicit NOT_ACCEPTED receipt without Reviewer spend', async () => {
+  const w = world('LOCAL');
+  const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: [req()] });
+  const result = await w.controller.review({ loopId, evidence: [proof('bogus')] });
+  assert.equal(result.status, 'REWORK');
+  assert.deepEqual(result.evidenceSubmission, {
+    status: 'NOT_ACCEPTED',
+    reason: 'INVALID_EVIDENCE',
+    submittedCount: 1,
+    retryRequired: true,
+  });
+  assert.equal(w.calls.reviewer, 0);
+  assert.deepEqual((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords, []);
+});

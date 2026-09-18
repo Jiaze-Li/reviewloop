@@ -423,9 +423,9 @@ export function createReviewLoopController({
     loopState, objective, reviewScope, delta, gate, submissions = [], head = null,
   }) {
     const evidenceFingerprint = delta?.fingerprint ?? head ?? 'unknown';
-    const rework = async (reason, missing = []) => ({
+    const rework = async (reason, missing = [], receipt = null) => ({
       blocked: true,
-      result: await evidenceRework({ loopState, gate, head, reason, missing }),
+      result: await evidenceRework({ loopState, gate, head, reason, missing, receipt }),
     });
     try {
       // Binding validates the whole batch and prospective aggregate before
@@ -459,7 +459,7 @@ export function createReviewLoopController({
       if (!(err instanceof EvidenceValidationError)) throw err;
       // Deterministic input rejection consumes no Reviewer/Supervisor round,
       // does not latch no-progress, and never echoes the rejected raw proof.
-      return rework(err.message);
+      return rework(err.message, [], unacceptedEvidence(submissions, 'INVALID_EVIDENCE'));
     }
   }
 

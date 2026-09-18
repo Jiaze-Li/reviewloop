@@ -59,7 +59,11 @@ export const PHASE_VERIFICATION_EVIDENCE_LIMITS = Object.freeze({
   totalBytes: 16 * 1024,
 });
 export const PHASE_PLAN_MAX_BYTES = 32 * 1024;
-export const RESUME_TASK_DEFINITION_MAX_BYTES = 96 * 1024;
+// Larger than the sum of the individually legal contract/phase/evidence
+// component maxima, with additional headroom for goal, constraints,
+// verificationPlan JSON framing and escaping. The aggregate is still bounded
+// so PHASE_PASS remains context-refresh safe.
+export const RESUME_TASK_DEFINITION_MAX_BYTES = 160 * 1024;
 const utf8Bytes = (value) => Buffer.byteLength(String(value), 'utf8');
 
 export function assertResumeTaskDefinitionBound({

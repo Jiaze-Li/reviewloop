@@ -120,7 +120,7 @@ export function declaredPhasePlan(text) {
     ? s
     : (planHeading ? s.slice(planHeading.index + planHeading[0].length) : '');
   const headingNumbers = explicitCounts.length ? [] : [...new Set(
-    [...headingText.matchAll(/(?:^|[.;][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
+    [...headingText.matchAll(/(?:^|[.;,][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
       .map((m) => Number(m[1])),
   )].sort((a, b) => a - b);
 
@@ -131,7 +131,7 @@ export function declaredPhasePlan(text) {
     // Accept an inline enumeration only when the heading is immediately
     // followed by phase clauses. Historical references elsewhere stay prose.
     for (const match of s.matchAll(/\bexecution[ \t]+plan[ \t]*:[ \t]*([^\r\n]*)/ig)) {
-      const clauses = match[1].split(/[.;]/).map((part) => part.trim()).filter(Boolean);
+      const clauses = match[1].split(/[.;,]/).map((part) => part.trim()).filter(Boolean);
       const labels = [];
       for (const clause of clauses) {
         if (!/^phase[ \t]+[1-9]\d*\b/i.test(clause)) break;
