@@ -485,6 +485,10 @@ function reviewScopePromptLines(reviewScope) {
       'PHASE EXIT CRITERIA:',
       ...(reviewScope.exitCriteria ?? []).map((v) => `- ${v}`),
     ];
+    if ((reviewScope.verificationEvidence ?? []).length) {
+      lines.push('PHASE VERIFICATION EVIDENCE EXPECTED:');
+      lines.push(...reviewScope.verificationEvidence.map((v) => `- ${v}`));
+    }
     if ((reviewScope.preserveInvariants ?? []).length) {
       lines.push('INVARIANTS FROM COMPLETED PHASES THAT MUST REMAIN TRUE:');
       lines.push(...reviewScope.preserveInvariants.map((v) => `- ${v}`));
@@ -519,15 +523,26 @@ function reviewScopePromptLines(reviewScope) {
 
 function buildReviewerInvoke() {
   return async ({
-    objective, diff, changedFiles, gate, reviewScope = null, transport, model, signal,
+    objective, diff, changedFiles, gate, reviewScope = null, evidence = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are an INDEPENDENT code reviewer.',
-      `ORIGINAL TASK: ${objective.goal}`,
+      objective.contractText
+        ? `FROZEN TASK CONTRACT (authoritative; self-contained):\n${objective.contractText}`
+        : `ORIGINAL TASK: ${objective.goal}`,
       objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
       ...reviewScopePromptLines(reviewScope),
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
+      evidence?.requirements?.length
+        ? `REQUIRED NON-COMMAND EVIDENCE FOR THIS GATE:\n${evidence.requirements.map((r) => `- ${r.id} [${r.type}]: ${r.description}${r.covers?.length ? ` (covers ${r.covers.join(', ')})` : ''}`).join('\n')}`
+        : '',
+      evidence?.submissions?.length
+        ? `SUBMITTED EVIDENCE:\n${evidence.submissions.map((e) => `- ${e.requirementId}: ${e.summary}${e.artifactRef ? ` [${e.artifactRef}]` : ''}`).join('\n')}`
+        : '',
+      evidence?.requirements?.length
+        ? 'Judge whether the submitted evidence actually proves the required behavior. A present-but-inadequate claim is a blocking finding; do not treat mere presence as proof.'
+        : '',
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
       '',
@@ -557,7 +572,9 @@ function buildSupervisorInvoke() {
   }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
-      `ORIGINAL TASK: ${objective.goal}`,
+      objective.contractText
+        ? `FROZEN TASK CONTRACT (authoritative; self-contained):\n${objective.contractText}`
+        : `ORIGINAL TASK: ${objective.goal}`,
       ...reviewScopePromptLines(reviewScope),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
       'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
