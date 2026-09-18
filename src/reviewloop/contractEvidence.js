@@ -17,13 +17,86 @@ export function normalizeContractText(value) {
   return value == null ? '' : String(value).trim();
 }
 
-export function clearlyDeclaresPhasePlan(text) {
+function uniqueSortedPhaseNumbers(text) {
+  return [...new Set(
+    [...String(text ?? '').matchAll(/\bphase\s+([1-9]\d*)\b/ig)]
+      .map((m) => Number(m[1])),
+  )].sort((a, b) => a - b);
+}
+
+function contiguousPhaseCount(numbers) {
+  if (!Array.isArray(numbers) || numbers.length < 2 || numbers[0] !== 1) return null;
+  for (let i = 0; i < numbers.length; i += 1) {
+    if (numbers[i] !== i + 1) return null;
+  }
+  return numbers.length;
+}
+
+export function declaredPhasePlan(text) {
   const s = String(text ?? '');
-  if (!s.trim()) return false;
-  if (/\b(?:full\s+spec\s+has|including\s+the)\s+\d+[- ]phase\b/i.test(s)) return true;
-  if (/\b\d+[- ]phase\s+(?:execution\s+)?plan\b/i.test(s)) return true;
-  const ids = [...s.matchAll(/\bphase\s+([1-9]\d*)\b/ig)].map((m) => Number(m[1]));
-  return new Set(ids).size >= 2;
+  if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
+
+  const explicitCounts = [
+    ...[...s.matchAll(/\b(?:full\s+spec\s+has|including\s+the)\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+      .map((m) => Number(m[1])),
+    ...[...s.matchAll(/\b([2-9]\d*)\s*(?:-\s*)?phases?\s+(?:execution\s+)?plan\b/ig)]
+      .map((m) => Number(m[1])),
+    ...[...s.matchAll(/\b(?:execution\s+)?plan\s+(?:has|with|contains)\s+([2-9]\d*)\s*(?:-\s*)?phases?\b/ig)]
+      .map((m) => Number(m[1])),
+  ];
+
+  const headingNumbers = [...new Set(
+    [...s.matchAll(/^\s{0,3}(?:#{1,6}\s*)?(?:[-*]\s*)?phase\s+([1-9]\d*)\b/gim)]
+      .map((m) => Number(m[1])),
+  )].sort((a, b) => a - b);
+
+  let scopedNumbers = headingNumbers;
+  let source = headingNumbers.length >= 2 ? 'phase headings' : null;
+  if (scopedNumbers.length < 2) {
+    const planIndex = s.search(/\bexecution\s+plan\b/i);
+    if (planIndex >= 0) {
+      scopedNumbers = uniqueSortedPhaseNumbers(s.slice(planIndex));
+      if (scopedNumbers.length >= 2) source = 'execution plan';
+    }
+  }
+
+  let inferredCount = null;
+  if (scopedNumbers.length >= 2) {
+    inferredCount = contiguousPhaseCount(scopedNumbers);
+    if (inferredCount == null) {
+      return {
+        count: null,
+        numbers: scopedNumbers,
+        source,
+        invalid: `declared phase numbers are not a contiguous 1..N sequence: ${scopedNumbers.join(', ')}`,
+      };
+    }
+  }
+
+  const distinctCounts = [...new Set([
+    ...explicitCounts,
+    ...(inferredCount == null ? [] : [inferredCount]),
+  ])];
+  if (distinctCounts.length > 1) {
+    return {
+      count: null,
+      numbers: scopedNumbers,
+      source: source ?? 'explicit phase count',
+      invalid: `conflicting declared phase counts: ${distinctCounts.join(', ')}`,
+    };
+  }
+
+  return {
+    count: distinctCounts[0] ?? null,
+    numbers: scopedNumbers,
+    source: source ?? (explicitCounts.length ? 'explicit phase count' : null),
+    invalid: null,
+  };
+}
+
+export function clearlyDeclaresPhasePlan(text) {
+  const declaration = declaredPhasePlan(text);
+  return declaration.invalid != null || declaration.count != null;
 }
 
 export function referencesMissingPriorContract(text) {
@@ -45,10 +118,36 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       'reviewloop_begin: contractText is not self-contained; replace references to earlier conversation with the actual frozen contract',
     );
   }
-  if (clearlyDeclaresPhasePlan(combined) && (!Array.isArray(phases) || phases.length === 0)) {
+  const declaration = declaredPhasePlan(combined);
+  if (declaration.invalid) {
     throw new Error(
-      'reviewloop_begin: task clearly declares a multi-phase execution plan but phases[] is empty; refusing to silently downgrade it to a single gate',
+      `reviewloop_begin: phase plan declaration is inconsistent; ${declaration.invalid}`,
     );
+  }
+  if (declaration.count != null) {
+    if (!Array.isArray(phases) || phases.length === 0) {
+      throw new Error(
+        'reviewloop_begin: task clearly declares a multi-phase execution plan but phases[] is empty; refusing to silently downgrade it to a single gate',
+      );
+    }
+    if (phases.length !== declaration.count) {
+      throw new Error(
+        `reviewloop_begin: task declares ${declaration.count} phases but structured phases[] contains ${phases.length}; refusing to freeze a truncated or expanded phase plan`,
+      );
+    }
+
+    const canonicalIds = phases.map((phase) => {
+      const m = String(phase?.id ?? '').trim().match(/^phase[-_ ]?([1-9]\d*)$/i);
+      return m ? Number(m[1]) : null;
+    });
+    if (canonicalIds.every((n) => n != null)) {
+      const expected = Array.from({ length: declaration.count }, (_, i) => i + 1);
+      if (JSON.stringify(canonicalIds) !== JSON.stringify(expected)) {
+        throw new Error(
+          `reviewloop_begin: canonical structured phase ids must be phase-1..phase-${declaration.count} in order; got ${canonicalIds.join(', ')}`,
+        );
+      }
+    }
   }
   return frozen;
 }
