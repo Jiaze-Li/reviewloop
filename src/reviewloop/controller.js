@@ -1941,7 +1941,8 @@ export function createReviewLoopController({
 
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
-        && loopState.lastReview?.status === 'ACTIONABLE') {
+        && loopState.lastReview?.status === 'ACTIONABLE'
+        && (!Array.isArray(evidence) || evidence.length === 0)) {
         await saveLoop(loopState);
         return {
           status: 'PUSH_REQUIRED', loopId: loopState.loopId, head: observedHead,
@@ -2030,25 +2031,24 @@ export function createReviewLoopController({
         return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
       }
 
-      const fp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-      });
-      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
-        await saveLoop(loopState);
-        return {
-          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
-          head: observedHead,
-          reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
-          lastReview: compactLastReview(loopState),
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
       if (snap.kind === 'GATE_FAIL') {
+        const gateFp = reviewFingerprint({
+          deltaFingerprint: delta.fingerprint,
+          gateFingerprint: gate.fingerprint,
+          reviewScopeFingerprint: reviewScope.fingerprint,
+        });
+        if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === gateFp) {
+          await saveLoop(loopState);
+          return {
+            status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
+            head: observedHead,
+            reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
+            lastReview: compactLastReview(loopState),
+            telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
+          };
+        }
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-        loopState.lastReviewedFingerprint = fp;
+        loopState.lastReviewedFingerprint = gateFp;
         loopState.lastGateFingerprint = gate.fingerprint;
         loopState.lastReviewedPrHead = observedHead;
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
@@ -2061,6 +2061,9 @@ export function createReviewLoopController({
         };
       }
 
+      // Evidence can legitimately change while the PR HEAD stays fixed (for
+      // example, a corrected runtime walkthrough after Reviewer feedback).
+      // Bind it before the no-progress decision and include it in review state.
       const evidenceCheck = await enforceEvidenceObligations({
         loopState,
         objective,
@@ -2074,12 +2077,31 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
+      const fp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+        evidenceFingerprint: evidenceCheck.proofFingerprint,
+      });
+      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
+        await saveLoop(loopState);
+        return {
+          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
+          head: observedHead,
+          reason: 'submitted PR code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
+          lastReview: compactLastReview(loopState),
+          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
+        };
+      }
+
       const spend = spendFor(loopState.loopId, objective);
       let reviewOut;
       try {
         reviewOut = await runReviewerOverEvidence({
           spend, loopState, objective, delta, gate, reviewScope,
-          evidenceBundle: evidenceCheck.bundle, signal,
+          evidenceBundle: evidenceCheck.bundle,
+          evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+          signal,
         });
       } catch (err) {
         if (err instanceof LeaseLostError) throw err;
