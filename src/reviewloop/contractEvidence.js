@@ -103,7 +103,7 @@ export function declaredPhasePlan(text) {
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
   const explicitCounts = [
-    ...[...s.matchAll(/\bfull\s+spec\s+has\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+has\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),

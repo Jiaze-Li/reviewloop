@@ -58,6 +58,7 @@ export const PHASE_VERIFICATION_EVIDENCE_LIMITS = Object.freeze({
   itemBytes: 4096,
   totalBytes: 16 * 1024,
 });
+export const PHASE_PLAN_MAX_BYTES = 32 * 1024;
 const utf8Bytes = (value) => Buffer.byteLength(String(value), 'utf8');
 
 export function normalizePhasePlan(phases = []) {
@@ -65,7 +66,7 @@ export function normalizePhasePlan(phases = []) {
   if (!Array.isArray(phases)) throw new Error('createReviewObjective: phases must be an array');
 
   const seen = new Set();
-  return phases.map((raw, index) => {
+  const normalized = phases.map((raw, index) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new Error(`createReviewObjective: phase ${index + 1} must be an object`);
     }
@@ -113,6 +114,12 @@ export function normalizePhasePlan(phases = []) {
       verificationEvidence,
     };
   });
+  if (utf8Bytes(JSON.stringify(normalized)) > PHASE_PLAN_MAX_BYTES) {
+    throw new Error(
+      `createReviewObjective: complete structured phase plan exceeds the ${PHASE_PLAN_MAX_BYTES}-byte UTF-8 limit; keep objectives, exit criteria, invariants, commands, and evidence descriptions concise without truncating acceptance criteria`,
+    );
+  }
+  return normalized;
 }
 
 // Build the immutable objective record. `mode` is LOCAL unless a PR number is

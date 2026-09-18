@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
-import { PHASE_VERIFICATION_EVIDENCE_LIMITS } from '../src/reviewloop/objective.js';
+import { PHASE_PLAN_MAX_BYTES, PHASE_VERIFICATION_EVIDENCE_LIMITS } from '../src/reviewloop/objective.js';
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
   assertContractHandoff, declaredPhasePlan, bindEvidenceSubmissions,
@@ -509,4 +509,34 @@ test('reserved ids report reserved and mixed-id violations together when both ap
     (error) => /phase id "final" is reserved/i.test(error.message)
       && /mixes canonical phase-N ids with custom ids/i.test(error.message),
   );
+});
+
+
+test('full specification and contract wording are explicit multi-phase declarations', () => {
+  for (const text of [
+    'Full specification has 3 phases: Phase 1 foundation; Phase 2 integration; Phase 3 finish.',
+    'Full contract has 3 phases.',
+    'Complete specification has 3 phases.',
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, 3);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+});
+
+test('complete structured phase metadata is aggregate-bounded before baseline/Gate work', async () => {
+  const h = makeHarness();
+  await assert.rejects(() => h.controller.begin({
+    cwd: '/r',
+    goal: 'Bound the full phase resume contract.',
+    phases: [{
+      id: 'p1',
+      title: 'P1',
+      objective: 'x'.repeat(PHASE_PLAN_MAX_BYTES + 1),
+      exitCriteria: ['P1 complete.'],
+      carryForwardInvariants: ['Preserve P1.'],
+      verificationCommands: ['echo verify'],
+    }],
+  }), /complete structured phase plan exceeds/);
+  assert.equal(h.calls.baseline, 0);
+  assert.equal(h.calls.gate, 0);
 });
