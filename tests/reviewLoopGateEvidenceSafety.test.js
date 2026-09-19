@@ -874,3 +874,47 @@ test('strong phase-count declarations cover common composition and division verb
     assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
   }
 });
+
+
+test('explicit phase count is checked against an immediately-following numbered phase list', () => {
+  const text = [
+    'Execution plan has 2 phases:',
+    'Phase 1 foundation',
+    'Phase 2 integration',
+    'Phase 3 cleanup',
+  ].join('\n');
+  const declaration = declaredPhasePlan(text);
+  assert.match(declaration.invalid ?? '', /conflicting declared phase counts/);
+  assert.throws(() => assertContractHandoff({
+    goal: text,
+    phases: [
+      { ...phases[0], id: 'phase-1' },
+      { ...phases[1], id: 'phase-2' },
+    ],
+  }), /inconsistent|conflicting declared phase counts/);
+});
+
+test('explicit phase count still ignores unrelated historical phase prose outside the immediate enumeration', () => {
+  const text = [
+    'Full specification has 3 phases.',
+    '',
+    'Historical note: Phase 1 of the migration shipped last quarter. Phase 2 is out of scope.',
+  ].join('\n');
+  const declaration = declaredPhasePlan(text);
+  assert.equal(declaration.count, 3);
+  assert.equal(declaration.invalid, null);
+});
+
+test('carry-forward invariants cannot delegate acceptance criteria to missing prior conversation', () => {
+  const bad = [{
+    id: 'p1',
+    title: 'P1',
+    objective: 'Implement P1.',
+    exitCriteria: ['P1 works.'],
+    carryForwardInvariants: ['Acceptance criteria are in the previous message.'],
+  }];
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement the phased task.',
+    phases: bad,
+  }), /structured phase\/evidence acceptance text is not self-contained/);
+});

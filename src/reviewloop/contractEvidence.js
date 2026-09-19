@@ -113,18 +113,36 @@ export function declaredPhasePlan(text) {
   const s = String(text ?? '');
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
-  const explicitCounts = [
-    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|contains|includes|comprises|consists\s+of|is\s+(?:split|divided)\s+into)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
-      .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
-      .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
-      .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s*:\s*([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
-      .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
-      .map((m) => Number(m[1])),
+  const countPatterns = [
+    /\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|contains|includes|comprises|consists\s+of|is\s+(?:split|divided)\s+into)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
+    /\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig,
+    /\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
+    /\bexecution\s+plan\s*:\s*([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
+    /\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
   ];
+  const explicitCountMatches = countPatterns.flatMap((pattern) =>
+    [...s.matchAll(pattern)].map((m) => ({
+      count: Number(m[1]),
+      end: (m.index ?? 0) + m[0].length,
+    })));
+  const explicitCounts = explicitCountMatches.map((match) => match.count);
+
+  // If a strong explicit count is immediately followed by an actual Phase 1
+  // enumeration, compare the whole contiguous list with that count. This catches
+  // "Execution plan has 2 phases" followed by Phase 1/2/3, while deliberately
+  // ignoring unrelated historical phase prose elsewhere in the document.
+  const listedCountsAfterExplicit = [];
+  for (const match of explicitCountMatches) {
+    const tail = s.slice(match.end);
+    if (!/^[ \t]*(?::[ \t]*|\r?\n[ \t]*)(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+1\b/i.test(tail)) continue;
+    const block = tail.slice(0, 8192).split(/\r?\n[ \t]*\r?\n/, 1)[0];
+    const numbers = [...new Set(
+      [...block.matchAll(/(?:^|[\n;:][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
+        .map((m) => Number(m[1])),
+    )].sort((a, b) => a - b);
+    const count = contiguousPhaseCount(numbers);
+    if (count != null) listedCountsAfterExplicit.push(count);
+  }
 
   // Phase headings are declarations only inside strong task-plan context.
   // Generic prose/documents often contain "Phase 1"/"Phase 2" headings that
@@ -183,6 +201,7 @@ export function declaredPhasePlan(text) {
 
   const distinctCounts = [...new Set([
     ...explicitCounts,
+    ...listedCountsAfterExplicit,
     ...(inferredCount == null ? [] : [inferredCount]),
   ])];
   if (distinctCounts.length > 1) {
@@ -240,6 +259,7 @@ export function assertContractHandoff({ goal, contractText, phases, evidenceRequ
     ...(Array.isArray(phases) ? phases.flatMap((phase) => [
       phase?.objective,
       ...(Array.isArray(phase?.exitCriteria) ? phase.exitCriteria : [phase?.exitCriteria]),
+      ...(Array.isArray(phase?.carryForwardInvariants) ? phase.carryForwardInvariants : [phase?.carryForwardInvariants]),
       ...(Array.isArray(phase?.verificationEvidence) ? phase.verificationEvidence : [phase?.verificationEvidence]),
     ]) : []),
     ...(Array.isArray(evidenceRequirements)
