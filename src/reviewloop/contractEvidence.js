@@ -98,6 +98,17 @@ function contiguousPhaseCount(numbers) {
   return numbers.length;
 }
 
+function hasExecutionPlanHeading(text) {
+  return /^\s{0,3}(?:#{1,6}\s*)?(?:the[ \t]+)?execution[ \t]+plan[ \t]*:?/im.test(String(text ?? ''));
+}
+
+function colonPhaseNumbers(text) {
+  return [...new Set(
+    [...String(text ?? '').matchAll(/(?:^|[\n.;][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\s*:/gim)]
+      .map((m) => Number(m[1])),
+  )].sort((a, b) => a - b);
+}
+
 export function declaredPhasePlan(text) {
   const s = String(text ?? '');
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
@@ -204,6 +215,15 @@ export function referencesMissingPriorContract(text) {
 
 export function assertContractHandoff({ goal, contractText, phases } = {}) {
   const frozen = normalizeContractText(contractText);
+  const suppliedPhaseIds = Array.isArray(phases)
+    ? phases.map((phase) => String(phase?.id ?? '').trim())
+    : [];
+  const reservedScopeIds = suppliedPhaseIds.filter((id) => id.toLowerCase() === 'final' || id.toLowerCase() === 'task');
+  if (reservedScopeIds.length) {
+    throw new Error(
+      `reviewloop_begin: phase id "${reservedScopeIds[0]}" is reserved for ReviewLoop scope state`,
+    );
+  }
   if (referencesMissingPriorContract(goal) && !frozen) {
     throw new Error(
       'reviewloop_begin: task refers to a spec/contract in prior conversation but no self-contained contractText was supplied',
@@ -226,12 +246,27 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
     );
   }
   const declaredCounts = [...new Set(declarations.map((item) => item.count).filter((count) => count != null))];
-  if (declaredCounts.length > 1) {
+
+  // Strong cross-field bridge: if one field explicitly declares an Execution
+  // Plan heading and the other field contains a contiguous colon-labelled
+  // Phase 1..N sequence, treat that as one task plan. This does NOT join
+  // arbitrary headings across fields; the explicit plan heading is required.
+  if (declaredCounts.length === 0 && goal && frozen) {
+    for (const [headingSource, phaseSource] of [[goal, frozen], [frozen, goal]]) {
+      if (!hasExecutionPlanHeading(headingSource)) continue;
+      const crossNumbers = colonPhaseNumbers(phaseSource);
+      const crossCount = contiguousPhaseCount(crossNumbers);
+      if (crossCount != null) declaredCounts.push(crossCount);
+    }
+  }
+
+  const uniqueDeclaredCounts = [...new Set(declaredCounts)];
+  if (uniqueDeclaredCounts.length > 1) {
     throw new Error(
-      `reviewloop_begin: phase plan declaration is inconsistent; conflicting declared phase counts: ${declaredCounts.join(', ')}`,
+      `reviewloop_begin: phase plan declaration is inconsistent; conflicting declared phase counts: ${uniqueDeclaredCounts.join(', ')}`,
     );
   }
-  const declaredCount = declaredCounts[0] ?? null;
+  const declaredCount = uniqueDeclaredCounts[0] ?? null;
   if (declaredCount != null) {
     if (!Array.isArray(phases) || phases.length === 0) {
       throw new Error(
@@ -249,15 +284,7 @@ export function assertContractHandoff({ goal, contractText, phases } = {}) {
       return m ? Number(m[1]) : null;
     });
     const canonicalCount = canonicalIds.filter((n) => n != null).length;
-    const rawPhaseIds = phases.map((phase) => String(phase?.id ?? '').trim());
-    const reservedScopeIds = rawPhaseIds.filter((id) => id.toLowerCase() === 'final' || id.toLowerCase() === 'task');
     const mixedIds = canonicalCount > 0 && canonicalCount < canonicalIds.length;
-    if (reservedScopeIds.length) {
-      throw new Error(
-        `reviewloop_begin: phase id "${reservedScopeIds[0]}" is reserved for ReviewLoop scope state`
-        + (mixedIds ? '; the declared plan also mixes canonical phase-N ids with custom ids' : ''),
-      );
-    }
     if (mixedIds) {
       throw new Error(
         'reviewloop_begin: declared phase plan mixes canonical phase-N ids with custom ids; use either a complete canonical phase-1..phase-N sequence or consistently custom ids',

@@ -722,3 +722,30 @@ test('LOCAL invalid evidence is rejected before Gate execution and reports still
   assert.equal(w.calls.gate, beforeGate, 'invalid local evidence must be rejected before Gate work');
   assert.equal(w.calls.reviewer, 0);
 });
+
+
+test('reserved phase ids are rejected even without any prose phase declaration', () => {
+  assert.throws(() => assertContractHandoff({
+    goal: 'Ordinary structured task with no prose phase heading.',
+    phases: [{
+      id: 'final', title: 'Bad', objective: 'Do work.', exitCriteria: ['Done.'],
+    }],
+  }), /phase id "final" is reserved/i);
+});
+
+test('Execution Plan heading in one field can bind colon-labelled phases in the other field', () => {
+  const goal = 'Implement the requested change.\n\nExecution Plan:';
+  const contractText = [
+    'Frozen acceptance contract.',
+    'Phase 1: establish the foundation.',
+    'Phase 2: integrate the behavior.',
+  ].join('\n');
+  assert.throws(
+    () => assertContractHandoff({ goal, contractText, phases: [] }),
+    /phases\[\] is empty/,
+  );
+  assert.doesNotThrow(() => assertContractHandoff({ goal, contractText, phases: [
+    { id: 'phase-1', title: 'P1', objective: 'Foundation.', exitCriteria: ['P1 done.'] },
+    { id: 'phase-2', title: 'P2', objective: 'Integration.', exitCriteria: ['P2 done.'] },
+  ] }));
+});
