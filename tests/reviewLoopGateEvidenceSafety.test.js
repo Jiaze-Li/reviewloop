@@ -826,3 +826,38 @@ test('pre-verificationEvidence completed phase resumes with its legacy scope fin
   assert.equal(resumed.status, 'PHASE_PASS');
   assert.equal(resumed.completedPhase.id, 'p2');
 });
+
+
+test('phase objectives and evidence requirement descriptions cannot refer to missing prior conversation', () => {
+  const phaseWithPriorRef = [{
+    id: 'p1',
+    title: 'P1',
+    objective: 'See the earlier contract for the full acceptance criteria.',
+    exitCriteria: ['P1 works.'],
+  }];
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement P1.',
+    phases: phaseWithPriorRef,
+  }), /structured phase\/evidence acceptance text is not self-contained/);
+
+  const evidenceRequirements = [{
+    id: 'runtime',
+    description: 'Refer to the previous contract for the runtime acceptance criteria.',
+    gate: 'final',
+  }];
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement the runtime behavior.',
+    phases: [],
+    evidenceRequirements,
+  }), /structured phase\/evidence acceptance text is not self-contained/);
+});
+
+test('arbitrary stage/step prose remains outside phase inference unless structured phases are supplied explicitly', () => {
+  for (const text of [
+    'This is a three-stage rollout: stage one setup; stage two migration; stage three cleanup.',
+    'Step 1) set up. Step 2) roll out.',
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, null);
+    assert.doesNotThrow(() => assertContractHandoff({ goal: text, phases: [] }));
+  }
+});

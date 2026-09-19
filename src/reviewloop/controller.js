@@ -474,7 +474,7 @@ export function createReviewLoopController({
   } = {}) {
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
-    const frozenContractText = assertContractHandoff({ goal, contractText, phases });
+    const frozenContractText = assertContractHandoff({ goal, contractText, phases, evidenceRequirements });
     // Validate bounded structured phase metadata before baseline/Gate work.
     // createReviewObjective normalizes again when freezing the objective; this
     // early pass is deliberately side-effect free and prevents invalid

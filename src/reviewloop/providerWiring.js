@@ -576,7 +576,7 @@ export function buildSupervisorInvoke() {
       'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
       'Return JSON: {"guidance":"","recommendation":"REWORK|HUMAN_REQUIRED"}.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
     const value = validateSupervisorPayload(parsed, { raw });
