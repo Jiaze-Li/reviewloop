@@ -131,7 +131,7 @@ export function declaredPhasePlan(text) {
     new RegExp('\\b(' + countToken + ')\\s*(?:-\\s*)?phases?\\s+execution\\s+plan\\b', 'ig'),
     new RegExp('\\bexecution\\s+plan\\s+(?:(?:has|with|contains|includes|including)\\s+(?:the\\s+)?|(?:comprises|consists\\s+of)\\s+|is\\s+(?:split|divided)\\s+into\\s+)(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
     new RegExp('\\bexecution\\s+plan\\s*:\\s*(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
-    new RegExp('\\b(?:this|the)\\s+(?:task|work|implementation)\\s+(?:(?:has|contains|includes)\\s+(?:the\\s+)?|(?:comprises|consists\\s+of)\\s+|is\\s+(?:split|divided)\\s+into\\s+)(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
+    new RegExp('\\b(?:this|the)\\s+(?:task|work|implementation|project)\\s+(?:(?:has|contains|includes)\\s+(?:the\\s+)?|(?:comprises|consists\\s+of)\\s+|is\\s+(?:split|divided)\\s+into\\s+)(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
   ];
   const explicitCountMatches = countPatterns.flatMap((pattern) =>
     [...s.matchAll(pattern)].map((m) => ({
@@ -291,7 +291,12 @@ export function assertContractHandoff({
   // can manufacture a fake phase sequence from one unrelated heading in each
   // source. Counts may corroborate across sources, but headings never cross the
   // source boundary.
-  const declarations = [goal, frozen].filter(Boolean).map((text) => declaredPhasePlan(text));
+  const constraintTexts = (Array.isArray(constraints) ? constraints : (constraints == null ? [] : [constraints]))
+    .filter((value) => value != null && String(value).trim())
+    .map(String);
+  const declarations = [goal, frozen, ...constraintTexts]
+    .filter(Boolean)
+    .map((text) => declaredPhasePlan(text));
   const invalidDeclaration = declarations.find((item) => item.invalid);
   if (invalidDeclaration) {
     throw new Error(

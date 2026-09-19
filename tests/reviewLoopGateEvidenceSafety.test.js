@@ -1044,3 +1044,28 @@ test('strong phase declarations recognize common word-form counts without wideni
   assert.equal(declaredPhasePlan(historical).count, null);
   assert.doesNotThrow(() => assertContractHandoff({ goal: historical, phases: [] }));
 });
+
+
+test('binding constraints participate in phase-count consistency checks', () => {
+  const two = [
+    { ...phases[0], id: 'phase-1' },
+    { ...phases[1], id: 'phase-2' },
+  ];
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement the requested change.',
+    constraints: ['The implementation has 3 phases.'],
+    phases: two,
+  }), /declares 3 phases.*contains 2|truncated/i);
+
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement the requested change.',
+    constraints: ['The project has three phases.'],
+    phases: [],
+  }), /phases\[\] is empty/);
+
+  assert.doesNotThrow(() => assertContractHandoff({
+    goal: 'Implement the requested change.',
+    constraints: ['The project has two phases.'],
+    phases: two,
+  }));
+});
