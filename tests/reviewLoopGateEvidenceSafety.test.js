@@ -1087,3 +1087,17 @@ test('explicit count is checked against sentence-separated and comma-separated p
     }), /inconsistent|conflicting declared phase counts/);
   }
 });
+
+
+test('explicit count followed by comma-prefixed phase enumeration is consistency-checked', () => {
+  const text = 'Execution plan has 2 phases, Phase 1: setup. Phase 2: rollout. Phase 3: cleanup.';
+  const declaration = declaredPhasePlan(text);
+  assert.match(declaration.invalid ?? '', /conflicting declared phase counts/);
+  assert.throws(() => assertContractHandoff({
+    goal: text,
+    phases: [
+      { ...phases[0], id: 'phase-1' },
+      { ...phases[1], id: 'phase-2' },
+    ],
+  }), /inconsistent|conflicting declared phase counts/);
+});
