@@ -696,7 +696,9 @@ export function createReviewLoopController({
     loopState,
     review,
     telemetry,
-    { head = null, gate = null, reviewScope = null, auditRecord = null } = {},
+    {
+      head = null, gate = null, reviewScope = null, auditRecord = null, evidenceFingerprint = null,
+    } = {},
   ) {
     const scope = reviewScope ?? currentReviewScope(loopState);
     if (scope.type !== 'phase') return null;
@@ -743,6 +745,7 @@ export function createReviewLoopController({
       completedScope: scope,
       nextScope,
       head,
+      evidenceFingerprint,
     });
     recordTransition(
       loopState,
@@ -1656,7 +1659,10 @@ export function createReviewLoopController({
     if (decision.verdict === REVIEW_VERDICTS.PASS) {
       const telemetry = await spend.telemetry();
       const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
-        head: delta.currentHead ?? null, gate, reviewScope,
+        head: delta.currentHead ?? null,
+        gate,
+        reviewScope,
+        evidenceFingerprint: delta.fingerprint,
       });
       if (phaseResult) {
         await saveLoop(loopState);
@@ -2375,6 +2381,7 @@ export function createReviewLoopController({
             gate,
             reviewScope,
             auditRecord: passAuditRecord,
+            evidenceFingerprint: delta.fingerprint,
           });
           await saveLoop(loopState);
           return phaseResult;

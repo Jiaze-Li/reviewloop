@@ -287,19 +287,6 @@ export function assertContractHandoff({
   }
   const declaredCounts = [...new Set(declarations.map((item) => item.count).filter((count) => count != null))];
 
-  // Strong cross-field bridge: if one field explicitly declares an Execution
-  // Plan heading and the other field contains a contiguous colon-labelled
-  // Phase 1..N sequence, treat that as one task plan. This does NOT join
-  // arbitrary headings across fields; the explicit plan heading is required.
-  if (declaredCounts.length === 0 && goal && frozen) {
-    for (const [headingSource, phaseSource] of [[goal, frozen], [frozen, goal]]) {
-      if (!hasExecutionPlanHeading(headingSource)) continue;
-      const crossNumbers = colonPhaseNumbers(phaseSource);
-      const crossCount = contiguousPhaseCount(crossNumbers);
-      if (crossCount != null) declaredCounts.push(crossCount);
-    }
-  }
-
   const uniqueDeclaredCounts = [...new Set(declaredCounts)];
   if (uniqueDeclaredCounts.length > 1) {
     throw new Error(
@@ -571,7 +558,9 @@ export function evidenceBundleFingerprint(bundle) {
     .digest('hex');
 }
 
-export function buildResumePacket({ loopState, objective, completedScope, nextScope, head = null } = {}) {
+export function buildResumePacket({
+  loopState, objective, completedScope, nextScope, head = null, evidenceFingerprint = null,
+} = {}) {
   const completed = loopState?.completedPhases ?? [];
   const inherited = completed
     .map((entry) => (objective?.phases ?? []).find((p) => p.id === entry.id))
@@ -619,7 +608,10 @@ export function buildResumePacket({ loopState, objective, completedScope, nextSc
       requirementId: requirement.id,
       gate: requirement.gate,
       recordCount: (loopState?.evidenceRecords ?? [])
-        .filter((record) => record.requirementId === requirement.id).length,
+        .filter((record) => record.requirementId === requirement.id
+          && completedScope
+          && record.reviewScopeFingerprint === (completedScope.fingerprint ?? '')
+          && record.evidenceFingerprint === evidenceFingerprint).length,
     })),
   };
 }

@@ -8,7 +8,7 @@ import {
 import {
   CONTRACT_TEXT_MAX_BYTES, EVIDENCE_LIMITS, normalizeContractText,
   assertContractHandoff, declaredPhasePlan, referencesMissingPriorContract,
-  bindEvidenceSubmissions, evidencePromptLines,
+  bindEvidenceSubmissions, evidencePromptLines, buildResumePacket,
   latestEvidenceRecords, evidenceStatusForScope,
 } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
@@ -975,3 +975,61 @@ for (const legacyOversize of ['goal', 'constraints', 'phases', 'verificationPlan
     assert.equal(after.resumePacket, null);
   });
 }
+
+
+test('cross-field Execution Plan heading does not combine with unrelated phase-labelled prose in another field', () => {
+  const goal = 'Execution Plan:\nRefactor the auth module as a single review gate.';
+  const contractText = [
+    'Historical protocol example:',
+    'Phase 1: legacy handshake.',
+    'Phase 2: legacy cleanup.',
+  ].join('\n');
+  assert.equal(declaredPhasePlan(goal).count, null);
+  assert.equal(declaredPhasePlan(contractText).count, null);
+  assert.doesNotThrow(() => assertContractHandoff({ goal, contractText, phases: [] }));
+});
+
+test('resume evidence summary counts only proof bound to the completed scope and exact code fingerprint', () => {
+  const completedScope = { type: 'phase', id: 'p1', title: 'P1', fingerprint: 'scope-p1' };
+  const nextScope = {
+    type: 'phase', id: 'p2', title: 'P2', objective: 'Do P2.',
+    exitCriteria: ['P2 works.'], carryForwardInvariants: [],
+    verificationCommands: [], verificationEvidence: [],
+  };
+  const objective = {
+    fingerprint: 'objective-fp',
+    goal: 'Phased task.',
+    phases,
+    evidenceRequirements: [req('p1-proof', { gate: 'p1' })],
+    repository: { name: 'acme/repo' },
+    constraints: [],
+    contractText: '',
+    verificationPlan: null,
+  };
+  const loopState = {
+    loopId: 'rl-test',
+    completedPhases: [{ id: 'p1', title: 'P1', proof: 'proof-hash' }],
+    evidenceRecords: [
+      {
+        requirementId: 'p1-proof',
+        reviewScopeFingerprint: 'scope-p1',
+        evidenceFingerprint: 'old-code',
+      },
+    ],
+  };
+
+  const stale = buildResumePacket({
+    loopState, objective, completedScope, nextScope, evidenceFingerprint: 'new-code',
+  });
+  assert.equal(stale.evidenceSummary[0].recordCount, 0);
+
+  loopState.evidenceRecords.push({
+    requirementId: 'p1-proof',
+    reviewScopeFingerprint: 'scope-p1',
+    evidenceFingerprint: 'new-code',
+  });
+  const current = buildResumePacket({
+    loopState, objective, completedScope, nextScope, evidenceFingerprint: 'new-code',
+  });
+  assert.equal(current.evidenceSummary[0].recordCount, 1);
+});
