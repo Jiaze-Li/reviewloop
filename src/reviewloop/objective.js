@@ -7,6 +7,7 @@
 // ReviewLoop declare a larger original task complete.
 
 import { createHash } from 'node:crypto';
+import { normalizeContractText, normalizeEvidenceRequirements } from './contractEvidence.js';
 
 export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL', PR: 'PR' });
 
@@ -51,17 +52,45 @@ function freezeDeep(value) {
 // Normalize an optional phase plan supplied by the Worker. The plan is frozen
 // into the immutable ReviewObjective so a later review round cannot skip,
 // reorder, weaken, or rewrite phase acceptance boundaries.
+const RESERVED_PHASE_IDS = new Set(['task', 'final']);
+export const PHASE_VERIFICATION_EVIDENCE_LIMITS = Object.freeze({
+  items: 32,
+  itemBytes: 4096,
+  totalBytes: 16 * 1024,
+});
+export const PHASE_PLAN_MAX_BYTES = 32 * 1024;
+// Larger than the sum of the individually legal contract/phase/evidence
+// component maxima, with additional headroom for goal, constraints,
+// verificationPlan JSON framing and escaping. The aggregate is still bounded
+// so PHASE_PASS remains context-refresh safe.
+export const RESUME_TASK_DEFINITION_MAX_BYTES = 160 * 1024;
+const utf8Bytes = (value) => Buffer.byteLength(String(value), 'utf8');
+
+export function assertResumeTaskDefinitionBound({
+  goal = '', constraints = [], phases = [], contractText = '', verificationPlan = null, evidenceRequirements = [],
+} = {}) {
+  const payload = { goal: String(goal), constraints, phases, contractText, verificationPlan, evidenceRequirements };
+  if (utf8Bytes(JSON.stringify(payload)) > RESUME_TASK_DEFINITION_MAX_BYTES) {
+    throw new Error(
+      `createReviewObjective: task definition copied into resume packets exceeds the ${RESUME_TASK_DEFINITION_MAX_BYTES}-byte UTF-8 limit; keep goal, constraints, phase metadata, verification commands, contract, and evidence requirements concise without truncating acceptance criteria`,
+    );
+  }
+}
+
 export function normalizePhasePlan(phases = []) {
   if (phases == null) return [];
   if (!Array.isArray(phases)) throw new Error('createReviewObjective: phases must be an array');
 
   const seen = new Set();
-  return phases.map((raw, index) => {
+  const normalized = phases.map((raw, index) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new Error(`createReviewObjective: phase ${index + 1} must be an object`);
     }
     const id = String(raw.id ?? `phase-${index + 1}`).trim();
     if (!id) throw new Error(`createReviewObjective: phase ${index + 1} has an empty id`);
+    if (RESERVED_PHASE_IDS.has(id.toLowerCase())) {
+      throw new Error(`createReviewObjective: phase id "${id}" is reserved for ReviewLoop scope state`);
+    }
     if (seen.has(id)) throw new Error(`createReviewObjective: duplicate phase id "${id}"`);
     seen.add(id);
 
@@ -75,6 +104,17 @@ export function normalizePhasePlan(phases = []) {
     if (!exitCriteria.length) {
       throw new Error(`createReviewObjective: phase "${id}" requires at least one exit criterion`);
     }
+    const verificationEvidence = list(raw.verificationEvidence);
+    if (verificationEvidence.length > PHASE_VERIFICATION_EVIDENCE_LIMITS.items
+      || verificationEvidence.some((item) => utf8Bytes(item) > PHASE_VERIFICATION_EVIDENCE_LIMITS.itemBytes)
+      || utf8Bytes(verificationEvidence.join('\n')) > PHASE_VERIFICATION_EVIDENCE_LIMITS.totalBytes) {
+      throw new Error(
+        `createReviewObjective: phase "${id}" verificationEvidence exceeds `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.items} items, `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.itemBytes} bytes per item, or `
+        + `${PHASE_VERIFICATION_EVIDENCE_LIMITS.totalBytes} bytes total; keep descriptive proof requirements concise`,
+      );
+    }
 
     return {
       id,
@@ -85,8 +125,17 @@ export function normalizePhasePlan(phases = []) {
       // Only exact executable commands belong here. Descriptive verification
       // prose stays in the phase objective / exit criteria for the Reviewer.
       verificationCommands: list(raw.verificationCommands),
+      // Descriptive/non-command evidence required to prove this phase. These
+      // survive structured handoff even when they are not shell commands.
+      verificationEvidence,
     };
   });
+  if (utf8Bytes(JSON.stringify(normalized)) > PHASE_PLAN_MAX_BYTES) {
+    throw new Error(
+      `createReviewObjective: complete structured phase plan exceeds the ${PHASE_PLAN_MAX_BYTES}-byte UTF-8 limit; keep objectives, exit criteria, invariants, commands, and evidence descriptions concise without truncating acceptance criteria`,
+    );
+  }
+  return normalized;
 }
 
 // Build the immutable objective record. `mode` is LOCAL unless a PR number is
@@ -108,6 +157,8 @@ export function createReviewObjective({
   reviewedHeadSha = null,
   constraints = [],
   phases = [],
+  contractText = '',
+  evidenceRequirements = [],
   blockingSeverities = DEFAULT_BLOCKING_SEVERITIES,
   // In phase-aware mode this is the convergence budget PER review gate
   // (each phase gate and the final whole-task gate), not one budget shared
@@ -138,6 +189,19 @@ export function createReviewObjective({
     ? maxReviewRounds
     : DEFAULT_MAX_REVIEW_ROUNDS;
   const normalizedPhases = normalizePhasePlan(phases);
+  const normalizedContractText = normalizeContractText(contractText);
+  const normalizedEvidenceRequirements = normalizeEvidenceRequirements(
+    evidenceRequirements,
+    normalizedPhases.map((p) => p.id),
+  );
+  assertResumeTaskDefinitionBound({
+    goal,
+    constraints: normalizedConstraints,
+    phases: normalizedPhases,
+    contractText: normalizedContractText,
+    verificationPlan,
+    evidenceRequirements: normalizedEvidenceRequirements,
+  });
 
   const objective = {
     loopId: String(loopId),
@@ -161,6 +225,13 @@ export function createReviewObjective({
       : null,
     constraints: normalizedConstraints,
     phases: normalizedPhases,
+    // Optional complete user-facing task contract. When supplied it is the
+    // self-contained source the independent Reviewer receives; it must never
+    // be replaced by a reference to earlier chat history.
+    contractText: normalizedContractText || null,
+    // Non-command evidence obligations (runtime/artifact/manual) frozen with
+    // the objective so a later round cannot silently waive them.
+    evidenceRequirements: normalizedEvidenceRequirements,
     blockingSeverities: blocking,
     maxReviewRounds: rounds,
     // The deterministic Gate's verification plan, FROZEN at reviewloop_begin.
@@ -204,6 +275,10 @@ function fingerprintFields(o) {
   // Backward compatibility: legacy objectives had no phase plan, so an empty
   // plan is intentionally omitted from the fingerprint.
   if (Array.isArray(o.phases) && o.phases.length) base.phases = o.phases;
+  if (o.contractText) base.contractText = o.contractText;
+  if (Array.isArray(o.evidenceRequirements) && o.evidenceRequirements.length) {
+    base.evidenceRequirements = o.evidenceRequirements;
+  }
   if (o.verificationPlan) base.verificationPlan = o.verificationPlan;
   // PR target identity — load-bearing for "which PR snapshot is under review".
   // Only folded in when present, so a LOCAL / pre-existing objective keeps its
@@ -301,6 +376,12 @@ export function assertObjectiveNotWeakened(original, candidate) {
   }
   if (JSON.stringify(candidate.phases ?? []) !== JSON.stringify(original.phases ?? [])) {
     problems.push('phase plan changed');
+  }
+  if ((candidate.contractText ?? null) !== (original.contractText ?? null)) {
+    problems.push('frozen contract text changed');
+  }
+  if (JSON.stringify(candidate.evidenceRequirements ?? []) !== JSON.stringify(original.evidenceRequirements ?? [])) {
+    problems.push('evidence requirements changed');
   }
   if (original.verificationPlan) {
     if (!candidate.verificationPlan) {

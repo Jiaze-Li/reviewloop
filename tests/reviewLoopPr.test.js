@@ -14,7 +14,8 @@ import {
 } from './helpers/reviewLoopHarness.js';
 
 function build({
-  prBackend, reviews = [], gates = [], supervisorReplies = [], onReviewer, persistence = new MemoryPersistence(),
+  prBackend, reviews = [], gates = [], supervisorReplies = [], onReviewer,
+  captureWorktreeSnapshotFn = null, persistence = new MemoryPersistence(),
 } = {}) {
   const calls = { reviewer: 0, supervisor: 0, gate: 0 };
   let ri = 0;
@@ -24,6 +25,7 @@ function build({
     persistence,
     prBackend,
     ...prTestFakes(prBackend),
+    ...(captureWorktreeSnapshotFn ? { captureWorktreeSnapshotFn } : {}),
     discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo test'], manifestFingerprint: 'mf' }),
     runGateFn: async () => {
       const g = gates[gi] ?? gates[gates.length - 1] ?? { verdict: 'PASS' };
@@ -146,6 +148,51 @@ test('E: blocking PR finding -> REWORK, then the next HEAD -> a fresh round', as
   const r2 = await controller.review({ loopId });
   assert.equal(r2.status, 'PASS');
   assert.equal(r2.round, 2);
+});
+
+
+test('revised runtime evidence can be re-reviewed on the same PR HEAD', async () => {
+  const backend = mockPrBackend({ heads: ['H1'] });
+  const { controller, calls } = build({
+    prBackend: backend,
+    gates: [
+      { verdict: 'PASS', fingerprint: 'same-gate' },
+      { verdict: 'PASS', fingerprint: 'same-gate' },
+    ],
+    reviews: [
+      { findings: [finding('P1', 'ui.js', 'runtime evidence is too weak')] },
+      { findings: [] },
+    ],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'PR runtime evidence task',
+    contractText: 'Goal: prove the runtime behavior on the reviewed PR.',
+    cwd: '/r',
+    prNumber: 4,
+    evidenceRequirements: [{
+      id: 'runtime-ui',
+      type: 'runtime',
+      description: 'Exercise the real production interaction.',
+      gate: 'final',
+    }],
+  });
+
+  const weak = await controller.review({
+    loopId,
+    evidence: [{ requirementId: 'runtime-ui', summary: 'Opened the app only.' }],
+  });
+  assert.equal(weak.status, 'REWORK');
+  assert.equal(calls.reviewer, 1);
+
+  const improved = await controller.review({
+    loopId,
+    evidence: [{
+      requirementId: 'runtime-ui',
+      summary: 'Completed the full production interaction and observed the required result.',
+    }],
+  });
+  assert.equal(improved.status, 'PASS');
+  assert.equal(calls.reviewer, 2, 'evidence-only progress must not require an unrelated push');
 });
 
 // F -- durable audit record.
@@ -420,4 +467,38 @@ test('M: completed PR phase must remain bound to its PHASE_PASS audit record', a
     () => controller.review({ loopId }),
     /successful exact-HEAD PHASE_PASS audit record|phase progression invalid/,
   );
+});
+
+
+test('PR Gate mutation rejects submitted evidence with CODE_CHANGED receipt', async () => {
+  const backend = mockPrBackend({ heads: ['H1'] });
+  let capture = 0;
+  const { controller, calls } = build({
+    prBackend: backend,
+    captureWorktreeSnapshotFn: async () => {
+      capture += 1;
+      return { ok: true, entries: capture % 2 === 1 ? [] : [' M generated.js'] };
+    },
+  });
+  const { loopId } = await controller.begin({
+    goal: 'PR mutation evidence task',
+    contractText: 'Prove runtime behavior on the reviewed PR.',
+    cwd: '/r',
+    prNumber: 4,
+    evidenceRequirements: [{
+      id: 'runtime-ui', type: 'runtime',
+      description: 'Exercise the real interaction.', gate: 'final',
+    }],
+  });
+  const result = await controller.review({
+    loopId,
+    evidence: [{ requirementId: 'runtime-ui', summary: 'Verified against H1 before Gate mutation.' }],
+  });
+  assert.equal(result.status, 'REWORK');
+  assert.equal(result.evidenceSubmission.status, 'NOT_ACCEPTED');
+  assert.equal(result.evidenceSubmission.reason, 'CODE_CHANGED');
+  assert.equal(result.evidenceSubmission.submittedCount, 1);
+  assert.equal(result.evidenceSubmission.retryRequired, true);
+  assert.match(result.reason, /must be recollected against the pushed code/);
+  assert.equal(calls.reviewer, 0);
 });

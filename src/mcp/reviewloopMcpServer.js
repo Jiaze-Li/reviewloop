@@ -73,6 +73,15 @@ export function createReviewLoopMcpServer({
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
         prNumber: z.number().int().optional().describe('PR number — review the PR (base -> exact HEAD) instead of the local worktree'),
         constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
+        contractText: z.string().min(1).optional().describe('complete self-contained frozen task contract, at most 65536 UTF-8 bytes; never truncate acceptance criteria or replace them with a reference to earlier conversation'),
+        evidenceRequirements: z.array(z.object({
+          id: z.string().min(1),
+          type: z.enum(['runtime', 'artifact', 'manual', 'other']).optional(),
+          description: z.string().min(1),
+          gate: z.string().min(1).optional().describe('one phase id or final; defaults to final. final is the task-completion gate for phased and unphased tasks'),
+          required: z.boolean().optional(),
+          covers: z.array(z.string().min(1)).optional(),
+        })).optional().describe('frozen non-command evidence obligations; required items mechanically block PASS until evidence is submitted'),
         verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
         blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1 and P2'),
         maxReviewRounds: z.number().int().positive().optional().describe('maximum fresh Reviewer rounds PER gate (each phase gate and the final gate); defaults to 3'),
@@ -83,6 +92,7 @@ export function createReviewLoopMcpServer({
           exitCriteria: z.array(z.string().min(1)).min(1),
           carryForwardInvariants: z.array(z.string().min(1)).optional(),
           verificationCommands: z.array(z.string().min(1)).optional(),
+          verificationEvidence: z.array(z.string().min(1)).optional().describe('descriptive runtime/artifact/manual evidence expected for this phase'),
         })).optional().describe('ordered frozen phase plan from the task contract; omit for ordinary single-gate tasks'),
       },
       outputSchema: {
@@ -103,6 +113,8 @@ export function createReviewLoopMcpServer({
       cwd: reqCwd,
       prNumber,
       constraints,
+      contractText,
+      evidenceRequirements,
       verificationCommands,
       blockingSeverities,
       maxReviewRounds,
@@ -113,6 +125,8 @@ export function createReviewLoopMcpServer({
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
         prNumber: prNumber ?? null,
         constraints: constraints ?? [],
+        contractText: contractText ?? '',
+        evidenceRequirements: evidenceRequirements ?? [],
         verificationCommands: verificationCommands ?? null,
         blockingSeverities,
         maxReviewRounds,
@@ -142,6 +156,11 @@ export function createReviewLoopMcpServer({
         'Run one ReviewLoop round for the current gate: deterministic Gate, then independent Reviewer if justified, then convergence policy. PHASE_PASS -> current phase passed; continue the next phase in THIS SAME loop and call again when ready. PASS -> the entire task passed the final gate and is done. REWORK -> fix the returned findings yourself in THIS session and call again. HUMAN_REQUIRED -> stop and surface the blocker. WAITING_FOR_REVIEW -> transient; call again once state settles. The deterministic Gate itself uses zero model tokens.',
       inputSchema: {
         loopId: z.string().min(1).describe('the loopId from reviewloop_begin'),
+        evidence: z.array(z.object({
+          requirementId: z.string().min(1),
+          summary: z.string().min(1),
+          artifactRef: z.string().min(1).optional(),
+        })).optional().describe('non-command evidence produced for the current gate; ReviewLoop binds it to the exact current code/review scope'),
       },
       outputSchema: {
         status: z.string(),
@@ -157,12 +176,18 @@ export function createReviewLoopMcpServer({
         supervisorGuidance: z.string().nullable().optional(),
         head: z.string().nullable().optional(),
         nextAction: z.string().nullable().optional(),
+        evidenceSubmission: z.record(z.string(), z.any()).optional().describe('explicit NOT_ACCEPTED receipt on Gate failure, code mutation or invalid input; evidence must be re-submitted'),
+        missingEvidenceRequirements: z.array(z.record(z.string(), z.any())).optional(),
+        resumePacket: z.record(z.string(), z.any()).nullable().optional(),
+        contextRefreshSafe: z.boolean().optional(),
+        evidenceRecordCount: z.number().int().nonnegative().optional(),
         telemetry: z.record(z.string(), z.any()).optional(),
       },
     },
-    async ({ loopId }, extra) => {
+    async ({ loopId, evidence }, extra) => {
       const res = await ctl.review({
         loopId,
+        evidence: evidence ?? [],
         signal: extra?.signal,
         onHeartbeat: async (msg) => {
           if (typeof extra?.sendNotification === 'function') {

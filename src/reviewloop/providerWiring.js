@@ -33,6 +33,7 @@ import {
   verifyEffectiveAgyAgent,
 } from './adapters/agyCustomAgentCapability.js';
 import { createGithubReviewBackend } from './githubBackend.js';
+import { evidencePromptLines, normalizeContractText } from './contractEvidence.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 export { narrowReviewTransportCwd, narrowAgyGeminiDir, detectAgyCustomAgentSupport };
@@ -485,6 +486,10 @@ function reviewScopePromptLines(reviewScope) {
       'PHASE EXIT CRITERIA:',
       ...(reviewScope.exitCriteria ?? []).map((v) => `- ${v}`),
     ];
+    if ((reviewScope.verificationEvidence ?? []).length) {
+      lines.push('PHASE VERIFICATION EVIDENCE EXPECTED:');
+      lines.push(...reviewScope.verificationEvidence.map((v) => `- ${v}`));
+    }
     if ((reviewScope.preserveInvariants ?? []).length) {
       lines.push('INVARIANTS FROM COMPLETED PHASES THAT MUST REMAIN TRUE:');
       lines.push(...reviewScope.preserveInvariants.map((v) => `- ${v}`));
@@ -517,17 +522,21 @@ function reviewScopePromptLines(reviewScope) {
   return [];
 }
 
-function buildReviewerInvoke() {
+export function buildReviewerInvoke() {
   return async ({
-    objective, diff, changedFiles, gate, reviewScope = null, transport, model, signal,
+    objective, diff, changedFiles, gate, reviewScope = null, evidence = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are an INDEPENDENT code reviewer.',
-      `ORIGINAL TASK: ${objective.goal}`,
+      `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
+      objective.contractText
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
+        : '',
       objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
       ...reviewScopePromptLines(reviewScope),
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
+      ...evidencePromptLines(evidence),
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
       '',
@@ -551,19 +560,23 @@ function buildReviewerInvoke() {
   };
 }
 
-function buildSupervisorInvoke() {
+export function buildSupervisorInvoke() {
   return async ({
-    objective, blockingFindings, reviewScope = null, transport, model, signal,
+    objective, blockingFindings, reviewScope = null, evidence = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
-      `ORIGINAL TASK: ${objective.goal}`,
+      `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
+      objective.contractText
+        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
+        : '',
       ...reviewScopePromptLines(reviewScope),
+      ...evidencePromptLines(evidence),
       `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
       'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
       'Return JSON: {"guidance":"","recommendation":"REWORK|HUMAN_REQUIRED"}.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
     const value = validateSupervisorPayload(parsed, { raw });

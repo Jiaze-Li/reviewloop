@@ -74,6 +74,12 @@ export function initialLoopState(objective) {
     // phase passes, currentPhaseIndex === phases.length means "final gate".
     currentPhaseIndex: Array.isArray(objective.phases) && objective.phases.length ? 0 : null,
     completedPhases: [],
+    // Durable non-command evidence bound to an exact review scope + code
+    // fingerprint. Old/stale runtime evidence cannot satisfy a later diff.
+    evidenceRecords: [],
+    // Compact handoff state produced after PHASE_PASS. It lets a Worker safely
+    // compact/refresh its own context without creating a new ReviewLoop.
+    resumePacket: null,
     reviewerCalls: 0,
     supervisorCalls: 0,
     // deterministic no-new-information tracking

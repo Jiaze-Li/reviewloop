@@ -22,6 +22,8 @@ import { DEFAULT_ROLE_POLICY } from '../orchestrator/roleRouting.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
 import {
   createReviewObjective,
+  normalizePhasePlan,
+  assertResumeTaskDefinitionBound,
   rehydrateObjective,
   assertObjectiveNotWeakened,
   baselineGateEvidenceIdentity,
@@ -52,6 +54,20 @@ import {
 } from './reviewPolicy.js';
 import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.js';
 import { chunkDiffForReview } from './diffChunker.js';
+import {
+  assertContractHandoff,
+  EvidenceValidationError,
+  normalizeContractText,
+  normalizeEvidenceRequirements,
+  validateEvidenceSubmissions,
+  latestEvidenceRecords,
+  requiredEvidenceForScope,
+  bindEvidenceSubmissions,
+  evidenceStatusForScope,
+  reviewerEvidenceBundle,
+  evidenceBundleFingerprint,
+  buildResumePacket,
+} from './contractEvidence.js';
 
 const RUNTIME_ROOT = REVIEWLOOP_RUNTIME_ROOT;
 
@@ -112,6 +128,9 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       carryForwardInvariants: phase.carryForwardInvariants ?? [],
       preserveInvariants,
       verificationCommands: phase.verificationCommands ?? [],
+      ...(Object.prototype.hasOwnProperty.call(phase, 'verificationEvidence')
+        ? { verificationEvidence: phase.verificationEvidence ?? [] }
+        : {}),
       phaseIndex: index,
       phaseCount: phases.length,
     };
@@ -129,6 +148,9 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       exitCriteria: p.exitCriteria ?? [],
       carryForwardInvariants: p.carryForwardInvariants ?? [],
       verificationCommands: p.verificationCommands ?? [],
+      ...(Object.prototype.hasOwnProperty.call(p, 'verificationEvidence')
+        ? { verificationEvidence: p.verificationEvidence ?? [] }
+        : {}),
     })),
     phaseCount: phases.length,
     // Phase-local verification may certify an intermediate implementation
@@ -372,13 +394,111 @@ export function createReviewLoopController({
     }
   }
 
+  function unacceptedEvidence(evidence, reason) {
+    return {
+      status: 'NOT_ACCEPTED',
+      reason,
+      submittedCount: Array.isArray(evidence) ? evidence.length : null,
+      retryRequired: reason === 'CODE_CHANGED' || (Array.isArray(evidence) ? evidence.length > 0 : evidence != null),
+    };
+  }
+
+  async function evidenceRework({ loopState, gate, head = null, reason, missing = [], receipt = null }) {
+    recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason);
+    await saveLoop(loopState);
+    return {
+      ...compactReworkPayload({
+        loopState,
+        review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
+        gate,
+      }),
+      head,
+      reason,
+      missingEvidenceRequirements: missing,
+      ...(receipt ? { evidenceSubmission: receipt } : {}),
+      nextAction: 'Correct or produce the evidence for this gate, then call reviewloop_review again in this same loop. Submit concise factual summaries and artifact references, not raw logs.',
+      telemetry: await durableTelemetry(loopState.loopId),
+      safetyEvents,
+    };
+  }
+
+  async function enforceEvidenceObligations({
+    loopState, objective, reviewScope, delta, gate, submissions = [], head = null,
+  }) {
+    const evidenceFingerprint = delta?.fingerprint ?? head ?? 'unknown';
+    const rework = async (reason, missing = [], receipt = null) => ({
+      blocked: true,
+      result: await evidenceRework({ loopState, gate, head, reason, missing, receipt }),
+    });
+    try {
+      // Binding validates the whole batch and prospective aggregate before
+      // changing records. Invalid input cannot persist an accepted prefix.
+      bindEvidenceSubmissions({
+        loopState,
+        objective,
+        reviewScope,
+        submissions,
+        evidenceFingerprint,
+        head,
+        now: new Date(clock()).toISOString(),
+      });
+      // Includes persisted records: upgrading/reloading cannot bypass limits.
+      const bundle = reviewerEvidenceBundle({
+        loopState, objective, reviewScope, evidenceFingerprint,
+      });
+      const status = evidenceStatusForScope({
+        loopState, objective, reviewScope, evidenceFingerprint,
+      });
+      if (status.missing.length) {
+        const ids = status.missing.map((r) => r.id);
+        return rework(`required evidence missing for ${reviewScope.id}: ${ids.join(', ')}`, status.missing);
+      }
+      return {
+        blocked: false,
+        bundle,
+        proofFingerprint: evidenceBundleFingerprint(bundle),
+      };
+    } catch (err) {
+      if (!(err instanceof EvidenceValidationError)) throw err;
+      // Deterministic input rejection consumes no Reviewer/Supervisor round,
+      // does not latch no-progress, and never echoes the rejected raw proof.
+      return rework(err.message, [], unacceptedEvidence(submissions, 'INVALID_EVIDENCE'));
+    }
+  }
+
   async function begin({
     goal, cwd, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
-    constraints = [], phases = [], signal = null,
+    constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
   } = {}) {
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
+    const frozenContractText = assertContractHandoff({
+      goal, contractText, constraints, phases, evidenceRequirements,
+    });
+    // Validate bounded structured phase metadata before baseline/Gate work.
+    // createReviewObjective normalizes again when freezing the objective; this
+    // early pass is deliberately side-effect free and prevents invalid
+    // verificationEvidence from spending repository work first.
+    const preflightPhases = normalizePhasePlan(phases);
+    const preflightEvidenceRequirements = normalizeEvidenceRequirements(
+      evidenceRequirements,
+      preflightPhases.map((phase) => phase.id),
+    );
+    // Verification commands are also copied into resumePacket. The configured
+    // commands are the only part known before repository discovery; validate
+    // the full discovered plan again immediately after discovery below.
+    assertResumeTaskDefinitionBound({
+      goal,
+      constraints,
+      phases: preflightPhases,
+      contractText: frozenContractText,
+      verificationPlan: verificationCommands == null ? null : {
+        source: 'configured-preflight',
+        commands: Array.isArray(verificationCommands) ? verificationCommands.map(String) : [String(verificationCommands)],
+      },
+      evidenceRequirements: preflightEvidenceRequirements,
+    });
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
     const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
     const mode = prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL;
@@ -398,13 +518,22 @@ export function createReviewLoopController({
     // PR Gate plan.
     const freezeVerificationPlan = (discoverCwd) => {
       const discovered = discoverVerificationCommandsFn({ cwd: discoverCwd, configured: verificationCommands });
-      return {
+      const plan = {
         source: String(discovered.source ?? 'unknown'),
         commands: (discovered.commands ?? []).map(String),
         manifestFingerprint: discovered.manifestFingerprint
           ?? sha256Hex(`fallback::${JSON.stringify(discovered.commands ?? [])}`),
         frozenAt: new Date(clock()).toISOString(),
       };
+      assertResumeTaskDefinitionBound({
+        goal,
+        constraints,
+        phases: preflightPhases,
+        contractText: frozenContractText,
+        verificationPlan: plan,
+        evidenceRequirements: preflightEvidenceRequirements,
+      });
+      return plan;
     };
 
     if (mode === REVIEW_MODES.LOCAL) {
@@ -513,7 +642,8 @@ export function createReviewLoopController({
     const objective = createReviewObjective({
       loopId, goal, repository, mode, prNumber, reviewer, baseline, prHead,
       prBaseSha, reviewedHeadSha: prHead,
-      constraints, phases, blockingSeverities, maxReviewRounds: resolvedMaxRounds,
+      constraints, phases, contractText: frozenContractText, evidenceRequirements,
+      blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       verificationPlan,
       baselineGateEvidence: baselineGate,
     });
@@ -566,7 +696,9 @@ export function createReviewLoopController({
     loopState,
     review,
     telemetry,
-    { head = null, gate = null, reviewScope = null, auditRecord = null } = {},
+    {
+      head = null, gate = null, reviewScope = null, auditRecord = null, evidenceFingerprint = null,
+    } = {},
   ) {
     const scope = reviewScope ?? currentReviewScope(loopState);
     if (scope.type !== 'phase') return null;
@@ -607,6 +739,14 @@ export function createReviewLoopController({
     loopState.chunkReviewCheckpoint = null;
 
     const nextScope = currentReviewScope(loopState);
+    loopState.resumePacket = buildResumePacket({
+      loopState,
+      objective: loopState.objective,
+      completedScope: scope,
+      nextScope,
+      head,
+      evidenceFingerprint,
+    });
     recordTransition(
       loopState,
       REVIEW_LOOP_STATES.READY_FOR_WORK,
@@ -623,6 +763,8 @@ export function createReviewLoopController({
         ? { id: nextScope.id, title: nextScope.title, index: nextScope.phaseIndex }
         : null,
       finalGatePending: nextScope.type === 'final',
+      resumePacket: loopState.resumePacket,
+      contextRefreshSafe: true,
       reviewer: review?.reviewer ?? null,
       nonBlockingFindings: review?.nonBlockingFindings ?? [],
       nonBlockingOmitted: review?.nonBlockingOmitted ?? 0,
@@ -661,8 +803,9 @@ export function createReviewLoopController({
   }) {
     const tried = new Set();
     // Effective attempt bound = this role's candidate count, so every
-    // DEFAULT_ROLE_POLICY candidate is reachable when each earlier one fails
-    // safely. `tried` + a null selection still stop the loop early.
+    // DEFAULT_ROLE_POLICY candidate must be mechanically reachable when each
+    // earlier one fails safely. `tried` + a null selection still stop the loop
+    // early.
     const maxAttempts = providerAttemptBudget(role);
     let lastErr = null;
     // Resume/continuation: if this exact (role, operationId) already durably
@@ -729,7 +872,7 @@ export function createReviewLoopController({
     throw lastErr ?? new Error(`ReviewLoop: no eligible ${role} provider`);
   }
 
-  async function review({ loopId, signal, onHeartbeat } = {}) {
+  async function review({ loopId, evidence = [], signal, onHeartbeat } = {}) {
     if (!loopId) throw new Error('reviewloop_review: loopId is required');
     // Serialize every reviewloop_review for this loopId. In-process: overlapping
     // calls run one after another (the second then hits the deterministic
@@ -761,7 +904,7 @@ export function createReviewLoopController({
       }
       activeLeaseGuards.set(loopId, lease.verifyHeld ?? (async () => true));
       try {
-        return await reviewInner({ loopId, signal });
+        return await reviewInner({ loopId, evidence, signal });
       } catch (err) {
         if (err instanceof LeaseLostError) {
           // The lease was reclaimed by another owner while this call ran. We
@@ -785,7 +928,7 @@ export function createReviewLoopController({
     });
   }
 
-  async function reviewInner({ loopId, signal }) {
+  async function reviewInner({ loopId, evidence, signal }) {
     // Per-invocation safety-event isolation: start this call with a clean list.
     safetyEvents = [];
     const loopState = await loadLoop(loopId);
@@ -800,13 +943,47 @@ export function createReviewLoopController({
       return terminalResult(loopState);
     }
 
-    if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, signal });
-    return reviewLocal({ loopState, signal });
+    try {
+      // Upgrade-safe task-definition preflight. New begins enforce these bounds
+      // before repository work, but an in-flight objective frozen by an older
+      // ReviewLoop may legitimately carry a prior-version fingerprint and
+      // oversized metadata. Never let PHASE_PASS turn that legacy state into an
+      // unbounded contextRefreshSafe resume packet.
+      const boundedPhases = normalizePhasePlan(objective.phases ?? []);
+      const boundedEvidenceRequirements = normalizeEvidenceRequirements(
+        objective.evidenceRequirements ?? [],
+        boundedPhases.map((phase) => phase.id),
+      );
+      const boundedContractText = normalizeContractText(objective.contractText);
+      assertResumeTaskDefinitionBound({
+        goal: objective.goal,
+        constraints: objective.constraints ?? [],
+        phases: boundedPhases,
+        contractText: boundedContractText,
+        verificationPlan: objective.verificationPlan ?? null,
+        evidenceRequirements: boundedEvidenceRequirements,
+      });
+    } catch (err) {
+      // Preflight is a review operation even when it does not run the Gate.
+      // Preserve the frozen objective verbatim; fail closed instead of
+      // truncating or rewriting a fingerprint-valid legacy task definition.
+      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err?.message ?? String(err));
+      await saveLoop(loopState);
+      return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
+    }
+    // Migrate old multi-version histories without changing any proof binding,
+    // completed phase, objective or task-wide spend counter.
+    loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
+
+    if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, evidence, signal });
+    return reviewLocal({ loopState, evidence, signal });
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
   async function runReviewerOverEvidence({
-    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective), signal,
+    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective),
+    evidenceBundle = null, evidenceProofFingerprint = '', signal,
   }) {
     // Every PHYSICAL Reviewer attempt for this call — one entry per failover
     // retry AND per chunk, success or failure. Never collapsed into a single
@@ -871,10 +1048,10 @@ export function createReviewLoopController({
     // reconsider new evidence, only re-chunked old evidence. `deltaGateKey` is
     // tracked separately from the layout-inclusive `checkpointKey` so round
     // reuse survives a re-chunk.
-    const deltaGateKey = scopeBoundFingerprint(
-      [delta.fingerprint, gate.fingerprint],
-      reviewScope,
-    );
+    const reviewStateParts = evidenceProofFingerprint
+      ? [delta.fingerprint, gate.fingerprint, evidenceProofFingerprint]
+      : [delta.fingerprint, gate.fingerprint];
+    const deltaGateKey = scopeBoundFingerprint(reviewStateParts, reviewScope);
     const chunkLayoutHash = sha256Hex(`${chunks.length}::${chunks.map((c) => c.hash).join('::')}`);
     const checkpointKey = sha256Hex(`${deltaGateKey}::${chunkLayoutHash}`);
     const resumeCheckpoint = loopState.chunkReviewCheckpoint;
@@ -960,7 +1137,12 @@ export function createReviewLoopController({
       const reviewStateEvidence = await spend.registerEvidence({
         kind: 'reviewstate',
         taskId: chunkId,
-        diffHash: scopeBoundFingerprint([chunk.hash, gate.fingerprint], reviewScope),
+        diffHash: scopeBoundFingerprint(
+          evidenceProofFingerprint
+            ? [chunk.hash, gate.fingerprint, evidenceProofFingerprint]
+            : [chunk.hash, gate.fingerprint],
+          reviewScope,
+        ),
       });
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
@@ -989,6 +1171,7 @@ export function createReviewLoopController({
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
+          evidence: evidenceBundle,
           selection,
           signal,
         })).then((out) => {
@@ -1051,7 +1234,7 @@ export function createReviewLoopController({
   }
 
   // ---- LOCAL mode --------------------------------------------------------
-  async function reviewLocal({ loopState, signal }) {
+  async function reviewLocal({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
@@ -1073,6 +1256,26 @@ export function createReviewLoopController({
     }
 
     recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'review requested');
+
+    // Validate shape/requirement/current-scope membership before the LOCAL Gate
+    // can spend time or mutate the worktree. Exact-code binding still happens
+    // only after Gate stabilization below.
+    try {
+      validateEvidenceSubmissions({ objective, reviewScope, submissions: evidence });
+    } catch (err) {
+      if (!(err instanceof EvidenceValidationError)) throw err;
+      const status = evidenceStatusForScope({
+        loopState, objective, reviewScope, evidenceFingerprint: delta.fingerprint,
+      });
+      return evidenceRework({
+        loopState,
+        gate: { verdict: 'NOT_RUN', failureIdentities: [] },
+        head: delta.currentHead ?? null,
+        reason: err.message,
+        missing: status.missing,
+        receipt: unacceptedEvidence(evidence, 'INVALID_EVIDENCE'),
+      });
+    }
 
     // B7 — a pre-existing change that cannot be attributed away from the Worker
     // must not be sent to the Reviewer as Worker output.
@@ -1171,6 +1374,7 @@ export function createReviewLoopController({
         });
       }
     }
+    let gateMutatedTree = false;
     let gate = await runGateFn({
       cwd, commands: gateCommands, runner: gateRunner, env, signal,
       baselineGateEvidence: trustedBaselineGateEvidence,
@@ -1190,7 +1394,7 @@ export function createReviewLoopController({
     // review path.)
     const postGateFn = collectPostGateDeltaFn
       ?? (collectWorkerDeltaFn === collectWorkerDelta ? collectWorkerDelta : null);
-    if (postGateFn && !signal?.aborted && gate.verdict !== GATE_VERDICTS.FAIL) {
+    if (postGateFn && !signal?.aborted) {
       // Collect + validate the post-Gate Worker delta. Fail closed on EVERY
       // failure — a throw, a missing result, a missing fingerprint, or
       // incomplete attribution. The fingerprint excludes completeness metadata,
@@ -1235,6 +1439,12 @@ export function createReviewLoopController({
       const MAX_GATE_STABILISE = 3;
       let stabiliseRuns = 0;
       while (pg.delta.fingerprint !== delta.fingerprint) {
+        gateMutatedTree = true;
+        // No proof for this scope survives a code change made during review.
+        // In particular, do not re-label the caller's pre-Gate evidence with
+        // the post-Gate fingerprint, or reuse history if the Gate later reverts.
+        loopState.evidenceRecords = (loopState.evidenceRecords ?? [])
+          .filter((record) => record.reviewScopeFingerprint !== reviewScope.fingerprint);
         collectSafetyEvent({
           code: 'GATE_MUTATED_TRACKED_FILES',
           severity: 'NON_BLOCKING',
@@ -1262,6 +1472,11 @@ export function createReviewLoopController({
           };
         }
 
+        // A failing Gate is already sufficient for REWORK. We still had to
+        // recollect and invalidate proof if it changed the tree, but must not
+        // run the failing mutator again in this round.
+        if (gate.verdict === GATE_VERDICTS.FAIL) break;
+
         stabiliseRuns += 1;
         if (stabiliseRuns > MAX_GATE_STABILISE) {
           return humanRequired(
@@ -1278,8 +1493,11 @@ export function createReviewLoopController({
         });
         gate.commandSource = commandSource;
         gate.executedCommands = [...gateCommands];
-        if (signal?.aborted || gate.verdict === GATE_VERDICTS.FAIL) break; // handled downstream
+        if (signal?.aborted) break;
 
+        // Recollect even after a FAIL: a failing formatter/codegen Gate may
+        // still have changed bytes, and stale exact-code evidence must be
+        // invalidated before returning the Gate failure.
         // eslint-disable-next-line no-await-in-loop
         pg = await collectPostGate();
         if (!pg.ok) {
@@ -1302,38 +1520,79 @@ export function createReviewLoopController({
       };
     }
 
-    const fp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-    });
-
-    if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
-      await saveLoop(loopState);
-      return {
-        status: 'NO_PROGRESS',
-        loopId: loopState.loopId,
-        round: loopState.round,
-        reason: 'submitted state is identical to the last review; no Reviewer/Supervisor call made',
-        lastReview: compactLastReview(loopState),
-        telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
-      };
-    }
-
     if (gate.verdict === GATE_VERDICTS.FAIL) {
-      // A deterministic Gate FAIL is a repair cycle, NOT a fresh Reviewer
-      // round: it never consumes one of the objective's max review rounds and
-      // the independent Reviewer has not run. An identical failing (diff+gate)
-      // resubmission still deterministically returns NO_PROGRESS (above).
+      // Gate failure needs no runtime/manual evidence. Keep the legacy
+      // diff+gate progress identity so an identical deterministic failure does
+      // not become "new information" merely because evidence text changed.
+      const gateFp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+      });
+      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === gateFp) {
+        await saveLoop(loopState);
+        return {
+          status: 'NO_PROGRESS',
+          loopId: loopState.loopId,
+          round: loopState.round,
+          reason: 'submitted state is identical to the last review; no Reviewer/Supervisor call made',
+          evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
+          lastReview: compactLastReview(loopState),
+          telemetry: await durableTelemetry(loopState.loopId),
+          safetyEvents,
+        };
+      }
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-      loopState.lastReviewedFingerprint = fp;
+      loopState.lastReviewedFingerprint = gateFp;
       loopState.lastGateFingerprint = gate.fingerprint;
       recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
       await saveLoop(loopState);
       return {
         ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),
         reason: 'deterministic Gate failed with a new regression; fix it before Reviewer runs',
+        evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
+        telemetry: await durableTelemetry(loopState.loopId),
+        safetyEvents,
+      };
+    }
+
+    if (gateMutatedTree && (Array.isArray(evidence) ? evidence.length > 0 : evidence != null)) {
+      return evidenceRework({
+        loopState, gate, head: delta.currentHead ?? null,
+        reason: 'the deterministic Gate changed the code during review; pre-Gate evidence was not accepted. Produce fresh evidence against the stabilized tree and retry in this loop',
+        missing: requiredEvidenceForScope(objective, reviewScope),
+        receipt: unacceptedEvidence(evidence, 'CODE_CHANGED'),
+      });
+    }
+
+    // Runtime/artifact/manual proof is part of the logical review state.
+    // Process it BEFORE the no-progress guard so improved evidence can be
+    // independently re-reviewed without requiring an unrelated code change.
+    const evidenceCheck = await enforceEvidenceObligations({
+      loopState,
+      objective,
+      reviewScope,
+      delta,
+      gate,
+      submissions: evidence,
+      head: delta.currentHead ?? null,
+    });
+    if (evidenceCheck.blocked) return evidenceCheck.result;
+
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
+    if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
+      await saveLoop(loopState);
+      return {
+        status: 'NO_PROGRESS',
+        loopId: loopState.loopId,
+        round: loopState.round,
+        reason: 'submitted code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
+        lastReview: compactLastReview(loopState),
         telemetry: await durableTelemetry(loopState.loopId),
         safetyEvents,
       };
@@ -1347,7 +1606,10 @@ export function createReviewLoopController({
     let reviewOut;
     try {
       reviewOut = await runReviewerOverEvidence({
-        spend, loopState, objective, delta, gate, reviewScope, signal,
+        spend, loopState, objective, delta, gate, reviewScope,
+        evidenceBundle: evidenceCheck.bundle,
+        evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+        signal,
       });
     } catch (err) {
       if (err instanceof LeaseLostError) throw err; // read-only exit in review()
@@ -1384,7 +1646,7 @@ export function createReviewLoopController({
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
       const sup = await runSupervisor({
-        spend, loopState, objective, review, gate, reviewScope, signal,
+        spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
       });
       if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
       const outcome = await applySupervisorOutcome({
@@ -1396,11 +1658,17 @@ export function createReviewLoopController({
 
     if (decision.verdict === REVIEW_VERDICTS.PASS) {
       const telemetry = await spend.telemetry();
-      const phaseResult = completeCurrentPhase(loopState, review, telemetry, { gate, reviewScope });
+      const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
+        head: delta.currentHead ?? null,
+        gate,
+        reviewScope,
+        evidenceFingerprint: delta.fingerprint,
+      });
       if (phaseResult) {
         await saveLoop(loopState);
         return phaseResult;
       }
+      loopState.resumePacket = null;
       recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
       await saveLoop(loopState);
       return passResult(loopState, review, telemetry);
@@ -1435,7 +1703,8 @@ export function createReviewLoopController({
   // Supervisor, exception-only. Returns { guidance } | { humanRequired, reason }
   // | { denied, error }.
   async function runSupervisor({
-    spend, loopState, objective, review, gate, reviewScope = currentReviewScope(loopState, objective), signal,
+    spend, loopState, objective, review, gate, reviewScope = currentReviewScope(loopState, objective),
+    evidenceBundle = null, signal,
   }) {
     const physicalCalls = [];
     if (signal?.aborted) {
@@ -1466,7 +1735,7 @@ export function createReviewLoopController({
         invoke: ({
           selection, attempt, family, provider,
         }) => Promise.resolve(supervisorFn({
-          objective, blockingFindings: review.blockingFindings, gate, reviewScope,
+          objective, blockingFindings: review.blockingFindings, gate, reviewScope, evidence: evidenceBundle,
           round: loopState.round, priorSignatures: loopState.findingSignatureHistory, selection, signal,
         })).then((out) => {
           physicalCalls.push({
@@ -1811,7 +2080,7 @@ export function createReviewLoopController({
     });
   }
 
-  async function reviewPr({ loopState, signal }) {
+  async function reviewPr({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
@@ -1831,9 +2100,26 @@ export function createReviewLoopController({
       }
       if (!observedHead) return prHumanRequired(loopState, `cannot resolve the live HEAD for PR #${prNumber}`);
 
+      // Validate the complete input before any disposable worktree or Gate
+      // execution. This proves only shape/requirement/scope/budget, not runtime
+      // sufficiency or exact-code binding. A bad tail rejects the whole batch.
+      let validatedEvidence;
+      try {
+        validatedEvidence = validateEvidenceSubmissions({ objective, reviewScope, submissions: rebind === 0 ? evidence : [] });
+      } catch (err) {
+        if (!(err instanceof EvidenceValidationError)) throw err;
+        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'PR evidence preflight');
+        return evidenceRework({
+          loopState, head: observedHead, gate: { verdict: 'NOT_RUN', failureIdentities: [] },
+          reason: err.message,
+          receipt: unacceptedEvidence(evidence, 'INVALID_EVIDENCE'),
+        });
+      }
+
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
-        && loopState.lastReview?.status === 'ACTIONABLE') {
+        && loopState.lastReview?.status === 'ACTIONABLE'
+        && validatedEvidence.length === 0) {
         await saveLoop(loopState);
         return {
           status: 'PUSH_REQUIRED', loopId: loopState.loopId, head: observedHead,
@@ -1910,7 +2196,11 @@ export function createReviewLoopController({
           head: observedHead,
           reason: 'the deterministic Gate modified files inside the exact reviewed PR snapshot (formatter / '
             + 'codegen / snapshot updater); run that step yourself, commit its output, and push before '
-            + 'calling reviewloop_review again — a snapshot the Gate itself changed can never be certified',
+            + 'calling reviewloop_review again — a snapshot the Gate itself changed can never be certified'
+            + (validatedEvidence.length ? '; submitted evidence was not accepted and must be recollected against the pushed code' : ''),
+          ...(validatedEvidence.length
+            ? { evidenceSubmission: unacceptedEvidence(validatedEvidence, 'CODE_CHANGED') }
+            : {}),
           telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
         };
       }
@@ -1922,25 +2212,25 @@ export function createReviewLoopController({
         return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
       }
 
-      const fp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-      });
-      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
-        await saveLoop(loopState);
-        return {
-          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
-          head: observedHead,
-          reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
-          lastReview: compactLastReview(loopState),
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
       if (snap.kind === 'GATE_FAIL') {
+        const gateFp = reviewFingerprint({
+          deltaFingerprint: delta.fingerprint,
+          gateFingerprint: gate.fingerprint,
+          reviewScopeFingerprint: reviewScope.fingerprint,
+        });
+        if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === gateFp) {
+          await saveLoop(loopState);
+          return {
+            status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
+            head: observedHead,
+            reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
+            evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
+            lastReview: compactLastReview(loopState),
+            telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
+          };
+        }
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-        loopState.lastReviewedFingerprint = fp;
+        loopState.lastReviewedFingerprint = gateFp;
         loopState.lastGateFingerprint = gate.fingerprint;
         loopState.lastReviewedPrHead = observedHead;
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
@@ -1949,6 +2239,41 @@ export function createReviewLoopController({
           ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),
           head: observedHead,
           reason: 'deterministic Gate failed with a regression; fix it before the Reviewer runs',
+          evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
+          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
+        };
+      }
+
+      // Evidence can legitimately change while the PR HEAD stays fixed (for
+      // example, a corrected runtime walkthrough after Reviewer feedback).
+      // Bind it before the no-progress decision and include it in review state.
+      const evidenceCheck = await enforceEvidenceObligations({
+        loopState,
+        objective,
+        reviewScope,
+        delta,
+        gate,
+        // A HEAD rebind makes evidence supplied for the original reviewed SHA
+        // stale. Never silently rebind the same runtime/manual claim to a new
+        // PR HEAD inside this one call.
+        submissions: validatedEvidence,
+        head: observedHead,
+      });
+      if (evidenceCheck.blocked) return evidenceCheck.result;
+
+      const fp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+        evidenceFingerprint: evidenceCheck.proofFingerprint,
+      });
+      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
+        await saveLoop(loopState);
+        return {
+          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
+          head: observedHead,
+          reason: 'submitted PR code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
+          lastReview: compactLastReview(loopState),
           telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
         };
       }
@@ -1957,7 +2282,10 @@ export function createReviewLoopController({
       let reviewOut;
       try {
         reviewOut = await runReviewerOverEvidence({
-          spend, loopState, objective, delta, gate, reviewScope, signal,
+          spend, loopState, objective, delta, gate, reviewScope,
+          evidenceBundle: evidenceCheck.bundle,
+          evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+          signal,
         });
       } catch (err) {
         if (err instanceof LeaseLostError) throw err;
@@ -1992,7 +2320,7 @@ export function createReviewLoopController({
       let supervisorPhysicalCalls = [];
       if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
         const sup = await runSupervisor({
-          spend, loopState, objective, review, gate, reviewScope, signal,
+          spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
         });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
@@ -2053,10 +2381,12 @@ export function createReviewLoopController({
             gate,
             reviewScope,
             auditRecord: passAuditRecord,
+            evidenceFingerprint: delta.fingerprint,
           });
           await saveLoop(loopState);
           return phaseResult;
         }
+        loopState.resumePacket = null;
         recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
         await saveLoop(loopState);
         await maybePublishPrResult({
@@ -2114,6 +2444,7 @@ export function createReviewLoopController({
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
+      evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
       telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
     };
   }
