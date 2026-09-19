@@ -937,3 +937,41 @@ test('global constraints cannot delegate acceptance criteria to missing prior co
   assert.equal(h.calls.baseline, 0);
   assert.equal(h.calls.gate, 0);
 });
+
+
+for (const legacyOversize of ['goal', 'constraints', 'phases', 'verificationPlan']) {
+  test(`LOCAL: oversized legacy ${legacyOversize} metadata is blocked before Gate/model/resume emission`, async () => {
+    const w = world('LOCAL');
+    const { loopId } = await w.controller.begin({ ...w.args, phases });
+    const raw = await w.persistence.readWorkflowState(loopId);
+    const objective = raw.reviewLoop.objective;
+    assert.equal(legacyFingerprint(objective), objective.fingerprint);
+
+    if (legacyOversize === 'goal') {
+      objective.goal = 'x'.repeat(RESUME_TASK_DEFINITION_MAX_BYTES + 1);
+    } else if (legacyOversize === 'constraints') {
+      objective.constraints = ['x'.repeat(RESUME_TASK_DEFINITION_MAX_BYTES + 1)];
+    } else if (legacyOversize === 'phases') {
+      objective.phases[0].objective = 'x'.repeat(PHASE_PLAN_MAX_BYTES + 1);
+    } else {
+      objective.verificationPlan = {
+        ...(objective.verificationPlan ?? {}),
+        source: 'legacy',
+        commands: ['x'.repeat(RESUME_TASK_DEFINITION_MAX_BYTES + 1)],
+      };
+    }
+    objective.fingerprint = legacyFingerprint(objective);
+    await w.persistence.writeWorkflowState(loopId, raw);
+
+    const gateBefore = w.calls.gate;
+    const result = await w.restart().review({ loopId });
+    assert.equal(result.status, 'HUMAN_REQUIRED');
+    assert.match(result.reason, /UTF-8 limit|task definition copied into resume packets exceeds|complete structured phase plan exceeds/);
+    assert.equal(w.calls.gate, gateBefore);
+    assert.equal(w.calls.reviewer, 0);
+    assert.equal(w.calls.supervisor, 0);
+    const after = (await w.persistence.readWorkflowState(loopId)).reviewLoop;
+    assert.deepEqual(after.objective, objective, 'legacy frozen metadata is never truncated or rewritten');
+    assert.equal(after.resumePacket, null);
+  });
+}

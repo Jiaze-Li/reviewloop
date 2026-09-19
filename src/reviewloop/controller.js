@@ -57,7 +57,6 @@ import { chunkDiffForReview } from './diffChunker.js';
 import {
   assertContractHandoff,
   EvidenceValidationError,
-  ContractValidationError,
   normalizeContractText,
   normalizeEvidenceRequirements,
   validateEvidenceSubmissions,
@@ -942,12 +941,31 @@ export function createReviewLoopController({
     }
 
     try {
-      normalizeContractText(objective.contractText);
+      // Upgrade-safe task-definition preflight. New begins enforce these bounds
+      // before repository work, but an in-flight objective frozen by an older
+      // ReviewLoop may legitimately carry a prior-version fingerprint and
+      // oversized metadata. Never let PHASE_PASS turn that legacy state into an
+      // unbounded contextRefreshSafe resume packet.
+      const boundedPhases = normalizePhasePlan(objective.phases ?? []);
+      const boundedEvidenceRequirements = normalizeEvidenceRequirements(
+        objective.evidenceRequirements ?? [],
+        boundedPhases.map((phase) => phase.id),
+      );
+      const boundedContractText = normalizeContractText(objective.contractText);
+      assertResumeTaskDefinitionBound({
+        goal: objective.goal,
+        constraints: objective.constraints ?? [],
+        phases: boundedPhases,
+        contractText: boundedContractText,
+        verificationPlan: objective.verificationPlan ?? null,
+        evidenceRequirements: boundedEvidenceRequirements,
+      });
     } catch (err) {
-      if (!(err instanceof ContractValidationError)) throw err;
       // Preflight is a review operation even when it does not run the Gate.
-      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen contract preflight');
-      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err.message);
+      // Preserve the frozen objective verbatim; fail closed instead of
+      // truncating or rewriting a fingerprint-valid legacy task definition.
+      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err?.message ?? String(err));
       await saveLoop(loopState);
       return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
     }
