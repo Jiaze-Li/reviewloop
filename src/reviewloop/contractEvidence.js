@@ -234,7 +234,9 @@ export function referencesMissingPriorContract(text) {
     || /\b(?:acceptance\s+criteria|success\s+criteria|task\s+requirements|requirements)\s+(?:(?:are|were|is|was)\s+(?:in|from)|(?:can|may)\s+be\s+found\s+in)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b/i.test(s);
 }
 
-export function assertContractHandoff({ goal, contractText, phases, evidenceRequirements = [] } = {}) {
+export function assertContractHandoff({
+  goal, contractText, constraints = [], phases, evidenceRequirements = [],
+} = {}) {
   const frozen = normalizeContractText(contractText);
   const suppliedPhaseIds = Array.isArray(phases)
     ? phases.map((phase) => String(phase?.id ?? '').trim())
@@ -256,6 +258,7 @@ export function assertContractHandoff({ goal, contractText, phases, evidenceRequ
     );
   }
   const structuredAcceptanceText = [
+    ...(Array.isArray(constraints) ? constraints : (constraints == null ? [] : [constraints])),
     ...(Array.isArray(phases) ? phases.flatMap((phase) => [
       phase?.objective,
       ...(Array.isArray(phase?.exitCriteria) ? phase.exitCriteria : [phase?.exitCriteria]),

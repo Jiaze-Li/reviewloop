@@ -918,3 +918,22 @@ test('carry-forward invariants cannot delegate acceptance criteria to missing pr
     phases: bad,
   }), /structured phase\/evidence acceptance text is not self-contained/);
 });
+
+
+test('global constraints cannot delegate acceptance criteria to missing prior conversation', async () => {
+  const constraint = 'Acceptance criteria are in the previous message.';
+  assert.throws(() => assertContractHandoff({
+    goal: 'Implement the task.',
+    constraints: [constraint],
+    phases: [],
+  }), /structured phase\/evidence acceptance text is not self-contained/);
+
+  const h = makeHarness();
+  await assert.rejects(() => h.controller.begin({
+    cwd: '/r',
+    goal: 'Implement the task.',
+    constraints: [constraint],
+  }), /not self-contained|previous message/i);
+  assert.equal(h.calls.baseline, 0);
+  assert.equal(h.calls.gate, 0);
+});
