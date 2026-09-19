@@ -504,7 +504,7 @@ test('explicit multi-phase counts recognize 10-19 and larger values', () => {
   }
 });
 
-test('reserved ids report reserved and mixed-id violations together when both apply', () => {
+test('reserved ids fail closed before prose-dependent canonical/custom diagnostics', () => {
   const three = [
     { ...phases[0], id: 'final' },
     { ...phases[1], id: 'phase-2' },
@@ -512,8 +512,7 @@ test('reserved ids report reserved and mixed-id violations together when both ap
   ];
   assert.throws(
     () => assertContractHandoff({ goal: 'Full spec has 3 phases.', phases: three }),
-    (error) => /phase id "final" is reserved/i.test(error.message)
-      && /mixes canonical phase-N ids with custom ids/i.test(error.message),
+    /phase id "final" is reserved/i,
   );
 });
 
