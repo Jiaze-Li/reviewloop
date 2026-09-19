@@ -134,7 +134,7 @@ export function declaredPhasePlan(text) {
   const listedCountsAfterExplicit = [];
   for (const match of explicitCountMatches) {
     const tail = s.slice(match.end);
-    if (!/^[ \t]*(?::[ \t]*|\r?\n[ \t]*)(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+1\b/i.test(tail)) continue;
+    if (!/^[ \t]*(?::[ \t]*(?:\r?\n[ \t]*)?|\r?\n[ \t]*)(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+1\b/i.test(tail)) continue;
     const block = tail.slice(0, 8192).split(/\r?\n[ \t]*\r?\n/, 1)[0];
     const numbers = [...new Set(
       [...block.matchAll(/(?:^|[\n;:][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
