@@ -861,3 +861,16 @@ test('arbitrary stage/step prose remains outside phase inference unless structur
     assert.doesNotThrow(() => assertContractHandoff({ goal: text, phases: [] }));
   }
 });
+
+
+test('strong phase-count declarations cover common composition and division verbs', () => {
+  for (const text of [
+    'The execution plan comprises 2 phases: setup and rollout.',
+    'The execution plan is divided into 2 phases: setup and rollout.',
+    'Complete specification comprises 3 phases.',
+    'This implementation is split into 2 phases.',
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, text.includes('3 phases') ? 3 : 2);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+});

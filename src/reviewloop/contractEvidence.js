@@ -114,15 +114,15 @@ export function declaredPhasePlan(text) {
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
   const explicitCounts = [
-    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|consists\s+of)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|contains|includes|comprises|consists\s+of|is\s+(?:split|divided)\s+into)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+|is\s+split\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\bexecution\s+plan\s*:\s*([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];
 
