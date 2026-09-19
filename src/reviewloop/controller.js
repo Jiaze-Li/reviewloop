@@ -2166,7 +2166,11 @@ export function createReviewLoopController({
           head: observedHead,
           reason: 'the deterministic Gate modified files inside the exact reviewed PR snapshot (formatter / '
             + 'codegen / snapshot updater); run that step yourself, commit its output, and push before '
-            + 'calling reviewloop_review again — a snapshot the Gate itself changed can never be certified',
+            + 'calling reviewloop_review again — a snapshot the Gate itself changed can never be certified'
+            + (validatedEvidence.length ? '; submitted evidence was not accepted and must be recollected against the pushed code' : ''),
+          ...(validatedEvidence.length
+            ? { evidenceSubmission: unacceptedEvidence(validatedEvidence, 'CODE_CHANGED') }
+            : {}),
           telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
         };
       }

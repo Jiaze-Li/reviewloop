@@ -118,7 +118,7 @@ export function declaredPhasePlan(text) {
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig)]
       .map((m) => Number(m[1])),
-    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+    ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+|is\s+split\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
@@ -210,7 +210,7 @@ export function referencesMissingPriorContract(text) {
   return /\b(?:full|complete|original)\s+(?:spec|specification|contract|acceptance\s+criteria|task\s+requirements)\b[\s\S]{0,500}?\b(?:provided|given|stated|is|was)\b[\s\S]{0,160}?\b(?:in\s+)?(?:the\s+)?(?:earlier|previous|original\s+task\s+message|conversation)\b/i.test(s)
     || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:spec|specification|contract|task\s+message)\b/i.test(s)
     || /\b(?:see|refer\s+to)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b[\s\S]{0,200}?\b(?:for|containing|with)\s+(?:the\s+)?(?:full|complete|original)?\s*(?:spec|specification|contract|acceptance\s+criteria|requirements)\b/i.test(s)
-    || /\b(?:acceptance\s+criteria|success\s+criteria|task\s+requirements|requirements)\s+(?:are|were|is|was)\s+(?:in|from)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b/i.test(s);
+    || /\b(?:acceptance\s+criteria|success\s+criteria|task\s+requirements|requirements)\s+(?:(?:are|were|is|was)\s+(?:in|from)|(?:can|may)\s+be\s+found\s+in)\s+(?:the\s+)?(?:earlier|previous|original)\s+(?:message|conversation)\b/i.test(s);
 }
 
 export function assertContractHandoff({ goal, contractText, phases } = {}) {

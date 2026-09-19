@@ -748,3 +748,20 @@ test('Execution Plan heading in one field can bind colon-labelled phases in the 
     { id: 'phase-2', title: 'P2', objective: 'Integration.', exitCriteria: ['P2 done.'] },
   ] }));
 });
+
+
+test('execution plan split-into declaration is fail-closed without structured phases', () => {
+  const text = 'The execution plan is split into 2 phases: setup and rollout.';
+  assert.equal(declaredPhasePlan(text).count, 2);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+});
+
+test('acceptance criteria can-be-found prior-message wording requires contractText, but style references do not', () => {
+  const missing = 'Acceptance criteria can be found in the previous message.';
+  assert.equal(referencesMissingPriorContract(missing), true);
+  assert.throws(() => assertContractHandoff({ goal: missing, phases: [] }), /no self-contained contractText/);
+
+  const styleOnly = 'Refactor the auth module; for naming conventions, refer to the earlier conversation about style.';
+  assert.equal(referencesMissingPriorContract(styleOnly), false);
+  assert.doesNotThrow(() => assertContractHandoff({ goal: styleOnly, phases: [] }));
+});

@@ -14,7 +14,8 @@ import {
 } from './helpers/reviewLoopHarness.js';
 
 function build({
-  prBackend, reviews = [], gates = [], supervisorReplies = [], onReviewer, persistence = new MemoryPersistence(),
+  prBackend, reviews = [], gates = [], supervisorReplies = [], onReviewer,
+  captureWorktreeSnapshotFn = null, persistence = new MemoryPersistence(),
 } = {}) {
   const calls = { reviewer: 0, supervisor: 0, gate: 0 };
   let ri = 0;
@@ -24,6 +25,7 @@ function build({
     persistence,
     prBackend,
     ...prTestFakes(prBackend),
+    ...(captureWorktreeSnapshotFn ? { captureWorktreeSnapshotFn } : {}),
     discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo test'], manifestFingerprint: 'mf' }),
     runGateFn: async () => {
       const g = gates[gi] ?? gates[gates.length - 1] ?? { verdict: 'PASS' };
@@ -465,4 +467,38 @@ test('M: completed PR phase must remain bound to its PHASE_PASS audit record', a
     () => controller.review({ loopId }),
     /successful exact-HEAD PHASE_PASS audit record|phase progression invalid/,
   );
+});
+
+
+test('PR Gate mutation rejects submitted evidence with CODE_CHANGED receipt', async () => {
+  const backend = mockPrBackend({ heads: ['H1'] });
+  let capture = 0;
+  const { controller, calls } = build({
+    prBackend: backend,
+    captureWorktreeSnapshotFn: async () => {
+      capture += 1;
+      return { ok: true, entries: capture % 2 === 1 ? [] : [' M generated.js'] };
+    },
+  });
+  const { loopId } = await controller.begin({
+    goal: 'PR mutation evidence task',
+    contractText: 'Prove runtime behavior on the reviewed PR.',
+    cwd: '/r',
+    prNumber: 4,
+    evidenceRequirements: [{
+      id: 'runtime-ui', type: 'runtime',
+      description: 'Exercise the real interaction.', gate: 'final',
+    }],
+  });
+  const result = await controller.review({
+    loopId,
+    evidence: [{ requirementId: 'runtime-ui', summary: 'Verified against H1 before Gate mutation.' }],
+  });
+  assert.equal(result.status, 'REWORK');
+  assert.equal(result.evidenceSubmission.status, 'NOT_ACCEPTED');
+  assert.equal(result.evidenceSubmission.reason, 'CODE_CHANGED');
+  assert.equal(result.evidenceSubmission.submittedCount, 1);
+  assert.equal(result.evidenceSubmission.retryRequired, true);
+  assert.match(result.reason, /must be recollected against the pushed code/);
+  assert.equal(calls.reviewer, 0);
 });
