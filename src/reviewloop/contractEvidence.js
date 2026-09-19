@@ -150,7 +150,7 @@ export function declaredPhasePlan(text) {
     if (!/^[ \t]*(?::[ \t]*(?:\r?\n[ \t]*)?|\r?\n[ \t]*)(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+1\b/i.test(tail)) continue;
     const block = tail.slice(0, 8192).split(/\r?\n[ \t]*\r?\n/, 1)[0];
     const numbers = [...new Set(
-      [...block.matchAll(/(?:^|[\n;:][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
+      [...block.matchAll(/(?:^|[\n;:.,][ \t]*)\s{0,3}(?:#{1,6}\s*)?(?:(?:[-*]|\d+[.)])\s*)?phase\s+([1-9]\d*)\b/gim)]
         .map((m) => Number(m[1])),
     )].sort((a, b) => a - b);
     const count = contiguousPhaseCount(numbers);
