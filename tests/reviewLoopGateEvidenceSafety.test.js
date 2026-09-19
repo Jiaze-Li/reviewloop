@@ -732,21 +732,15 @@ test('reserved phase ids are rejected even without any prose phase declaration',
   }), /phase id "final" is reserved/i);
 });
 
-test('Execution Plan heading in one field can bind colon-labelled phases in the other field', () => {
+test('Execution Plan heading in one field never synthesizes a phase plan from another field', () => {
   const goal = 'Implement the requested change.\n\nExecution Plan:';
   const contractText = [
     'Frozen acceptance contract.',
+    'Historical protocol example:',
     'Phase 1: establish the foundation.',
     'Phase 2: integrate the behavior.',
   ].join('\n');
-  assert.throws(
-    () => assertContractHandoff({ goal, contractText, phases: [] }),
-    /phases\[\] is empty/,
-  );
-  assert.doesNotThrow(() => assertContractHandoff({ goal, contractText, phases: [
-    { id: 'phase-1', title: 'P1', objective: 'Foundation.', exitCriteria: ['P1 done.'] },
-    { id: 'phase-2', title: 'P2', objective: 'Integration.', exitCriteria: ['P2 done.'] },
-  ] }));
+  assert.doesNotThrow(() => assertContractHandoff({ goal, contractText, phases: [] }));
 });
 
 
