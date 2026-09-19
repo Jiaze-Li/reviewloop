@@ -1027,3 +1027,20 @@ test('resume evidence summary counts only proof bound to the completed scope and
   });
   assert.equal(current.evidenceSummary[0].recordCount, 1);
 });
+
+
+test('strong phase declarations recognize common word-form counts without widening historical prose', () => {
+  for (const [text, count] of [
+    ['The execution plan has two phases: foundation and integration.', 2],
+    ['Complete specification consists of three phases.', 3],
+    ['This implementation is divided into twelve phases.', 12],
+    ['Twenty-phase execution plan', 20],
+  ]) {
+    assert.equal(declaredPhasePlan(text).count, count);
+    assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+  }
+
+  const historical = 'Document the two phases of the legacy handshake.';
+  assert.equal(declaredPhasePlan(historical).count, null);
+  assert.doesNotThrow(() => assertContractHandoff({ goal: historical, phases: [] }));
+});

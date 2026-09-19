@@ -98,6 +98,18 @@ function contiguousPhaseCount(numbers) {
   return numbers.length;
 }
 
+const WORD_PHASE_COUNTS = Object.freeze({
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+});
+
+function phaseCountValue(token) {
+  const text = String(token ?? '').trim().toLowerCase();
+  if (/^[2-9]$|^[1-9]\d+$/.test(text)) return Number(text);
+  return WORD_PHASE_COUNTS[text] ?? null;
+}
+
 function hasExecutionPlanHeading(text) {
   return /^\s{0,3}(?:#{1,6}\s*)?(?:the[ \t]+)?execution[ \t]+plan[ \t]*:?/im.test(String(text ?? ''));
 }
@@ -113,18 +125,19 @@ export function declaredPhasePlan(text) {
   const s = String(text ?? '');
   if (!s.trim()) return { count: null, numbers: [], source: null, invalid: null };
 
+  const countToken = '(?:[2-9]|[1-9]\\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
   const countPatterns = [
-    /\b(?:full|complete)\s+(?:spec|specification|contract)\s+(?:has|contains|includes|comprises|consists\s+of|is\s+(?:split|divided)\s+into)\s+([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
-    /\b([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\s+execution\s+plan\b/ig,
-    /\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
-    /\bexecution\s+plan\s*:\s*([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
-    /\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|(?:comprises|consists\s+of)\s+|is\s+(?:split|divided)\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig,
+    new RegExp('\\b(?:full|complete)\\s+(?:spec|specification|contract)\\s+(?:has|contains|includes|comprises|consists\\s+of|is\\s+(?:split|divided)\\s+into)\\s+(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
+    new RegExp('\\b(' + countToken + ')\\s*(?:-\\s*)?phases?\\s+execution\\s+plan\\b', 'ig'),
+    new RegExp('\\bexecution\\s+plan\\s+(?:(?:has|with|contains|includes|including)\\s+(?:the\\s+)?|(?:comprises|consists\\s+of)\\s+|is\\s+(?:split|divided)\\s+into\\s+)(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
+    new RegExp('\\bexecution\\s+plan\\s*:\\s*(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
+    new RegExp('\\b(?:this|the)\\s+(?:task|work|implementation)\\s+(?:(?:has|contains|includes)\\s+(?:the\\s+)?|(?:comprises|consists\\s+of)\\s+|is\\s+(?:split|divided)\\s+into\\s+)(' + countToken + ')\\s*(?:-\\s*)?phases?\\b', 'ig'),
   ];
   const explicitCountMatches = countPatterns.flatMap((pattern) =>
     [...s.matchAll(pattern)].map((m) => ({
-      count: Number(m[1]),
+      count: phaseCountValue(m[1]),
       end: (m.index ?? 0) + m[0].length,
-    })));
+    })).filter((match) => match.count != null));
   const explicitCounts = explicitCountMatches.map((match) => match.count);
 
   // If a strong explicit count is immediately followed by an actual Phase 1
