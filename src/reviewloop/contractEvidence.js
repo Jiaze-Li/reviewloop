@@ -120,6 +120,8 @@ export function declaredPhasePlan(text) {
       .map((m) => Number(m[1])),
     ...[...s.matchAll(/\bexecution\s+plan\s+(?:(?:has|with|contains|includes|including)\s+(?:the\s+)?|consists\s+of\s+|is\s+split\s+into\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
+    ...[...s.matchAll(/\bexecution\s+plan\s*:\s*([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
+      .map((m) => Number(m[1])),
     ...[...s.matchAll(/\b(?:this|the)\s+(?:task|work|implementation)\s+(?:(?:has|contains|includes)\s+(?:the\s+)?|consists\s+of\s+)([2-9]|[1-9]\d+)\s*(?:-\s*)?phases?\b/ig)]
       .map((m) => Number(m[1])),
   ];

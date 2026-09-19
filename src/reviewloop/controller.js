@@ -129,7 +129,9 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       carryForwardInvariants: phase.carryForwardInvariants ?? [],
       preserveInvariants,
       verificationCommands: phase.verificationCommands ?? [],
-      verificationEvidence: phase.verificationEvidence ?? [],
+      ...(Object.prototype.hasOwnProperty.call(phase, 'verificationEvidence')
+        ? { verificationEvidence: phase.verificationEvidence ?? [] }
+        : {}),
       phaseIndex: index,
       phaseCount: phases.length,
     };
@@ -147,7 +149,9 @@ function currentReviewScope(loopState, objective = loopState?.objective) {
       exitCriteria: p.exitCriteria ?? [],
       carryForwardInvariants: p.carryForwardInvariants ?? [],
       verificationCommands: p.verificationCommands ?? [],
-      verificationEvidence: p.verificationEvidence ?? [],
+      ...(Object.prototype.hasOwnProperty.call(p, 'verificationEvidence')
+        ? { verificationEvidence: p.verificationEvidence ?? [] }
+        : {}),
     })),
     phaseCount: phases.length,
     // Phase-local verification may certify an intermediate implementation

@@ -765,3 +765,64 @@ test('acceptance criteria can-be-found prior-message wording requires contractTe
   assert.equal(referencesMissingPriorContract(styleOnly), false);
   assert.doesNotThrow(() => assertContractHandoff({ goal: styleOnly, phases: [] }));
 });
+
+
+test('colon-delimited execution-plan count is fail-closed without structured phases', () => {
+  const text = 'Execution plan: 2 phases: setup and rollout.';
+  assert.equal(declaredPhasePlan(text).count, 2);
+  assert.throws(() => assertContractHandoff({ goal: text, phases: [] }), /phases\[\] is empty/);
+});
+
+test('pre-verificationEvidence completed phase resumes with its legacy scope fingerprint', async () => {
+  const w = world('LOCAL');
+  const begun = await w.controller.begin({ ...w.args, phases });
+  const { loopId } = begun;
+  assert.equal((await w.controller.review({ loopId })).status, 'PHASE_PASS');
+
+  const raw = await w.persistence.readWorkflowState(loopId);
+  // Simulate a loop persisted by the pre-verificationEvidence scope shape:
+  // phase metadata omitted that field and PHASE_PASS was hashed without it.
+  const legacyPhases = raw.reviewLoop.objective.phases.map((phase) => {
+    const copy = { ...phase };
+    delete copy.verificationEvidence;
+    return copy;
+  });
+  raw.reviewLoop.objective.phases = legacyPhases;
+  raw.reviewLoop.objective.fingerprint = legacyFingerprint(raw.reviewLoop.objective);
+
+  const p = legacyPhases[0];
+  const legacyScope = {
+    type: 'phase',
+    id: p.id,
+    title: p.title,
+    objective: p.objective,
+    exitCriteria: p.exitCriteria ?? [],
+    carryForwardInvariants: p.carryForwardInvariants ?? [],
+    preserveInvariants: [],
+    verificationCommands: p.verificationCommands ?? [],
+    phaseIndex: 0,
+    phaseCount: legacyPhases.length,
+  };
+  const oldScopeFp = createHash('sha256').update(JSON.stringify(legacyScope)).digest('hex').slice(0, 32);
+  const completion = raw.reviewLoop.completedPhases[0];
+  completion.reviewScopeFingerprint = oldScopeFp;
+  completion.previousProof = `objective:${raw.reviewLoop.objective.fingerprint}`;
+  completion.proof = createHash('sha256').update(JSON.stringify({
+    id: completion.id,
+    title: completion.title,
+    phaseIndex: completion.phaseIndex,
+    completedAt: completion.completedAt,
+    round: completion.round,
+    head: completion.head ?? null,
+    reviewScopeFingerprint: completion.reviewScopeFingerprint,
+    gateFingerprint: completion.gateFingerprint,
+    reviewFingerprint: completion.reviewFingerprint,
+    previousProof: completion.previousProof,
+    auditTargetFingerprint: completion.auditTargetFingerprint ?? null,
+  })).digest('hex').slice(0, 32);
+
+  await w.persistence.writeWorkflowState(loopId, raw);
+  const resumed = await w.restart().review({ loopId });
+  assert.equal(resumed.status, 'PHASE_PASS');
+  assert.equal(resumed.completedPhase.id, 'p2');
+});
