@@ -265,6 +265,8 @@ export function createReviewLoopProviderPool({
   healthRevalidator = null,
   staleHealthTtlMs = 10 * 60 * 1000,
 } = {}) {
+  const agyReviewTimeoutMs = resolveAgyReviewTimeoutMs(env);
+
   // Resolve every registered family to a concrete model (or null = provider
   // default) at construction. Stable family identity in, concrete version out —
   // a catalog bump changes `resolvedModel` here without any policy edit.
@@ -670,8 +672,6 @@ export function createProductionReviewLoopProviders({
   healthRevalidator = undefined,
   staleHealthTtlMs = undefined,
 } = {}) {
-  const agyReviewTimeoutMs = resolveAgyReviewTimeoutMs(env);
-
   // `agyCatalog` + `transportRuntime` + `customAgentSupport` are supplied by the
   // MCP entrypoint, which probes them once at startup; left null here so nothing
   // is spawned in tests (resolution falls back to the provider-default path, the
