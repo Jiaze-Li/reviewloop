@@ -874,8 +874,13 @@ export function createReviewLoopController({
       if (attemptNumbers.length > 0) {
         startAttempt = Math.max(...attemptNumbers) + 1;
       }
+      // Family is the stable transport identity. Production AGY providers are
+      // quota-pool ids such as "agy-claude-gpt" / "agy-gemini", not the
+      // literal string "agy"; matching provider === "agy" would silently lose
+      // retry history after a real process restart.
       transientAuthRetriesUsed = priorAttempts.filter((r) => (
-        r.provider === 'agy'
+        typeof r.family === 'string'
+        && r.family.startsWith('agy:')
         && r.failureCode === 'PROVIDER_AUTH_FAILED'
         && r.transientAuth === true
       )).length;
@@ -904,10 +909,10 @@ export function createReviewLoopController({
     // transition BEFORE routing any new physical attempt.
     const exhaustedTransientFamilies = new Map();
     for (const record of priorAttempts) {
-      if (record?.provider !== 'agy'
+      if (typeof record?.family !== 'string'
+        || !record.family.startsWith('agy:')
         || record?.failureCode !== 'PROVIDER_AUTH_FAILED'
-        || record?.transientAuth !== true
-        || typeof record?.family !== 'string') continue;
+        || record?.transientAuth !== true) continue;
       const entry = exhaustedTransientFamilies.get(record.family) ?? {
         family: record.family,
         provider: record.provider,

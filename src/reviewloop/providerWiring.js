@@ -50,7 +50,15 @@ export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY))
  */
 function agyEnvelopeReportsUsage(envelope) {
   if (!envelope || typeof envelope !== 'object') return false;
-  const candidates = [envelope.usage, envelope.token_usage, envelope.tokenUsage];
+  // Keep this in lock-step with agyErrorEnvelope.js USAGE_KEYS. metadata/meta are intentionally retained there as numeric-only operational
+  // trees because AGY can report token/context activity through them.
+  const candidates = [
+    envelope.usage,
+    envelope.token_usage,
+    envelope.tokenUsage,
+    envelope.metadata,
+    envelope.meta,
+  ];
 
   const hasNumericLeaf = (value, depth = 0) => {
     if (depth > 4 || value == null) return false;
