@@ -326,7 +326,7 @@ test('process restart preserves transient-auth retry budget and physical attempt
     () => seedSpend.meteredCall({
       role: 'reviewer',
       family: 'agy:opus',
-      provider: 'agy',
+      provider: 'agy-claude-gpt',
       model: 'claude-opus-4-6-thinking',
       operationId,
       attempt: 1,
