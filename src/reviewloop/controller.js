@@ -310,6 +310,51 @@ const RETRYABLE = new Set([
   'EXECUTOR_TIMEOUT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED',
 ]);
 
+// One logical review dispatch may absorb two canonical AGY 401/OAuth refresh
+// races before the family is marked AUTH_FAILED and normal pool failover takes
+// over. These are PHYSICAL attempts: each still goes through a fresh
+// ModelSpendAuthority permit/reservation and is durably recorded. They do not
+// consume an extra review/fix round; the proven auth-boundary failures settle
+// as zero-token attempts through ReviewSpend's existing PROVIDER_AUTH_FAILED
+// accounting rule.
+export const DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS = Object.freeze([2_000, 5_000]);
+
+function normalizeTransientAuthRetryDelays(delays) {
+  if (!Array.isArray(delays)) return [...DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS];
+  return delays
+    .filter((v) => Number.isFinite(v) && v >= 0)
+    .slice(0, 4)
+    .map((v) => Math.floor(v));
+}
+
+function retryCancelledError() {
+  return Object.assign(new Error('ReviewLoop: cancelled during transient-auth retry backoff'), {
+    code: 'REVIEW_CANCELLED',
+    cancelled: true,
+  });
+}
+
+function defaultRetrySleep(ms, signal) {
+  if (!Number.isFinite(ms) || ms <= 0) {
+    if (signal?.aborted) return Promise.reject(retryCancelledError());
+    return Promise.resolve();
+  }
+  if (signal?.aborted) return Promise.reject(retryCancelledError());
+
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+      reject(retryCancelledError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener?.('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
+
 export function createReviewLoopController({
   persistence: injectedPersistence = null,
   runtimeRoot = RUNTIME_ROOT,
@@ -324,6 +369,8 @@ export function createReviewLoopController({
   routeReviewerFn = null,
   routeSupervisorFn = null,
   recordProviderFailure = null,
+  transientAuthRetryDelaysMs = DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
+  sleepFn = defaultRetrySleep,
   prBackend = null,
   // PR-target snapshot correctness. Real implementations by default; tests
   // inject deterministic fakes so no real git/gh call is ever made.
@@ -353,6 +400,7 @@ export function createReviewLoopController({
   // filesystem-backed persistence has one; an in-memory test persistence does
   // not, and there the in-process lock chain is the whole guarantee.
   const fileLeaseRoot = typeof persistence?.workflowDir === 'function' ? runtimeRoot : null;
+  const transientAuthRetryDelays = normalizeTransientAuthRetryDelays(transientAuthRetryDelaysMs);
 
   // Cross-host lease safety: while a reviewloop_review runs, its loopId maps to
   // a "do I still hold the lease?" probe. If a remote contender reclaims the
@@ -787,7 +835,7 @@ export function createReviewLoopController({
   // a fresh dispatch on identical evidence for a first attempt (crash/resume
   // re-call included).
   async function meteredWithFailover({
-    spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null,
+    spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null, signal = null,
     // Durable physical-call-audit identity forwarded verbatim into the spend
     // record (round / chunkIndex / chunkTotal; quotaPools is filled in below
     // from the resolved routing selection) — see reviewSpend.js meteredCall.
@@ -802,25 +850,98 @@ export function createReviewLoopController({
     onAttempt = null,
   }) {
     const tried = new Set();
-    // Effective attempt bound = this role's candidate count, so every
-    // DEFAULT_ROLE_POLICY candidate must be mechanically reachable when each
-    // earlier one fails safely. `tried` + a null selection still stop the loop
-    // early.
-    const maxAttempts = providerAttemptBudget(role);
+    // Effective attempt bound = role candidate count PLUS the bounded AGY
+    // transient-auth retry allowance. The extra slots are only usable by
+    // errors explicitly marked transientAuth=true; ordinary provider failures
+    // still traverse each policy candidate at most once.
+    const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
+    let transientAuthRetriesUsed = 0;
     let lastErr = null;
-    // Resume/continuation: if this exact (role, operationId) already durably
-    // CONSUMED its evidence in a prior (crashed) session, this call is not a
-    // fresh first attempt — it continues that one authorized dispatch SEQUENCE.
-    // Start the bounded attempt counter past 1 so authorize() takes the
-    // failover-reuse path, which STILL refuses if any earlier attempt actually
-    // reached the provider (non-zero settled usage / open DISPATCHING).
+    let priorAttempts = [];
+    // Resume/continuation is derived from DURABLE physical-attempt records, not
+    // process-local counters. A crash during the 2s/5s backoff therefore cannot
+    // reset either the physical attempt number or the two-retry auth budget.
+    // The New Information ledger remains the authorization authority; these
+    // records only restore bounded sequencing state.
     let startAttempt = 1;
     try {
-      const priorClaim = await spend.informationLedger?.findConsumedBy?.({
-        workflowId, role, operationId, evidenceIds,
+      priorAttempts = typeof spend.attemptRecords === 'function'
+        ? await spend.attemptRecords({ role, operationId })
+        : [];
+      const attemptNumbers = priorAttempts
+        .map((r) => Number(r.attempt))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      if (attemptNumbers.length > 0) {
+        startAttempt = Math.max(...attemptNumbers) + 1;
+      }
+      // Family is the stable transport identity. Production AGY providers are
+      // quota-pool ids such as "agy-claude-gpt" / "agy-gemini", not the
+      // literal string "agy"; matching provider === "agy" would silently lose
+      // retry history after a real process restart.
+      transientAuthRetriesUsed = priorAttempts.filter((r) => (
+        typeof r.family === 'string'
+        && r.family.startsWith('agy:')
+        && r.failureCode === 'PROVIDER_AUTH_FAILED'
+        && r.transientAuth === true
+      )).length;
+
+      // Backward-compatible fallback for a consumed claim written by an older
+      // build that has no spend-attempt projection. Starting at 2 preserves the
+      // existing failover-reuse safety rule; authorize() still re-checks the
+      // durable reservation ledger before any physical call.
+      if (startAttempt === 1) {
+        const priorClaim = await spend.informationLedger?.findConsumedBy?.({
+          workflowId, role, operationId, evidenceIds,
+        });
+        if (priorClaim) startAttempt = 2;
+      }
+    } catch {
+      // Fail closed on the actual call path: authorize() independently checks
+      // durable information/reservations. We only lose resume convenience here,
+      // never bypass spend safety.
+    }
+
+    // Crash window hardening: the third same-family transient AGY 401 is
+    // durably appended BEFORE recordProviderFailure() runs. If the process dies
+    // in that tiny window, a fresh router would otherwise consider the family
+    // healthy and grant an unintended fourth AGY call. Reconstruct exhausted
+    // families from the durable spend log and restore the missing health
+    // transition BEFORE routing any new physical attempt.
+    const exhaustedTransientFamilies = new Map();
+    for (const record of priorAttempts) {
+      if (typeof record?.family !== 'string'
+        || !record.family.startsWith('agy:')
+        || record?.failureCode !== 'PROVIDER_AUTH_FAILED'
+        || record?.transientAuth !== true) continue;
+      const entry = exhaustedTransientFamilies.get(record.family) ?? {
+        family: record.family,
+        provider: record.provider,
+        failures: 0,
+      };
+      entry.failures += 1;
+      exhaustedTransientFamilies.set(record.family, entry);
+    }
+    for (const entry of exhaustedTransientFamilies.values()) {
+      if (entry.failures <= transientAuthRetryDelays.length) continue;
+      // Seed tried as defense-in-depth. Production routing honors the restored
+      // health failure; a test/custom router that ignores health still cannot
+      // dispatch this already-exhausted family again.
+      tried.add(entry.family);
+      if (recordProviderFailure) {
+        recordProviderFailure(
+          { role, family: entry.family, provider: entry.provider },
+          { code: 'PROVIDER_AUTH_FAILED', recoveredFromDurableAuthExhaustion: true },
+        );
+      }
+      onEvent?.({
+        type: 'ROLE_PROVIDER_TRANSIENT_AUTH_EXHAUSTION_RESTORED',
+        role,
+        family: entry.family,
+        provider: entry.provider,
+        failures: entry.failures,
       });
-      if (priorClaim) startAttempt = 2;
-    } catch { /* treat as a first attempt; authorize() re-checks deterministically */ }
+    }
+
     for (let attempt = startAttempt; attempt < startAttempt + maxAttempts; attempt += 1) {
       let selection = null;
       if (routeFn) {
@@ -861,10 +982,42 @@ export function createReviewLoopController({
         lastErr = err;
         if (isAuthorizationFailure(err)) throw err; // spend/objective denial — never dispatched, never retried
         const code = err?.code ?? err?.providerFailure ?? '';
+        const transientAuth =
+          code === 'PROVIDER_AUTH_FAILED'
+          && err?.transientAuth === true;
+
         onAttempt?.({
           attempt, family, provider, quotaPools: selection?.quotaPools ?? null, outcome: 'FAILURE', code,
         });
         if (!RETRYABLE.has(code)) throw err;
+
+        if (transientAuth && transientAuthRetriesUsed < transientAuthRetryDelays.length) {
+          const delayMs = transientAuthRetryDelays[transientAuthRetriesUsed];
+          transientAuthRetriesUsed += 1;
+
+          // Do NOT mark provider health AUTH_FAILED for a one-off OAuth refresh
+          // race. Let the deterministic router select the same healthy primary
+          // again. The next physical call still gets a fresh spend permit.
+          if (selection) tried.delete(selection.family);
+          onEvent?.({
+            type: 'ROLE_PROVIDER_TRANSIENT_AUTH_RETRY',
+            role,
+            family,
+            provider,
+            attempt,
+            retry: transientAuthRetriesUsed,
+            delayMs,
+          });
+
+          // eslint-disable-next-line no-await-in-loop
+          await sleepFn(delayMs, signal);
+          // loop -> same family is eligible again
+          continue;
+        }
+
+        // Either this was an ordinary retryable provider failure, or the AGY
+        // transient-auth budget was exhausted. Only NOW poison provider health
+        // and let the next iteration route to the next eligible family.
         if (selection && recordProviderFailure) recordProviderFailure(selection, { code });
         // loop -> next attempt re-routes
       }
@@ -1154,6 +1307,7 @@ export function createReviewLoopController({
         operationId: chunkId,
         workflowId: loopState.loopId,
         evidenceIds: [reviewStateEvidence.evidenceId],
+        signal,
         auditContext: { round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total },
         onAttempt: (a) => physicalCalls.push({
           role: 'reviewer', round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total,
@@ -1726,6 +1880,7 @@ export function createReviewLoopController({
         operationId: `${loopState.loopId}:supervise:${reviewScope.id}:round-${loopState.round}`,
         workflowId: loopState.loopId,
         evidenceIds: [findingsEvidence.evidenceId],
+        signal,
         auditContext: { round: loopState.round, chunkIndex: null, chunkTotal: null },
         onAttempt: (a) => physicalCalls.push({
           role: 'supervisor', round: loopState.round, chunkIndex: null, chunkTotal: null,
