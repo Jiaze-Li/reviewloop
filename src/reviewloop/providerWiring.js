@@ -38,6 +38,57 @@ import { evidencePromptLines, normalizeContractText } from './contractEvidence.j
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 
 /**
+ * AGY occasionally surfaces Google's canonical OAuth boundary rejection from a
+ * prompt-bearing invocation even though the next fresh CLI process can refresh
+ * credentials and succeed immediately. Narrowly recognise ONLY that canonical
+ * 401/UNAUTHENTICATED shape here. Generic CLI 401/403 failures remain
+ * post-dispatch AUTH_REJECTED (unknown spend) and fail closed.
+ *
+ * This classifier is intentionally strict: an arbitrary non-zero AGY exit, a
+ * 403 permission error, or a 401 without the canonical authentication wording
+ * is NOT treated as a proven zero-token auth-boundary rejection.
+ */
+export function isAgyTransientAuthBoundaryRejection(err) {
+  if (!err || typeof err !== 'object' || err.code !== 'AGY_NONZERO_EXIT') return false;
+
+  const envelope = err.envelope && typeof err.envelope === 'object' ? err.envelope : {};
+  const envelopeBits = [
+    envelope.status,
+    envelope.state,
+    envelope.error_code,
+    envelope.errorCode,
+    envelope.code,
+    envelope.error_type,
+    envelope.errorType,
+    envelope.type,
+    envelope.reason,
+  ].filter((v) => v !== undefined && v !== null).map(String);
+
+  const diagnostic = `${String(err.stderr ?? '')}\n${envelopeBits.join(' ')}`.toLowerCase();
+  const has401 = /\b401\b/.test(diagnostic);
+  const hasCanonicalAuthSignal =
+    /\bunauthenticated\b|invalid authentication credentials|expected oauth 2 access token|login cookie/.test(diagnostic);
+
+  return has401 && hasCanonicalAuthSignal;
+}
+
+function normalizeAgyTransientAuthBoundaryRejection(err) {
+  const normalized = new Error('AGY authentication was rejected at the Google provider auth boundary');
+  normalized.name = 'AgyTransientAuthError';
+  normalized.code = 'PROVIDER_AUTH_FAILED';
+  normalized.providerFailure = 'PROVIDER_AUTH_FAILED';
+  // Controller uses this marker to retry the SAME provider family before
+  // poisoning provider health. ReviewSpend still sees PROVIDER_AUTH_FAILED and
+  // therefore settles the physical attempt as proven zero-token auth failure.
+  normalized.transientAuth = true;
+  normalized.transientAuthSource = 'agy-google-401-unauthenticated';
+  normalized.exitCode = Number.isFinite(err?.exitCode) ? err.exitCode : 1;
+  if (err?.stderr) normalized.stderr = String(err.stderr).slice(0, 4000);
+  if (err?.envelope) normalized.envelope = err.envelope;
+  return normalized;
+}
+
+/**
  * ReviewLoop-specific wall-clock bound for AGY-backed Reviewer/Supervisor calls.
  *
  * The generic callAgy() client intentionally keeps its historical 120s default,
@@ -331,17 +382,25 @@ export function createReviewLoopProviderPool({
       logFile = path.join(logDir, 'agy.log');
     }
     try {
-      const res = await callAgy({
-        prompt,
-        model: modelForFamily[family] ?? null,
-        cwd: narrowReviewTransportCwd(),
-        geminiDir: agyGeminiDir,
-        logFile: logFile ?? undefined,
-        disableSlashCommands: true,
-        agent: MINIMAL_AGY_AGENT_NAME,
-        timeoutMs: agyReviewTimeoutMs,
-        signal,
-      });
+      let res;
+      try {
+        res = await callAgy({
+          prompt,
+          model: modelForFamily[family] ?? null,
+          cwd: narrowReviewTransportCwd(),
+          geminiDir: agyGeminiDir,
+          logFile: logFile ?? undefined,
+          disableSlashCommands: true,
+          agent: MINIMAL_AGY_AGENT_NAME,
+          timeoutMs: agyReviewTimeoutMs,
+          signal,
+        });
+      } catch (err) {
+        if (isAgyTransientAuthBoundaryRejection(err)) {
+          throw normalizeAgyTransientAuthBoundaryRejection(err);
+        }
+        throw err;
+      }
       if (enforcePerCall) {
         let logText = '';
         try { logText = readFileSync(logFile, 'utf8'); } catch { logText = ''; }
