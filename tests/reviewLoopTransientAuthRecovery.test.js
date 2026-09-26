@@ -36,40 +36,6 @@ function transientProviderAuth() {
   });
 }
 
-function controllerHarness({ reviewerFn, routeReviewerFn, recordProviderFailure, sleepFn }) {
-  return createReviewLoopController({
-    persistence: new MemoryPersistence(),
-    routeReviewerFn,
-    recordProviderFailure,
-    sleepFn,
-    reviewerFn,
-    captureBaselineFn: async () => ({
-      head: 'B',
-      dirtyFiles: [],
-      evidenceComplete: true,
-    }),
-    collectWorkerDeltaFn: async () => ({
-      fingerprint: 'd',
-      diff: 'diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-a\n+b\n',
-      changedFiles: ['a.js'],
-      currentHead: 'B',
-      evidenceComplete: true,
-      noWorkerChangeYet: false,
-    }),
-    runGateFn: async () => ({
-      verdict: 'PASS',
-      pass: true,
-      fingerprint: 'g',
-      failureIdentities: [],
-      results: [],
-    }),
-    discoverVerificationCommandsFn: () => ({
-      source: 'test',
-      commands: ['echo test'],
-    }),
-  });
-}
-
 test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-looking exits do not', () => {
   assert.equal(isAgyTransientAuthBoundaryRejection(google401()), true);
   assert.equal(isAgyTransientAuthBoundaryRejection(Object.assign(new Error('x'), {
