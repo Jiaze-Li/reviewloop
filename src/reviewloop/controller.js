@@ -835,7 +835,7 @@ export function createReviewLoopController({
   // a fresh dispatch on identical evidence for a first attempt (crash/resume
   // re-call included).
   async function meteredWithFailover({
-    spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null,
+    spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null, signal = null,
     // Durable physical-call-audit identity forwarded verbatim into the spend
     // record (round / chunkIndex / chunkTotal; quotaPools is filled in below
     // from the resolved routing selection) — see reviewSpend.js meteredCall.
@@ -1235,6 +1235,7 @@ export function createReviewLoopController({
         operationId: chunkId,
         workflowId: loopState.loopId,
         evidenceIds: [reviewStateEvidence.evidenceId],
+        signal,
         auditContext: { round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total },
         onAttempt: (a) => physicalCalls.push({
           role: 'reviewer', round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total,
@@ -1807,6 +1808,7 @@ export function createReviewLoopController({
         operationId: `${loopState.loopId}:supervise:${reviewScope.id}:round-${loopState.round}`,
         workflowId: loopState.loopId,
         evidenceIds: [findingsEvidence.evidenceId],
+        signal,
         auditContext: { round: loopState.round, chunkIndex: null, chunkTotal: null },
         onAttempt: (a) => physicalCalls.push({
           role: 'supervisor', round: loopState.round, chunkIndex: null, chunkTotal: null,
