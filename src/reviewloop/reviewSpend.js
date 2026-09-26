@@ -1203,6 +1203,10 @@ export function createReviewLoopSpend({
             costKnown,
             businessOutcome: 'FAILURE',
             failureCode: err?.code ?? err?.providerFailure ?? null,
+            // Persist the narrow transient-auth provenance so a process restart
+            // cannot reset the same-family OAuth retry budget. Generic
+            // PROVIDER_AUTH_FAILED failures remain distinguishable.
+            transientAuth: err?.transientAuth === true,
             // Durable physical-call-audit identity (see auditContext above).
             operationId: operationId ?? null,
             attempt,
@@ -1261,6 +1265,18 @@ export function createReviewLoopSpend({
     return result?.value ?? result;
   }
 
+  // Durable + current-process physical attempts for one logical role/operation.
+  // Used by controller retry/resume logic so attempt numbers and bounded
+  // transient-auth retry budgets survive a process restart. This is a
+  // read-only projection of the existing spend log — no parallel state store.
+  async function attemptRecords({ role, operationId } = {}) {
+    const prior = await loadPriorRecords();
+    return [...prior, ...sessionRecords].filter((r) => (
+      (role == null || r.role === role)
+      && (operationId == null || r.operationId === operationId)
+    ));
+  }
+
   async function telemetry() {
     const t = await currentTotals();
     const prior = await loadPriorRecords();
@@ -1297,6 +1313,7 @@ export function createReviewLoopSpend({
     informationLedger,
     registerEvidence,
     meteredCall,
+    attemptRecords,
     currentTotals,
     hasUnaccountedSpend,
     loadTokenAnomaly: loadAnomaly,

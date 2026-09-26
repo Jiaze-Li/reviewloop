@@ -857,19 +857,43 @@ export function createReviewLoopController({
     const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
     let transientAuthRetriesUsed = 0;
     let lastErr = null;
-    // Resume/continuation: if this exact (role, operationId) already durably
-    // CONSUMED its evidence in a prior (crashed) session, this call is not a
-    // fresh first attempt — it continues that one authorized dispatch SEQUENCE.
-    // Start the bounded attempt counter past 1 so authorize() takes the
-    // failover-reuse path, which STILL refuses if any earlier attempt actually
-    // reached the provider (non-zero settled usage / open DISPATCHING).
+    // Resume/continuation is derived from DURABLE physical-attempt records, not
+    // process-local counters. A crash during the 2s/5s backoff therefore cannot
+    // reset either the physical attempt number or the two-retry auth budget.
+    // The New Information ledger remains the authorization authority; these
+    // records only restore bounded sequencing state.
     let startAttempt = 1;
     try {
-      const priorClaim = await spend.informationLedger?.findConsumedBy?.({
-        workflowId, role, operationId, evidenceIds,
-      });
-      if (priorClaim) startAttempt = 2;
-    } catch { /* treat as a first attempt; authorize() re-checks deterministically */ }
+      const priorAttempts = typeof spend.attemptRecords === 'function'
+        ? await spend.attemptRecords({ role, operationId })
+        : [];
+      const attemptNumbers = priorAttempts
+        .map((r) => Number(r.attempt))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      if (attemptNumbers.length > 0) {
+        startAttempt = Math.max(...attemptNumbers) + 1;
+      }
+      transientAuthRetriesUsed = priorAttempts.filter((r) => (
+        r.provider === 'agy'
+        && r.failureCode === 'PROVIDER_AUTH_FAILED'
+        && r.transientAuth === true
+      )).length;
+
+      // Backward-compatible fallback for a consumed claim written by an older
+      // build that has no spend-attempt projection. Starting at 2 preserves the
+      // existing failover-reuse safety rule; authorize() still re-checks the
+      // durable reservation ledger before any physical call.
+      if (startAttempt === 1) {
+        const priorClaim = await spend.informationLedger?.findConsumedBy?.({
+          workflowId, role, operationId, evidenceIds,
+        });
+        if (priorClaim) startAttempt = 2;
+      }
+    } catch {
+      // Fail closed on the actual call path: authorize() independently checks
+      // durable information/reservations. We only lose resume convenience here,
+      // never bypass spend safety.
+    }
     for (let attempt = startAttempt; attempt < startAttempt + maxAttempts; attempt += 1) {
       let selection = null;
       if (routeFn) {

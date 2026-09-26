@@ -13,6 +13,7 @@ import {
   createReviewLoopController,
   DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
 } from '../src/reviewloop/controller.js';
+import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 function google401() {
@@ -213,4 +214,79 @@ test('after two transient AGY retries, provider health is marked once and normal
     ],
   );
   assert.equal(spend[3].businessOutcome, 'SUCCESS');
+});
+
+
+test('process restart preserves transient-auth retry budget and physical attempt numbering', async () => {
+  const persistence = new MemoryPersistence();
+
+  const seedController = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+  const { loopId } = await seedController.begin({ goal: 'g', cwd: '/r' });
+  const operationId = `${loopId}:round-1:chunk-0`;
+
+  // Simulate process A: physical attempt 1 reached the Google auth boundary,
+  // was proven zero-token, and was durably accounted before the process died.
+  const seedSpend = createReviewLoopSpend({ loopId, persistence });
+  const seedEvidence = await seedSpend.registerEvidence({
+    kind: 'external',
+    taskId: operationId,
+    fingerprint: 'seed-auth-retry',
+  });
+  await assert.rejects(
+    () => seedSpend.meteredCall({
+      role: 'reviewer',
+      family: 'agy:opus',
+      provider: 'agy',
+      model: 'claude-opus-4-6-thinking',
+      operationId,
+      attempt: 1,
+      evidenceIds: [seedEvidence.evidenceId],
+      call: async () => { throw transientProviderAuth(); },
+    }),
+    (err) => err?.code === 'PROVIDER_AUTH_FAILED',
+  );
+
+  // Simulate process B. Only one of the two same-family retries remains.
+  // The next AGY failure consumes it; one further AGY failure exhausts the
+  // family and normal failover starts at physical attempt 4.
+  const families = [];
+  const healthFailures = [];
+  let agyBlocked = false;
+  const controller = createReviewLoopController({
+    persistence,
+    routeReviewerFn: () => (agyBlocked
+      ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
+      : { family: 'agy:opus', provider: 'agy', model: 'claude-opus-4-6-thinking', transport: async () => ({}) }),
+    recordProviderFailure: (selection, failure) => {
+      healthFailures.push({ family: selection.family, code: failure.code });
+      if (selection.family === 'agy:opus') agyBlocked = true;
+    },
+    sleepFn: async () => {},
+    reviewerFn: async ({ selection }) => {
+      families.push(selection.family);
+      if (selection.family === 'agy:opus') throw transientProviderAuth();
+      return { value: { findings: [] }, usage: { input_tokens: 4, output_tokens: 2 }, model: 'codex-test' };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
+  assert.deepEqual(families, ['agy:opus', 'agy:opus', 'codex:default']);
+  assert.deepEqual(healthFailures, [{ family: 'agy:opus', code: 'PROVIDER_AUTH_FAILED' }]);
+
+  const state = await persistence.readWorkflowState(loopId);
+  const attempts = (state.reviewLoopSpend?.records ?? [])
+    .filter((r) => r.role === 'reviewer' && r.operationId === operationId)
+    .map((r) => r.attempt);
+  assert.deepEqual(attempts, [1, 2, 3, 4], 'restart must continue physical attempt numbering without reuse');
 });
