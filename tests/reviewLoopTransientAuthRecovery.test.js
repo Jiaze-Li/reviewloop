@@ -16,7 +16,7 @@ import {
 import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
-function google401() {
+function google401({ envelope = undefined } = {}) {
   return Object.assign(new Error('agy exited with status 1'), {
     name: 'AgyExitError',
     code: 'AGY_NONZERO_EXIT',
@@ -24,6 +24,7 @@ function google401() {
     stderr:
       'UNAUTHENTICATED (code 401): Request had invalid authentication credentials. '
       + 'Expected OAuth 2 access token, login cookie or other valid authentication credential.',
+    ...(envelope === undefined ? {} : { envelope }),
   });
 }
 
@@ -47,6 +48,13 @@ test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-loo
     code: 'AGY_NONZERO_EXIT',
     stderr: '401 upstream proxy error with no authentication diagnostic',
   })), false);
+  assert.equal(isAgyTransientAuthBoundaryRejection(google401({
+    envelope: {
+      status: 'UNAUTHENTICATED',
+      code: 401,
+      usage: { input_tokens: 3, output_tokens: 0 },
+    },
+  })), false, 'usage-bearing 401 is not mechanically zero-token and must fail closed');
 });
 
 test('AGY transport normalizes canonical Google 401 into retryable proven auth-boundary failure', async () => {
@@ -71,6 +79,37 @@ test('AGY transport normalizes canonical Google 401 into retryable proven auth-b
       assert.equal(err.providerFailure, 'PROVIDER_AUTH_FAILED');
       assert.equal(err.transientAuth, true);
       assert.equal(err.transientAuthSource, 'agy-google-401-unauthenticated');
+      return true;
+    },
+  );
+});
+
+test('usage-bearing AGY 401 is never normalized to zero-token transient auth', async () => {
+  const usageBearing = google401({
+    envelope: {
+      status: 'UNAUTHENTICATED',
+      code: 401,
+      usage: { input_tokens: 9, output_tokens: 0 },
+    },
+  });
+  const pool = createReviewLoopProviderPool({
+    callAgy: async () => { throw usageBearing; },
+    provisionMinimalAgent: () => ({ name: 'reviewloop-minimal', path: '/tmp/reviewloop-minimal.md' }),
+    agyGeminiDir: '/tmp/reviewloop-test-gemini',
+    customAgentSupport: null,
+    transportRuntime: {
+      'codex:default': { available: false, reason: 'test' },
+      'claude:opus': { available: false, reason: 'test' },
+    },
+  });
+
+  const selection = pool.route('reviewer');
+  await assert.rejects(
+    () => selection.transport('review this'),
+    (err) => {
+      assert.equal(err.code, 'AGY_NONZERO_EXIT');
+      assert.notEqual(err.transientAuth, true);
+      assert.deepEqual(err.envelope?.usage, { input_tokens: 9, output_tokens: 0 });
       return true;
     },
   );
@@ -289,4 +328,104 @@ test('process restart preserves transient-auth retry budget and physical attempt
     .filter((r) => r.role === 'reviewer' && r.operationId === operationId)
     .map((r) => r.attempt);
   assert.deepEqual(attempts, [1, 2, 3, 4], 'restart must continue physical attempt numbering without reuse');
+});
+
+
+test('restart after third transient AGY failure restores exhausted-family health before any fourth AGY dispatch', async () => {
+  const persistence = new MemoryPersistence();
+
+  const seedController = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+  const { loopId } = await seedController.begin({ goal: 'g', cwd: '/r' });
+  const operationId = `${loopId}:round-1:chunk-0`;
+
+  // Exact crash-window state: all three auth-boundary failures are durable, but
+  // the in-memory provider-health mutation after failure #3 never happened.
+  const state = await persistence.readWorkflowState(loopId);
+  await persistence.updateWorkflowState(loopId, {
+    reviewLoopSpend: {
+      records: [1, 2, 3].map((attempt) => ({
+        role: 'reviewer',
+        family: 'agy:opus',
+        provider: 'agy',
+        model: 'claude-opus-4-6-thinking',
+        usageKnown: true,
+        usageVolume: 0,
+        usageAccounting: {
+          method: 'conservative_additive_unknown',
+          semanticsKnown: false,
+          volumeResolved: true,
+          accountingClass: 'agy',
+          reportedTotalTokens: null,
+        },
+        usageBreakdown: {
+          inputTokens: 0,
+          outputTokens: 0,
+          thinkingTokens: null,
+          cacheReadTokens: null,
+          cacheCreationTokens: null,
+          reportedTotalTokens: null,
+          rawFieldSumTokens: 0,
+        },
+        costUsd: 0,
+        costKnown: true,
+        businessOutcome: 'FAILURE',
+        failureCode: 'PROVIDER_AUTH_FAILED',
+        transientAuth: true,
+        operationId,
+        attempt,
+        rawUsage: { input_tokens: 0, output_tokens: 0 },
+        round: 1,
+        chunkIndex: 0,
+        chunkTotal: 1,
+        at: new Date(0).toISOString(),
+      })),
+    },
+    modelSpendReservations: state.modelSpendReservations ?? {},
+  });
+
+  const families = [];
+  const restoredHealth = [];
+  let agyBlocked = false;
+  const controller = createReviewLoopController({
+    persistence,
+    routeReviewerFn: () => (agyBlocked
+      ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
+      : { family: 'agy:opus', provider: 'agy', model: 'claude-opus-4-6-thinking', transport: async () => ({}) }),
+    recordProviderFailure: (selection, failure) => {
+      restoredHealth.push({
+        family: selection.family,
+        code: failure.code,
+        recovered: failure.recoveredFromDurableAuthExhaustion === true,
+      });
+      if (selection.family === 'agy:opus') agyBlocked = true;
+    },
+    reviewerFn: async ({ selection }) => {
+      families.push(selection.family);
+      return { value: { findings: [] }, usage: { input_tokens: 5, output_tokens: 2 }, model: 'codex-test' };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
+  assert.deepEqual(families, ['codex:default'], 'no fourth AGY call is allowed after durable exhaustion');
+  assert.deepEqual(restoredHealth, [{
+    family: 'agy:opus',
+    code: 'PROVIDER_AUTH_FAILED',
+    recovered: true,
+  }]);
+
+  const finalState = await persistence.readWorkflowState(loopId);
+  const newAttempt = (finalState.reviewLoopSpend?.records ?? [])
+    .find((r) => r.operationId === operationId && r.businessOutcome === 'SUCCESS');
+  assert.equal(newAttempt?.attempt, 4, 'failover resumes with the next physical attempt number');
 });

@@ -857,6 +857,7 @@ export function createReviewLoopController({
     const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
     let transientAuthRetriesUsed = 0;
     let lastErr = null;
+    let priorAttempts = [];
     // Resume/continuation is derived from DURABLE physical-attempt records, not
     // process-local counters. A crash during the 2s/5s backoff therefore cannot
     // reset either the physical attempt number or the two-retry auth budget.
@@ -864,7 +865,7 @@ export function createReviewLoopController({
     // records only restore bounded sequencing state.
     let startAttempt = 1;
     try {
-      const priorAttempts = typeof spend.attemptRecords === 'function'
+      priorAttempts = typeof spend.attemptRecords === 'function'
         ? await spend.attemptRecords({ role, operationId })
         : [];
       const attemptNumbers = priorAttempts
@@ -894,6 +895,48 @@ export function createReviewLoopController({
       // durable information/reservations. We only lose resume convenience here,
       // never bypass spend safety.
     }
+
+    // Crash window hardening: the third same-family transient AGY 401 is
+    // durably appended BEFORE recordProviderFailure() runs. If the process dies
+    // in that tiny window, a fresh router would otherwise consider the family
+    // healthy and grant an unintended fourth AGY call. Reconstruct exhausted
+    // families from the durable spend log and restore the missing health
+    // transition BEFORE routing any new physical attempt.
+    const exhaustedTransientFamilies = new Map();
+    for (const record of priorAttempts) {
+      if (record?.provider !== 'agy'
+        || record?.failureCode !== 'PROVIDER_AUTH_FAILED'
+        || record?.transientAuth !== true
+        || typeof record?.family !== 'string') continue;
+      const entry = exhaustedTransientFamilies.get(record.family) ?? {
+        family: record.family,
+        provider: record.provider,
+        failures: 0,
+      };
+      entry.failures += 1;
+      exhaustedTransientFamilies.set(record.family, entry);
+    }
+    for (const entry of exhaustedTransientFamilies.values()) {
+      if (entry.failures <= transientAuthRetryDelays.length) continue;
+      // Seed tried as defense-in-depth. Production routing honors the restored
+      // health failure; a test/custom router that ignores health still cannot
+      // dispatch this already-exhausted family again.
+      tried.add(entry.family);
+      if (recordProviderFailure) {
+        recordProviderFailure(
+          { role, family: entry.family, provider: entry.provider },
+          { code: 'PROVIDER_AUTH_FAILED', recoveredFromDurableAuthExhaustion: true },
+        );
+      }
+      onEvent?.({
+        type: 'ROLE_PROVIDER_TRANSIENT_AUTH_EXHAUSTION_RESTORED',
+        role,
+        family: entry.family,
+        provider: entry.provider,
+        failures: entry.failures,
+      });
+    }
+
     for (let attempt = startAttempt; attempt < startAttempt + maxAttempts; attempt += 1) {
       let selection = null;
       if (routeFn) {

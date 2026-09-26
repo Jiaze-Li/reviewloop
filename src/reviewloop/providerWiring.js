@@ -48,6 +48,20 @@ export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY))
  * 403 permission error, or a 401 without the canonical authentication wording
  * is NOT treated as a proven zero-token auth-boundary rejection.
  */
+function agyEnvelopeReportsUsage(envelope) {
+  if (!envelope || typeof envelope !== 'object') return false;
+  const candidates = [envelope.usage, envelope.token_usage, envelope.tokenUsage];
+
+  const hasNumericLeaf = (value, depth = 0) => {
+    if (depth > 4 || value == null) return false;
+    if (typeof value === 'number' && Number.isFinite(value)) return true;
+    if (typeof value !== 'object' || Array.isArray(value)) return false;
+    return Object.values(value).some((v) => hasNumericLeaf(v, depth + 1));
+  };
+
+  return candidates.some((candidate) => hasNumericLeaf(candidate));
+}
+
 export function isAgyTransientAuthBoundaryRejection(err) {
   if (!err || typeof err !== 'object' || err.code !== 'AGY_NONZERO_EXIT') return false;
 
@@ -69,7 +83,12 @@ export function isAgyTransientAuthBoundaryRejection(err) {
   const hasCanonicalAuthSignal =
     /\bunauthenticated\b|invalid authentication credentials|expected oauth 2 access token|login cookie/.test(diagnostic);
 
-  return has401 && hasCanonicalAuthSignal;
+  // A usage-bearing error is NOT mechanically proven pre-send/zero-token.
+  // Leave it as the original AGY_NONZERO_EXIT so ModelSpendAuthority follows
+  // the existing UNKNOWN != ZERO fail-closed path (or a future accounting path
+  // can consume the reported usage explicitly). Never synthesize zero usage
+  // when AGY itself reported token activity.
+  return has401 && hasCanonicalAuthSignal && !agyEnvelopeReportsUsage(envelope);
 }
 
 function normalizeAgyTransientAuthBoundaryRejection(err) {
