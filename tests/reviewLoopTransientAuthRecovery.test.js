@@ -16,14 +16,15 @@ import {
 import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
-function google401({ envelope = undefined } = {}) {
+function google401({ envelope = undefined, stderrSuffix = '' } = {}) {
   return Object.assign(new Error('agy exited with status 1'), {
     name: 'AgyExitError',
     code: 'AGY_NONZERO_EXIT',
     exitCode: 1,
     stderr:
       'UNAUTHENTICATED (code 401): Request had invalid authentication credentials. '
-      + 'Expected OAuth 2 access token, login cookie or other valid authentication credential.',
+      + 'Expected OAuth 2 access token, login cookie or other valid authentication credential.'
+      + String(stderrSuffix ?? ''),
     ...(envelope === undefined ? {} : { envelope }),
   });
 }
@@ -39,7 +40,11 @@ function transientProviderAuth() {
 }
 
 test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-looking exits do not', () => {
-  assert.equal(isAgyTransientAuthBoundaryRejection(google401()), true);
+  assert.equal(
+    isAgyTransientAuthBoundaryRejection(google401()),
+    true,
+    'the canonical "OAuth 2 access token" wording alone is not a usage diagnostic',
+  );
   assert.equal(isAgyTransientAuthBoundaryRejection(Object.assign(new Error('x'), {
     code: 'AGY_NONZERO_EXIT',
     stderr: '403 PERMISSION_DENIED: caller lacks permission',
@@ -69,6 +74,12 @@ test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-loo
       meta: { token_usage: { total_tokens: 5 } },
     },
   })), false, 'meta-carried token counts are reported activity, never proven zero-token');
+  assert.equal(isAgyTransientAuthBoundaryRejection(google401({
+    stderrSuffix: '\nusage: input_tokens=6 output_tokens=0',
+  })), false, 'stderr-carried token counts are reported activity, never proven zero-token');
+  assert.equal(isAgyTransientAuthBoundaryRejection(google401({
+    stderrSuffix: '\ntotal_tokens: 7',
+  })), false, 'stderr total-token diagnostics are reported activity, never proven zero-token');
 });
 
 test('AGY transport normalizes canonical Google 401 into retryable proven auth-boundary failure', async () => {
@@ -155,6 +166,33 @@ test('metadata-carried AGY token counts keep the original fail-closed transport 
       assert.equal(err.code, 'AGY_NONZERO_EXIT');
       assert.notEqual(err.transientAuth, true);
       assert.deepEqual(err.envelope?.metadata, { input_tokens: 11, output_tokens: 0 });
+      return true;
+    },
+  );
+});
+
+test('stderr-carried AGY token counts keep the original fail-closed transport error', async () => {
+  const stderrBearing = google401({
+    stderrSuffix: '\nToken usage: 13\ninput_tokens=13 output_tokens=0',
+  });
+  const pool = createReviewLoopProviderPool({
+    callAgy: async () => { throw stderrBearing; },
+    provisionMinimalAgent: () => ({ name: 'reviewloop-minimal', path: '/tmp/reviewloop-minimal.md' }),
+    agyGeminiDir: '/tmp/reviewloop-test-gemini',
+    customAgentSupport: null,
+    transportRuntime: {
+      'codex:default': { available: false, reason: 'test' },
+      'claude:opus': { available: false, reason: 'test' },
+    },
+  });
+
+  const selection = pool.route('reviewer');
+  await assert.rejects(
+    () => selection.transport('review this'),
+    (err) => {
+      assert.equal(err.code, 'AGY_NONZERO_EXIT');
+      assert.notEqual(err.transientAuth, true);
+      assert.match(err.stderr, /input_tokens=13/);
       return true;
     },
   );

@@ -48,6 +48,18 @@ export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY))
  * 403 permission error, or a 401 without the canonical authentication wording
  * is NOT treated as a proven zero-token auth-boundary rejection.
  */
+function agyStderrReportsUsage(stderr) {
+  const text = String(stderr ?? '');
+
+  // stderr is allowed to carry usage diagnostics, but the canonical Google
+  // auth message itself contains "OAuth 2 access token". Never treat that
+  // phrase as usage. Require a usage/count field label tied to a numeric value.
+  const tokenCountField = /\b(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?\b\s*[:=]\s*\d+(?:\.\d+)?\b/i;
+  const usageCountField = /\b(?:token[_ -]?usage|usage(?:[_ -]?(?:tokens?|count|volume))?)\b\s*[:=]\s*\d+(?:\.\d+)?\b/i;
+
+  return tokenCountField.test(text) || usageCountField.test(text);
+}
+
 function agyEnvelopeReportsUsage(envelope) {
   if (!envelope || typeof envelope !== 'object') return false;
   // Keep this in lock-step with agyErrorEnvelope.js USAGE_KEYS. metadata/meta are intentionally retained there as numeric-only operational
@@ -96,7 +108,10 @@ export function isAgyTransientAuthBoundaryRejection(err) {
   // the existing UNKNOWN != ZERO fail-closed path (or a future accounting path
   // can consume the reported usage explicitly). Never synthesize zero usage
   // when AGY itself reported token activity.
-  return has401 && hasCanonicalAuthSignal && !agyEnvelopeReportsUsage(envelope);
+  return has401
+    && hasCanonicalAuthSignal
+    && !agyEnvelopeReportsUsage(envelope)
+    && !agyStderrReportsUsage(err.stderr);
 }
 
 function normalizeAgyTransientAuthBoundaryRejection(err) {
