@@ -124,7 +124,7 @@ test('one transient AGY 401 retries the same family and succeeds without poisoni
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
   const result = await controller.review({ loopId });
 
-  assert.equal(result.status, 'PASS');
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
   assert.deepEqual(calls, ['agy:opus', 'agy:opus']);
   assert.deepEqual(delays, [DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS[0]]);
   assert.equal(healthFailures.length, 0, 'a recovered OAuth refresh race must not poison provider health');
@@ -196,7 +196,7 @@ test('after two transient AGY retries, provider health is marked once and normal
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
   const result = await controller.review({ loopId });
 
-  assert.equal(result.status, 'PASS');
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
   assert.deepEqual(families, ['agy:opus', 'agy:opus', 'agy:opus', 'codex:default']);
   assert.deepEqual(delays, [...DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS]);
   assert.deepEqual(healthFailures, [{ family: 'agy:opus', code: 'PROVIDER_AUTH_FAILED' }]);
