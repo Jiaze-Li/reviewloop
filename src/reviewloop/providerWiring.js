@@ -48,38 +48,81 @@ export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY))
  * 403 permission error, or a 401 without the canonical authentication wording
  * is NOT treated as a proven zero-token auth-boundary rejection.
  */
+const AGY_USAGE_CONTAINER_KEYS = new Set(['usage', 'token_usage', 'tokenUsage', 'metadata', 'meta']);
+const AGY_TOKEN_COUNT_KEY_RE = /^(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?$/i;
+
+function agyObjectCarriesUsageEvidence(value, depth = 0) {
+  if (depth > 8 || value == null) return false;
+  if (Array.isArray(value)) {
+    return value.some((item) => agyObjectCarriesUsageEvidence(item, depth + 1));
+  }
+  if (typeof value !== 'object') return false;
+
+  for (const [key, child] of Object.entries(value)) {
+    // UNKNOWN != ZERO: the presence of a usage-shaped container/field is
+    // enough to disqualify mechanically-proven zero, even when its value is
+    // null/empty/unresolved.
+    if (AGY_USAGE_CONTAINER_KEYS.has(key) || AGY_TOKEN_COUNT_KEY_RE.test(key)) return true;
+    if (agyObjectCarriesUsageEvidence(child, depth + 1)) return true;
+  }
+  return false;
+}
+
+function stderrJsonCarriesUsageEvidence(text) {
+  const candidates = new Set();
+  const chunks = [String(text ?? '').trim(), ...String(text ?? '').split(/\r?\n/).map((s) => s.trim())]
+    .filter(Boolean);
+
+  for (const chunk of chunks) {
+    candidates.add(chunk);
+    const objectStart = chunk.indexOf('{');
+    const objectEnd = chunk.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      candidates.add(chunk.slice(objectStart, objectEnd + 1));
+    }
+    const arrayStart = chunk.indexOf('[');
+    const arrayEnd = chunk.lastIndexOf(']');
+    if (arrayStart >= 0 && arrayEnd > arrayStart) {
+      candidates.add(chunk.slice(arrayStart, arrayEnd + 1));
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (agyObjectCarriesUsageEvidence(parsed)) return true;
+    } catch {
+      // Mixed prose + JSON or malformed diagnostics fall through to the
+      // field-label detector below. Never infer zero from a parse failure.
+    }
+  }
+  return false;
+}
+
 function agyStderrReportsUsage(stderr) {
   const text = String(stderr ?? '');
+  // Normalize escaped JSON quotes so raw JSON and JSON embedded in diagnostic
+  // prose are covered by the same conservative field detector.
+  const normalized = text.replace(/\\(["'])/g, '$1');
 
-  // stderr is allowed to carry usage diagnostics, but the canonical Google
-  // auth message itself contains "OAuth 2 access token". Never treat that
-  // phrase as usage. Require a usage/count field label tied to a numeric value.
-  const tokenCountField = /\b(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?\b\s*[:=]\s*\d+(?:\.\d+)?\b/i;
-  const usageCountField = /\b(?:token[_ -]?usage|usage(?:[_ -]?(?:tokens?|count|volume))?)\b\s*[:=]\s*\d+(?:\.\d+)?\b/i;
+  // The canonical auth message itself contains "OAuth 2 access token", so
+  // matching the word token is unsafe. Require an explicit usage/token-count
+  // FIELD label with a separator. The value may be numeric or unresolved:
+  // UNKNOWN != ZERO, so either form blocks zero-token recovery.
+  const tokenCountField = /(?:^|[\s,{[(])["']?(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?["']?\s*[:=]/i;
+  const usageField = /(?:^|[\s,{[(])["']?(?:token[_ -]?usage|usage(?:[_ -]?(?:tokens?|count|volume))?)["']?\s*[:=]/i;
 
-  return tokenCountField.test(text) || usageCountField.test(text);
+  return tokenCountField.test(normalized)
+    || usageField.test(normalized)
+    || stderrJsonCarriesUsageEvidence(normalized);
 }
 
 function agyEnvelopeReportsUsage(envelope) {
   if (!envelope || typeof envelope !== 'object') return false;
-  // Keep this in lock-step with agyErrorEnvelope.js USAGE_KEYS. metadata/meta are intentionally retained there as numeric-only operational
-  // trees because AGY can report token/context activity through them.
-  const candidates = [
-    envelope.usage,
-    envelope.token_usage,
-    envelope.tokenUsage,
-    envelope.metadata,
-    envelope.meta,
-  ];
-
-  const hasNumericLeaf = (value, depth = 0) => {
-    if (depth > 4 || value == null) return false;
-    if (typeof value === 'number' && Number.isFinite(value)) return true;
-    if (typeof value !== 'object' || Array.isArray(value)) return false;
-    return Object.values(value).some((v) => hasNumericLeaf(v, depth + 1));
-  };
-
-  return candidates.some((candidate) => hasNumericLeaf(candidate));
+  // Keep this in lock-step with agyErrorEnvelope.js USAGE_KEYS. A safe
+  // envelope only contains operational metadata; any usage-shaped field means
+  // the call is not mechanically provable as zero-token.
+  return agyObjectCarriesUsageEvidence(envelope);
 }
 
 export function isAgyTransientAuthBoundaryRejection(err) {

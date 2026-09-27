@@ -908,6 +908,7 @@ export function createReviewLoopController({
     // families from the durable spend log and restore the missing health
     // transition BEFORE routing any new physical attempt.
     const exhaustedTransientFamilies = new Map();
+    const exhaustedFamilies = new Set();
     for (const record of priorAttempts) {
       if (typeof record?.family !== 'string'
         || !record.family.startsWith('agy:')
@@ -926,6 +927,7 @@ export function createReviewLoopController({
       // Seed tried as defense-in-depth. Production routing honors the restored
       // health failure; a test/custom router that ignores health still cannot
       // dispatch this already-exhausted family again.
+      exhaustedFamilies.add(entry.family);
       tried.add(entry.family);
       if (recordProviderFailure) {
         recordProviderFailure(
@@ -963,6 +965,24 @@ export function createReviewLoopController({
       }
       const family = selection?.family ?? defaultFamily;
       const provider = selection?.provider ?? defaultProvider;
+
+      // Exhaustion is a dispatch invariant, not a routing implementation
+      // detail. A route-less controller has no selection to consult, so the
+      // default family must be blocked here too once durable history proves
+      // that its initial auth failure + both same-family retries were spent.
+      if (exhaustedFamilies.has(family)) {
+        lastErr ??= Object.assign(
+          new Error('ReviewLoop: transient auth retry budget exhausted for ' + family),
+          {
+            code: 'PROVIDER_AUTH_FAILED',
+            providerFailure: 'PROVIDER_AUTH_FAILED',
+            transientAuth: true,
+            transientAuthExhausted: true,
+          },
+        );
+        break;
+      }
+
       try {
         // Fail closed if we no longer hold the loop lease: never start a new
         // paid provider attempt on behalf of a review another owner has taken

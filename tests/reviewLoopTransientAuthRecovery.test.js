@@ -80,6 +80,22 @@ test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-loo
   assert.equal(isAgyTransientAuthBoundaryRejection(google401({
     stderrSuffix: '\ntotal_tokens: 7',
   })), false, 'stderr total-token diagnostics are reported activity, never proven zero-token');
+
+  const stderrUsageCases = [
+    ['raw JSON usage', '\n{"usage":{"input_tokens":6}}'],
+    ['nested JSON usage', '\n{"error":{"details":{"usage":{"input_tokens":6}}}}'],
+    ['escaped JSON usage', '\n{\\"usage\\":{\\"input_tokens\\":6}}'],
+    ['JSON metadata usage', '\n{"metadata":{"total_tokens":6}}'],
+    ['unknown usage field', '\ninput_tokens: unknown'],
+    ['unknown usage container', '\nusage: unavailable'],
+  ];
+  for (const [name, stderrSuffix] of stderrUsageCases) {
+    assert.equal(
+      isAgyTransientAuthBoundaryRejection(google401({ stderrSuffix })),
+      false,
+      name + ' is usage evidence (UNKNOWN != ZERO) and must fail closed',
+    );
+  }
 });
 
 test('AGY transport normalizes canonical Google 401 into retryable proven auth-boundary failure', async () => {
@@ -193,6 +209,33 @@ test('stderr-carried AGY token counts keep the original fail-closed transport er
       assert.equal(err.code, 'AGY_NONZERO_EXIT');
       assert.notEqual(err.transientAuth, true);
       assert.match(err.stderr, /input_tokens=13/);
+      return true;
+    },
+  );
+});
+
+test('JSON-formatted stderr usage also keeps the original fail-closed transport error', async () => {
+  const stderrBearing = google401({
+    stderrSuffix: '\n{"usage":{"input_tokens":17,"output_tokens":0}}',
+  });
+  const pool = createReviewLoopProviderPool({
+    callAgy: async () => { throw stderrBearing; },
+    provisionMinimalAgent: () => ({ name: 'reviewloop-minimal', path: '/tmp/reviewloop-minimal.md' }),
+    agyGeminiDir: '/tmp/reviewloop-test-gemini',
+    customAgentSupport: null,
+    transportRuntime: {
+      'codex:default': { available: false, reason: 'test' },
+      'claude:opus': { available: false, reason: 'test' },
+    },
+  });
+
+  const selection = pool.route('reviewer');
+  await assert.rejects(
+    () => selection.transport('review this'),
+    (err) => {
+      assert.equal(err.code, 'AGY_NONZERO_EXIT');
+      assert.notEqual(err.transientAuth, true);
+      assert.match(err.stderr, /"input_tokens":17/);
       return true;
     },
   );
@@ -519,4 +562,85 @@ test('restart after third transient AGY failure restores exhausted-family health
   const newAttempt = (finalState.reviewLoopSpend?.records ?? [])
     .find((r) => r.operationId === operationId && r.businessOutcome === 'SUCCESS');
   assert.equal(newAttempt?.attempt, 4, 'failover resumes with the next physical attempt number');
+});
+
+
+test('route-less resume never dispatches an AGY default family after durable transient-auth exhaustion', async () => {
+  const persistence = new MemoryPersistence();
+
+  const seedController = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+  const { loopId } = await seedController.begin({ goal: 'g', cwd: '/r' });
+  const operationId = loopId + ':round-1:chunk-0';
+
+  const state = await persistence.readWorkflowState(loopId);
+  await persistence.updateWorkflowState(loopId, {
+    reviewLoopSpend: {
+      records: [1, 2, 3].map((attempt) => ({
+        role: 'reviewer',
+        family: 'agy:gpt-oss',
+        provider: 'agy-claude-gpt',
+        model: 'gpt-oss-test',
+        usageKnown: true,
+        usageVolume: 0,
+        usageAccounting: {
+          method: 'conservative_additive_unknown',
+          semanticsKnown: false,
+          volumeResolved: true,
+          accountingClass: 'agy',
+          reportedTotalTokens: null,
+        },
+        usageBreakdown: {
+          inputTokens: 0,
+          outputTokens: 0,
+          thinkingTokens: null,
+          cacheReadTokens: null,
+          cacheCreationTokens: null,
+          reportedTotalTokens: null,
+          rawFieldSumTokens: 0,
+        },
+        costUsd: 0,
+        costKnown: true,
+        businessOutcome: 'FAILURE',
+        failureCode: 'PROVIDER_AUTH_FAILED',
+        transientAuth: true,
+        operationId,
+        attempt,
+        rawUsage: { input_tokens: 0, output_tokens: 0 },
+        round: 1,
+        chunkIndex: 0,
+        chunkTotal: 1,
+        at: new Date(0).toISOString(),
+      })),
+    },
+    modelSpendReservations: state.modelSpendReservations ?? {},
+  });
+
+  let reviewerCalls = 0;
+  const controller = createReviewLoopController({
+    persistence,
+    reviewerFn: async () => {
+      reviewerCalls += 1;
+      return { value: { findings: [] }, usage: { input_tokens: 3, output_tokens: 1 }, model: 'unexpected' };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ fingerprint: 'd', diff: 'x', changedFiles: ['a.js'], currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(reviewerCalls, 0, 'durably exhausted default AGY family must not be dispatched a fourth time');
+  assert.notEqual(result.status, 'PASS', 'exhausted route-less provider cannot certify the review');
+
+  const finalState = await persistence.readWorkflowState(loopId);
+  const attempts = (finalState.reviewLoopSpend?.records ?? [])
+    .filter((r) => r.role === 'reviewer' && r.operationId === operationId)
+    .map((r) => r.attempt);
+  assert.deepEqual(attempts, [1, 2, 3], 'route-less resume must not append a fourth physical AGY attempt');
 });
