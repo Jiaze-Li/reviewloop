@@ -644,3 +644,57 @@ test('route-less resume never dispatches an AGY default family after durable tra
     .map((r) => r.attempt);
   assert.deepEqual(attempts, [1, 2, 3], 'route-less resume must not append a fourth physical AGY attempt');
 });
+
+
+test('route-less active dispatch stops immediately after initial auth failure plus two transient retries', async () => {
+  const persistence = new MemoryPersistence();
+  const delays = [];
+  let reviewerCalls = 0;
+
+  const controller = createReviewLoopController({
+    persistence,
+    transientAuthRetryDelaysMs: [0, 0],
+    sleepFn: async (ms) => { delays.push(ms); },
+    // Deliberately omit routeReviewerFn: the default AGY family has nowhere
+    // else to route after its bounded transient-auth retry budget is exhausted.
+    reviewerFn: async () => {
+      reviewerCalls += 1;
+      throw transientProviderAuth();
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      fingerprint: 'd',
+      diff: 'x',
+      changedFiles: ['a.js'],
+      currentHead: 'B',
+      evidenceComplete: true,
+      noWorkerChangeYet: false,
+    }),
+    runGateFn: async () => ({
+      verdict: 'PASS',
+      pass: true,
+      fingerprint: 'g',
+      failureIdentities: [],
+      results: [],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+  const result = await controller.review({ loopId });
+
+  assert.equal(
+    reviewerCalls,
+    3,
+    'route-less dispatch must stop at initial call + exactly two transient-auth retries',
+  );
+  assert.deepEqual(delays, [0, 0]);
+  assert.notEqual(result.status, 'PASS', 'an exhausted default provider cannot certify the review');
+
+  const state = await persistence.readWorkflowState(loopId);
+  const operationId = loopId + ':round-1:chunk-0';
+  const attempts = (state.reviewLoopSpend?.records ?? [])
+    .filter((r) => r.role === 'reviewer' && r.operationId === operationId)
+    .map((r) => r.attempt);
+  assert.deepEqual(attempts, [1, 2, 3], 'no fourth physical attempt may be appended in-flight');
+});

@@ -1036,10 +1036,23 @@ export function createReviewLoopController({
         }
 
         // Either this was an ordinary retryable provider failure, or the AGY
-        // transient-auth budget was exhausted. Only NOW poison provider health
-        // and let the next iteration route to the next eligible family.
-        if (selection && recordProviderFailure) recordProviderFailure(selection, { code });
-        // loop -> next attempt re-routes
+        // transient-auth budget was exhausted. Exhaustion is a dispatch
+        // invariant: record it immediately in THIS process too, not only on
+        // restart reconstruction from durable history.
+        if (transientAuth) {
+          exhaustedFamilies.add(family);
+        }
+
+        if (selection && recordProviderFailure) {
+          recordProviderFailure(selection, { code });
+        }
+
+        // Routed calls may now fail over to a different family. Route-less
+        // calls have no alternate selection, so once the default family is
+        // exhausted they must stop here instead of entering a fourth physical
+        // attempt in the same process.
+        if (transientAuth && !selection) break;
+        // loop -> next attempt re-routes (or ordinary retryable default failure)
       }
     }
     throw lastErr ?? new Error(`ReviewLoop: no eligible ${role} provider`);
