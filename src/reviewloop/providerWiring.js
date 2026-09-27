@@ -16,6 +16,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { callAgy as defaultCallAgy, AgyError } from '../agy/agyClient.js';
 import {
+  agyObjectCarriesUsageEvidence,
+  agyStderrCarriesUsageEvidence,
+} from '../agy/agyUsageEvidence.js';
+import {
   DEFAULT_ROLE_POLICY,
   PRODUCTION_ROLE_CAPABILITIES,
   RoleRouter,
@@ -48,83 +52,6 @@ export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY))
  * 403 permission error, or a 401 without the canonical authentication wording
  * is NOT treated as a proven zero-token auth-boundary rejection.
  */
-const AGY_USAGE_CONTAINER_KEYS = new Set(['usage', 'token_usage', 'tokenUsage', 'metadata', 'meta']);
-const AGY_TOKEN_COUNT_KEY_RE = /^(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?$/i;
-
-function agyObjectCarriesUsageEvidence(value, depth = 0) {
-  if (depth > 8 || value == null) return false;
-  if (Array.isArray(value)) {
-    return value.some((item) => agyObjectCarriesUsageEvidence(item, depth + 1));
-  }
-  if (typeof value !== 'object') return false;
-
-  for (const [key, child] of Object.entries(value)) {
-    // UNKNOWN != ZERO: the presence of a usage-shaped container/field is
-    // enough to disqualify mechanically-proven zero, even when its value is
-    // null/empty/unresolved.
-    if (AGY_USAGE_CONTAINER_KEYS.has(key) || AGY_TOKEN_COUNT_KEY_RE.test(key)) return true;
-    if (agyObjectCarriesUsageEvidence(child, depth + 1)) return true;
-  }
-  return false;
-}
-
-function stderrJsonCarriesUsageEvidence(text) {
-  const candidates = new Set();
-  const chunks = [String(text ?? '').trim(), ...String(text ?? '').split(/\r?\n/).map((s) => s.trim())]
-    .filter(Boolean);
-
-  for (const chunk of chunks) {
-    candidates.add(chunk);
-    const objectStart = chunk.indexOf('{');
-    const objectEnd = chunk.lastIndexOf('}');
-    if (objectStart >= 0 && objectEnd > objectStart) {
-      candidates.add(chunk.slice(objectStart, objectEnd + 1));
-    }
-    const arrayStart = chunk.indexOf('[');
-    const arrayEnd = chunk.lastIndexOf(']');
-    if (arrayStart >= 0 && arrayEnd > arrayStart) {
-      candidates.add(chunk.slice(arrayStart, arrayEnd + 1));
-    }
-  }
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate);
-      if (agyObjectCarriesUsageEvidence(parsed)) return true;
-    } catch {
-      // Mixed prose + JSON or malformed diagnostics fall through to the
-      // field-label detector below. Never infer zero from a parse failure.
-    }
-  }
-  return false;
-}
-
-function agyStderrReportsUsage(stderr) {
-  const text = String(stderr ?? '');
-  // Normalize escaped JSON quotes so raw JSON and JSON embedded in diagnostic
-  // prose are covered by the same conservative field detector.
-  const normalized = text.replace(/\\(["'])/g, '$1');
-
-  // The canonical auth message itself contains "OAuth 2 access token", so
-  // matching the word token is unsafe. Require an explicit usage/token-count
-  // FIELD label with a separator. The value may be numeric or unresolved:
-  // UNKNOWN != ZERO, so either form blocks zero-token recovery.
-  const tokenCountField = /(?:^|[\s,{[(])["']?(?:input|output|prompt|completion|total|thinking|cached?|cache[_ -]?(?:read|write|creation))[_ -]?tokens?["']?\s*[:=]/i;
-  const usageField = /(?:^|[\s,{[(])["']?(?:token[_ -]?usage|usage(?:[_ -]?(?:tokens?|count|volume))?)["']?\s*[:=]/i;
-
-  return tokenCountField.test(normalized)
-    || usageField.test(normalized)
-    || stderrJsonCarriesUsageEvidence(normalized);
-}
-
-function agyEnvelopeReportsUsage(envelope) {
-  if (!envelope || typeof envelope !== 'object') return false;
-  // Keep this in lock-step with agyErrorEnvelope.js USAGE_KEYS. A safe
-  // envelope only contains operational metadata; any usage-shaped field means
-  // the call is not mechanically provable as zero-token.
-  return agyObjectCarriesUsageEvidence(envelope);
-}
-
 export function isAgyTransientAuthBoundaryRejection(err) {
   if (!err || typeof err !== 'object' || err.code !== 'AGY_NONZERO_EXIT') return false;
 
@@ -151,10 +78,20 @@ export function isAgyTransientAuthBoundaryRejection(err) {
   // the existing UNKNOWN != ZERO fail-closed path (or a future accounting path
   // can consume the reported usage explicitly). Never synthesize zero usage
   // when AGY itself reported token activity.
+  const usageEvidenceState = err.usageEvidenceState;
+  const usageEvidenceDisqualifiesZero =
+    usageEvidenceState === 'present'
+    || usageEvidenceState === 'unknown'
+    // Backward-compatible fallback for synthetic/test errors and older
+    // transports that do not yet carry the authoritative pre-truncation state.
+    || (usageEvidenceState == null && (
+      agyObjectCarriesUsageEvidence(envelope)
+      || agyStderrCarriesUsageEvidence(err.stderr)
+    ));
+
   return has401
     && hasCanonicalAuthSignal
-    && !agyEnvelopeReportsUsage(envelope)
-    && !agyStderrReportsUsage(err.stderr);
+    && !usageEvidenceDisqualifiesZero;
 }
 
 function normalizeAgyTransientAuthBoundaryRejection(err) {

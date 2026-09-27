@@ -23,6 +23,7 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import { extractSafeAgyEnvelopeMetadata } from './agyErrorEnvelope.js';
+import { agyStderrCarriesUsageEvidence } from './agyUsageEvidence.js';
 import { PROCESS_GROUP_SPAWN_OPTS, terminateProcessTree } from '../orchestrator/processTree.js';
 
 export const DEFAULT_AGY_MODEL = 'gemini-3.7-flash-low';
@@ -56,15 +57,24 @@ export class AgyExitError extends AgyError {
   constructor(exitCode, stderr, { durationMs, stdout } = {}) {
     super(`agy exited with status ${exitCode}`, { code: 'AGY_NONZERO_EXIT', exitCode: exitCode || 1 });
     this.name = 'AgyExitError';
-    // stderr from agy is diagnostic (auth / rate-limit / usage), not prompt
-    // content — safe to surface.
-    this.stderr = truncate(stderr);
+    // Inspect FULL captured diagnostics before any lossy truncation. This
+    // boolean/state is content-free and lets upper layers distinguish
+    // mechanically-proven zero from reported/unknown token activity.
+    const stderrUsagePresent = agyStderrCarriesUsageEvidence(stderr);
     if (Number.isFinite(durationMs)) this.durationMs = durationMs;
     // agy sometimes prints a structured error envelope to stdout before
     // exiting non-zero. Pull ONLY whitelisted operational metadata out of it
     // (status / error_code / model / token usage …) — never generated text.
     // See src/agy/agyErrorEnvelope.js. Absent/non-JSON stdout -> no envelope.
     const envelope = extractSafeAgyEnvelopeMetadata(typeof stdout === 'string' ? stdout : '');
+    this.usageEvidenceState = stderrUsagePresent
+      ? 'present'
+      : envelope.usageEvidenceState;
+    this.usageEvidencePresent = this.usageEvidenceState === 'present';
+
+    // stderr from agy is diagnostic (auth / rate-limit / usage), not prompt
+    // content — safe to surface, but bounded for error propagation.
+    this.stderr = truncate(stderr);
     if (envelope.jsonObject && Object.keys(envelope.fields).length > 0) {
       this.envelope = envelope.fields;
     }

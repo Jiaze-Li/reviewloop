@@ -1,3 +1,5 @@
+import { agyObjectCarriesUsageEvidence } from './agyUsageEvidence.js';
+
 // Safe, content-free inspection of an `agy --output-format json` reply when
 // the CLI exits non-zero.
 //
@@ -10,9 +12,6 @@
 // diagnostic caller pull ONLY the documented envelope/error metadata out of
 // that stdout — never the model's generated text.
 //
-// It is standalone and not imported by the transport, the providers, the
-// loop, or the gate. A diagnostic script wires it in explicitly.
-
 // Envelope keys that are known to carry operational metadata (not model
 // output). Anything not on this list is dropped rather than echoed.
 const SAFE_SCALAR_KEYS = [
@@ -69,13 +68,20 @@ function pickNumericTree(value, depth = 0) {
 /**
  * @param {string} stdout  raw stdout captured from a non-zero `agy` exit
  * @returns {{ parsed: boolean, jsonObject: boolean, fields: object,
+ *             usageEvidenceState: 'absent'|'present'|'unknown',
  *             note?: string }}
  *   `fields` contains only whitelisted operational metadata. The generated
  *   response text is never included, even if present in the envelope.
  */
 export function extractSafeAgyEnvelopeMetadata(stdout) {
   if (typeof stdout !== 'string' || stdout.trim() === '') {
-    return { parsed: false, jsonObject: false, fields: {}, note: 'no stdout captured' };
+    return {
+      parsed: false,
+      jsonObject: false,
+      fields: {},
+      usageEvidenceState: 'absent',
+      note: 'no stdout captured',
+    };
   }
 
   let json;
@@ -86,12 +92,21 @@ export function extractSafeAgyEnvelopeMetadata(stdout) {
       parsed: false,
       jsonObject: false,
       fields: {},
+      usageEvidenceState: 'unknown',
       note: 'stdout was not valid JSON — not echoed (may contain model text)',
     };
   }
 
+  const usageEvidenceState = agyObjectCarriesUsageEvidence(json) ? 'present' : 'absent';
+
   if (!json || typeof json !== 'object' || Array.isArray(json)) {
-    return { parsed: true, jsonObject: false, fields: {}, note: 'stdout JSON was not an object' };
+    return {
+      parsed: true,
+      jsonObject: false,
+      fields: {},
+      usageEvidenceState,
+      note: 'stdout JSON was not an object',
+    };
   }
 
   const fields = pickSafeScalars(json);
@@ -108,5 +123,5 @@ export function extractSafeAgyEnvelopeMetadata(stdout) {
     }
   }
 
-  return { parsed: true, jsonObject: true, fields };
+  return { parsed: true, jsonObject: true, fields, usageEvidenceState };
 }

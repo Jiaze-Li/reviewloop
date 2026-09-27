@@ -14,6 +14,7 @@ import {
   DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
 } from '../src/reviewloop/controller.js';
 import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
+import { AgyExitError } from '../src/agy/agyClient.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 function google401({ envelope = undefined, stderrSuffix = '' } = {}) {
@@ -96,6 +97,49 @@ test('AGY classifier is narrow: canonical Google 401 matches, unrelated auth-loo
       name + ' is usage evidence (UNKNOWN != ZERO) and must fail closed',
     );
   }
+});
+
+test('actual AgyExitError preserves usage evidence before lossy envelope/stderr normalization', () => {
+  const canonical =
+    'UNAUTHENTICATED (code 401): Request had invalid authentication credentials. '
+    + 'Expected OAuth 2 access token, login cookie or other valid authentication credential.';
+
+  const nestedStdout = new AgyExitError(1, canonical, {
+    stdout: JSON.stringify({
+      error: {
+        status: 'UNAUTHENTICATED',
+        code: 401,
+        usage: { input_tokens: 5 },
+      },
+    }),
+  });
+  assert.equal(nestedStdout.usageEvidenceState, 'present');
+  assert.equal(isAgyTransientAuthBoundaryRejection(nestedStdout), false);
+
+  const unresolvedStdout = new AgyExitError(1, canonical, {
+    stdout: JSON.stringify({
+      status: 'UNAUTHENTICATED',
+      code: 401,
+      usage: 'unknown',
+    }),
+  });
+  assert.equal(unresolvedStdout.usageEvidenceState, 'present');
+  assert.equal(isAgyTransientAuthBoundaryRejection(unresolvedStdout), false);
+
+  const opaqueStdout = new AgyExitError(1, canonical, {
+    stdout: 'non-json diagnostic output',
+  });
+  assert.equal(opaqueStdout.usageEvidenceState, 'unknown');
+  assert.equal(isAgyTransientAuthBoundaryRejection(opaqueStdout), false, 'UNKNOWN != ZERO');
+
+  const longStderr = new AgyExitError(
+    1,
+    canonical + '\n' + 'x'.repeat(5000) + '\ninput_tokens: 9',
+    { stdout: '' },
+  );
+  assert.equal(longStderr.usageEvidenceState, 'present');
+  assert.equal(longStderr.stderr.includes('input_tokens: 9'), false, 'surfaced stderr is intentionally truncated');
+  assert.equal(isAgyTransientAuthBoundaryRejection(longStderr), false, 'pre-truncation evidence must still block zero-token retry');
 });
 
 test('AGY transport normalizes canonical Google 401 into retryable proven auth-boundary failure', async () => {
