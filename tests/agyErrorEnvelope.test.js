@@ -7,6 +7,7 @@ test('empty / missing stdout', () => {
   const r = extractSafeAgyEnvelopeMetadata('');
   assert.equal(r.parsed, false);
   assert.deepEqual(r.fields, {});
+  assert.equal(r.usageEvidenceState, 'absent');
 });
 
 test('non-JSON stdout is never echoed', () => {
@@ -14,6 +15,7 @@ test('non-JSON stdout is never echoed', () => {
   assert.equal(r.parsed, false);
   assert.equal(r.jsonObject, false);
   assert.deepEqual(r.fields, {});
+  assert.equal(r.usageEvidenceState, 'unknown');
   assert.match(r.note, /not echoed/);
 });
 
@@ -51,4 +53,27 @@ test('usage object with string values is refused (no text smuggling)', () => {
   const stdout = JSON.stringify({ status: 'ok', usage: { note: 'the answer is 42', prompt_tokens: 10 } });
   const r = extractSafeAgyEnvelopeMetadata(stdout);
   assert.deepEqual(r.fields.usage, { prompt_tokens: 10 });
+});
+
+
+test('nested and unresolved usage is preserved as a content-free evidence state even when fields are dropped', () => {
+  const nested = extractSafeAgyEnvelopeMetadata(JSON.stringify({
+    error: {
+      status: 'UNAUTHENTICATED',
+      code: 401,
+      usage: { input_tokens: 5 },
+    },
+  }));
+  assert.equal(nested.usageEvidenceState, 'present');
+  assert.equal(nested.fields.status, 'UNAUTHENTICATED');
+  assert.equal(nested.fields.code, 401);
+  assert.equal('usage' in nested.fields, false, 'nested usage need not be copied to mark evidence present');
+
+  const unresolved = extractSafeAgyEnvelopeMetadata(JSON.stringify({
+    status: 'UNAUTHENTICATED',
+    code: 401,
+    usage: 'unknown',
+  }));
+  assert.equal(unresolved.usageEvidenceState, 'present');
+  assert.equal('usage' in unresolved.fields, false, 'string usage remains private/dropped');
 });
