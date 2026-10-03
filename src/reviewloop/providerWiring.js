@@ -110,6 +110,56 @@ function normalizeAgyTransientAuthBoundaryRejection(err) {
   return normalized;
 }
 
+
+/**
+ * Narrow recovery for AGY failures that prove the request never established a
+ * usable provider connection. This specifically covers OS/network-path errors
+ * such as the observed Cisco/VPN IPv6 failure:
+ *   "write tcp ...: write: socket is not connected"
+ *
+ * Safety boundary:
+ * - AGY must have exited non-zero;
+ * - stdout must be explicitly empty (no provider/model response bytes);
+ * - usage evidence must be explicitly absent;
+ * - stderr must match one of the connection-establishment failures below.
+ *
+ * Mid-stream shapes such as "connection reset by peer", "broken pipe", EOF,
+ * TLS/read timeouts, or arbitrary AGY_NONZERO_EXIT remain UNKNOWN and fail
+ * closed. They may have reached the provider.
+ */
+export function isAgyTransientPreSendNetworkFailure(err) {
+  if (!err || typeof err !== 'object' || err.code !== 'AGY_NONZERO_EXIT') return false;
+  if (err.stdoutWasEmpty !== true) return false;
+  if (err.usageEvidenceState !== 'absent') return false;
+
+  const diagnostic = String(err.stderr ?? '');
+  const safePreConnectPatterns = [
+    /\bwrite:\s*socket is not connected\b/i,
+    /\bconnect:\s*network is unreachable\b/i,
+    /\bconnect:\s*no route to host\b/i,
+    /\bconnect:\s*connection refused\b/i,
+    /\blookup\s+[^\n:]+:\s*no such host\b/i,
+  ];
+  return safePreConnectPatterns.some((re) => re.test(diagnostic));
+}
+
+function normalizeAgyTransientPreSendNetworkFailure(err) {
+  const normalized = new Error('AGY network path was unavailable before a provider response was established');
+  normalized.name = 'AgyTransientNetworkError';
+  normalized.code = 'AGY_NETWORK_UNAVAILABLE';
+  normalized.providerFailure = 'AGY_NETWORK_UNAVAILABLE';
+  normalized.transientNetwork = true;
+  normalized.transientNetworkSource = 'agy-pre-send-network';
+  normalized.preSendZeroProven = true;
+  normalized.exitCode = Number.isFinite(err?.exitCode) ? err.exitCode : 1;
+  if (err?.stderr) normalized.stderr = String(err.stderr).slice(0, 4000);
+  normalized.details = {
+    preSendZeroProven: true,
+    transientNetworkSource: normalized.transientNetworkSource,
+  };
+  return normalized;
+}
+
 /**
  * ReviewLoop-specific wall-clock bound for AGY-backed Reviewer/Supervisor calls.
  *
@@ -420,6 +470,9 @@ export function createReviewLoopProviderPool({
       } catch (err) {
         if (isAgyTransientAuthBoundaryRejection(err)) {
           throw normalizeAgyTransientAuthBoundaryRejection(err);
+        }
+        if (isAgyTransientPreSendNetworkFailure(err)) {
+          throw normalizeAgyTransientPreSendNetworkFailure(err);
         }
         throw err;
       }
