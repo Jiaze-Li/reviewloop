@@ -362,6 +362,7 @@ export class ModelSpendAuthority {
     // src/orchestrator/{reviewloop/*}.js to
     // verify the production inventory has not silently grown or shrunk — see
     // also tests/newInformationProductionWiring.test.js.
+    let humanRetryGrant = null;
     if (this._informationLedger) {
       const rawEvidenceIds = rawIntent?.evidenceIds;
       const candidateEvidenceIds = Array.isArray(rawEvidenceIds)
@@ -417,21 +418,58 @@ export class ModelSpendAuthority {
         ));
         const allProvenPreSendZero = earlierAttempts.length > 0
           && earlierAttempts.every(isProvenPreSendZero);
-        if (allProvenPreSendZero) {
-          let priorClaim = null;
-          try {
-            priorClaim = await this._informationLedger.findConsumedBy({
-              workflowId: intent.workflowId, role: intent.role, operationId: intent.operationId, evidenceIds: candidateEvidenceIds,
-            });
-          } catch (error) {
-            throw new AuthorizationError(
-              AUTHORIZATION_ERROR_CODES.MODEL_SPEND_INFORMATION_STATE_UNAVAILABLE,
-              `new information state could not be read: ${error?.message ?? error}`,
-              { intent },
-            );
-          }
-          if (priorClaim) {
-            eligible = { evidenceId: priorClaim.evidenceId, type: null, _failoverReuse: true };
+
+        let priorClaim = null;
+        try {
+          priorClaim = await this._informationLedger.findConsumedBy({
+            workflowId: intent.workflowId, role: intent.role, operationId: intent.operationId, evidenceIds: candidateEvidenceIds,
+          });
+        } catch (error) {
+          throw new AuthorizationError(
+            AUTHORIZATION_ERROR_CODES.MODEL_SPEND_INFORMATION_STATE_UNAVAILABLE,
+            `new information state could not be read: ${error?.message ?? error}`,
+            { intent },
+          );
+        }
+
+        if (allProvenPreSendZero && priorClaim) {
+          eligible = { evidenceId: priorClaim.evidenceId, type: null, _failoverReuse: true };
+        } else if (priorClaim) {
+          // Human acknowledgement is a distinct, explicit one-shot recovery
+          // authority. It does NOT claim the unknown call was zero and does NOT
+          // manufacture "new information". Every earlier attempt that may have
+          // reached the provider must itself be an acknowledged UNRESOLVED
+          // reservation; any success or ordinary known-usage failure still
+          // blocks reuse of the same evidence.
+          const nonPreSend = earlierAttempts.filter((r) => !isProvenPreSendZero(r));
+          const allUnknownAccepted = nonPreSend.length > 0 && nonPreSend.every((r) => (
+            r.status === RESERVATION_STATUS.UNRESOLVED
+            && r?.humanAcknowledgement?.accepted === true
+            && r?.humanAcknowledgement?.accountingRecorded === true
+          ));
+          if (allUnknownAccepted) {
+            try {
+              humanRetryGrant = await this._reservationLedger.findHumanRetryGrant({
+                workflowId: intent.workflowId,
+                role: intent.role,
+                operationId: intent.operationId,
+                evidenceIds: candidateEvidenceIds,
+              });
+            } catch (error) {
+              throw new AuthorizationError(
+                AUTHORIZATION_ERROR_CODES.MODEL_SPEND_INFORMATION_STATE_UNAVAILABLE,
+                `human spend acknowledgement state could not be read: ${error?.message ?? error}`,
+                { intent },
+              );
+            }
+            if (humanRetryGrant
+              && String(humanRetryGrant.humanAcknowledgement?.evidenceId ?? '') === String(priorClaim.evidenceId)) {
+              eligible = {
+                evidenceId: priorClaim.evidenceId,
+                type: null,
+                _humanRetryReuse: true,
+              };
+            }
           }
         }
       }
@@ -459,7 +497,7 @@ export class ModelSpendAuthority {
       try {
         // A failover-reuse claim is already durably consumed — re-consuming is
         // an idempotent no-op, but skip it to keep the intent explicit.
-        if (!eligible._failoverReuse) {
+        if (!eligible._failoverReuse && !eligible._humanRetryReuse) {
           await this._informationLedger.consume({
             workflowId: intent.workflowId, role: intent.role, operationId: intent.operationId, evidenceId: eligible.evidenceId,
           });
@@ -474,7 +512,20 @@ export class ModelSpendAuthority {
     }
     const reservationId = randomUUID();
     try {
-      await this._reservationLedger.reserve({ workflowId: intent.workflowId, intent, physicalAttempt: intent.attempt, reservationId });
+      if (humanRetryGrant) {
+        await this._reservationLedger.reserveWithHumanRetryGrant({
+          workflowId: intent.workflowId,
+          sourceReservationId: humanRetryGrant.reservationId,
+          evidenceId: humanRetryGrant.humanAcknowledgement.evidenceId,
+          intent,
+          physicalAttempt: intent.attempt,
+          reservationId,
+        });
+      } else {
+        await this._reservationLedger.reserve({
+          workflowId: intent.workflowId, intent, physicalAttempt: intent.attempt, reservationId,
+        });
+      }
     } catch (error) {
       // Fail closed: reservation persistence failed, so no permit is ever
       // minted and the physical call count for this attempt is zero.
