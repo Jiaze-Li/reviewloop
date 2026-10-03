@@ -90,7 +90,7 @@ test('AGY transport normalizes the observed socket failure into retryable AGY_NE
   );
 });
 
-test('proven AGY network-unavailable failure settles zero and permits one bounded failover attempt', async () => {
+test('proven AGY network-unavailable failure settles zero and permits bounded reuse of the same logical evidence', async () => {
   const persistence = new MemoryPersistence();
   const spend = createReviewLoopSpend({ loopId: 'net-failover', persistence });
   const ev = await spend.registerEvidence({
@@ -186,4 +186,134 @@ test('unproven AGY_NETWORK_UNAVAILABLE cannot manufacture zero-spend failover el
 
   assert.ok(denied, 'second attempt must be blocked because first usage is unresolved');
   assert.equal(secondCalls, 0);
+});
+
+
+test('one transient AGY network failure fresh-retries the same family and succeeds', async () => {
+  const persistence = new MemoryPersistence();
+  const families = [];
+  const delays = [];
+  const healthFailures = [];
+  let n = 0;
+
+  const { createReviewLoopController, DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS } =
+    await import('../src/reviewloop/controller.js');
+
+  const controller = createReviewLoopController({
+    persistence,
+    routeReviewerFn: () => ({
+      family: 'agy:opus',
+      provider: 'agy-claude-gpt',
+      model: 'claude-opus-4-6-thinking',
+      transport: async () => ({}),
+    }),
+    recordProviderFailure: (selection, failure) => {
+      healthFailures.push({ family: selection.family, code: failure.code });
+    },
+    sleepFn: async (ms) => { delays.push(ms); },
+    reviewerFn: async ({ selection }) => {
+      families.push(selection.family);
+      n += 1;
+      if (n === 1) {
+        const e = new Error('socket path unavailable');
+        e.code = 'AGY_NETWORK_UNAVAILABLE';
+        e.providerFailure = 'AGY_NETWORK_UNAVAILABLE';
+        e.transientNetwork = true;
+        e.preSendZeroProven = true;
+        return Promise.reject(e);
+      }
+      return {
+        value: { findings: [] },
+        usage: { input_tokens: 5, output_tokens: 2 },
+        model: 'claude-opus-4-6-thinking',
+      };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      fingerprint: 'd', diff: 'x', changedFiles: ['a.js'],
+      currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false,
+    }),
+    runGateFn: async () => ({
+      verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+  const result = await controller.review({ loopId });
+
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
+  assert.deepEqual(families, ['agy:opus', 'agy:opus']);
+  assert.deepEqual(delays, [DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS[0]]);
+  assert.equal(healthFailures.length, 0, 'a recovered socket race must not poison provider health');
+});
+
+test('two transient AGY network retries then fail over after the third failure', async () => {
+  const persistence = new MemoryPersistence();
+  const families = [];
+  const delays = [];
+  const healthFailures = [];
+  let agyBlocked = false;
+
+  const { createReviewLoopController, DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS } =
+    await import('../src/reviewloop/controller.js');
+
+  const controller = createReviewLoopController({
+    persistence,
+    routeReviewerFn: () => (agyBlocked
+      ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
+      : { family: 'agy:opus', provider: 'agy-claude-gpt', model: 'claude-opus-4-6-thinking', transport: async () => ({}) }),
+    recordProviderFailure: (selection, failure) => {
+      healthFailures.push({ family: selection.family, code: failure.code });
+      if (selection.family === 'agy:opus') agyBlocked = true;
+    },
+    sleepFn: async (ms) => { delays.push(ms); },
+    reviewerFn: async ({ selection }) => {
+      families.push(selection.family);
+      if (selection.family === 'agy:opus') {
+        const e = new Error('socket path unavailable');
+        e.code = 'AGY_NETWORK_UNAVAILABLE';
+        e.providerFailure = 'AGY_NETWORK_UNAVAILABLE';
+        e.transientNetwork = true;
+        e.preSendZeroProven = true;
+        throw e;
+      }
+      return {
+        value: { findings: [] },
+        usage: { input_tokens: 4, output_tokens: 2 },
+        model: 'codex-test',
+      };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      fingerprint: 'd', diff: 'x', changedFiles: ['a.js'],
+      currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false,
+    }),
+    runGateFn: async () => ({
+      verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+  const result = await controller.review({ loopId });
+
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
+  assert.deepEqual(families, ['agy:opus', 'agy:opus', 'agy:opus', 'codex:default']);
+  assert.deepEqual(delays, [...DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS]);
+  assert.deepEqual(healthFailures, [{ family: 'agy:opus', code: 'AGY_NETWORK_UNAVAILABLE' }]);
+
+  const state = await persistence.readWorkflowState(loopId);
+  const records = (state.reviewLoopSpend?.records ?? [])
+    .filter((r) => r.role === 'reviewer');
+  assert.deepEqual(
+    records.slice(0, 3).map((r) => [r.family, r.failureCode, r.transientNetwork, r.usageVolume]),
+    [
+      ['agy:opus', 'AGY_NETWORK_UNAVAILABLE', true, 0],
+      ['agy:opus', 'AGY_NETWORK_UNAVAILABLE', true, 0],
+      ['agy:opus', 'AGY_NETWORK_UNAVAILABLE', true, 0],
+    ],
+  );
+  assert.equal(records[3].family, 'codex:default');
+  assert.equal(records[3].businessOutcome, 'SUCCESS');
 });

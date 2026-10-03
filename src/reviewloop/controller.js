@@ -310,13 +310,18 @@ const RETRYABLE = new Set([
   'EXECUTOR_TIMEOUT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED', 'AGY_NETWORK_UNAVAILABLE',
 ]);
 
-// One logical review dispatch may absorb two canonical AGY 401/OAuth refresh
-// races before the family is marked AUTH_FAILED and normal pool failover takes
-// over. These are PHYSICAL attempts: each still goes through a fresh
+// One logical review dispatch may absorb two mechanically-proven transient AGY
+// failures before the family is marked failed and normal pool failover takes
+// over. This covers the existing canonical 401/OAuth refresh race AND the
+// narrow pre-send network-path failures normalized as AGY_NETWORK_UNAVAILABLE.
+//
+// Each retry is a brand-new physical AGY process/connection, but it replays the
+// same logical review request. This mirrors the operator behavior of re-running
+// "continue" after a stuck terminal session without inventing a new prompt.
+//
+// These are PHYSICAL attempts: each still goes through a fresh
 // ModelSpendAuthority permit/reservation and is durably recorded. They do not
-// consume an extra review/fix round; the proven auth-boundary failures settle
-// as zero-token attempts through ReviewSpend's existing PROVIDER_AUTH_FAILED
-// accounting rule.
+// consume an extra review/fix round.
 export const DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS = Object.freeze([2_000, 5_000]);
 
 function normalizeTransientAuthRetryDelays(delays) {
@@ -851,11 +856,12 @@ export function createReviewLoopController({
   }) {
     const tried = new Set();
     // Effective attempt bound = role candidate count PLUS the bounded AGY
-    // transient-auth retry allowance. The extra slots are only usable by
-    // errors explicitly marked transientAuth=true; ordinary provider failures
-    // still traverse each policy candidate at most once.
+    // same-family transient retry allowance. The two extra slots are shared by
+    // canonical auth-refresh races and mechanically-proven pre-send network
+    // failures. Ordinary provider failures still traverse each policy
+    // candidate at most once.
     const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
-    let transientAuthRetriesUsed = 0;
+    let transientRetriesUsed = 0;
     let lastErr = null;
     let priorAttempts = [];
     // Resume/continuation is derived from DURABLE physical-attempt records, not
@@ -878,11 +884,13 @@ export function createReviewLoopController({
       // quota-pool ids such as "agy-claude-gpt" / "agy-gemini", not the
       // literal string "agy"; matching provider === "agy" would silently lose
       // retry history after a real process restart.
-      transientAuthRetriesUsed = priorAttempts.filter((r) => (
+      transientRetriesUsed = priorAttempts.filter((r) => (
         typeof r.family === 'string'
         && r.family.startsWith('agy:')
-        && r.failureCode === 'PROVIDER_AUTH_FAILED'
-        && r.transientAuth === true
+        && (
+          (r.failureCode === 'PROVIDER_AUTH_FAILED' && r.transientAuth === true)
+          || (r.failureCode === 'AGY_NETWORK_UNAVAILABLE' && r.transientNetwork === true)
+        )
       )).length;
 
       // Backward-compatible fallback for a consumed claim written by an older
@@ -901,7 +909,7 @@ export function createReviewLoopController({
       // never bypass spend safety.
     }
 
-    // Crash window hardening: the third same-family transient AGY 401 is
+    // Crash window hardening: the third same-family safe transient failure is
     // durably appended BEFORE recordProviderFailure() runs. If the process dies
     // in that tiny window, a fresh router would otherwise consider the family
     // healthy and grant an unintended fourth AGY call. Reconstruct exhausted
@@ -910,16 +918,24 @@ export function createReviewLoopController({
     const exhaustedTransientFamilies = new Map();
     const exhaustedFamilies = new Set();
     for (const record of priorAttempts) {
-      if (typeof record?.family !== 'string'
-        || !record.family.startsWith('agy:')
-        || record?.failureCode !== 'PROVIDER_AUTH_FAILED'
-        || record?.transientAuth !== true) continue;
+      if (typeof record?.family !== 'string' || !record.family.startsWith('agy:')) continue;
+      const safeTransient =
+        (record?.failureCode === 'PROVIDER_AUTH_FAILED' && record?.transientAuth === true)
+        || (record?.failureCode === 'AGY_NETWORK_UNAVAILABLE' && record?.transientNetwork === true);
+      if (!safeTransient) continue;
+
       const entry = exhaustedTransientFamilies.get(record.family) ?? {
         family: record.family,
         provider: record.provider,
         failures: 0,
+        failureCode: record.failureCode,
+        transientAuth: false,
+        transientNetwork: false,
       };
       entry.failures += 1;
+      entry.failureCode = record.failureCode;
+      entry.transientAuth ||= record?.transientAuth === true;
+      entry.transientNetwork ||= record?.transientNetwork === true;
       exhaustedTransientFamilies.set(record.family, entry);
     }
     for (const entry of exhaustedTransientFamilies.values()) {
@@ -932,14 +948,20 @@ export function createReviewLoopController({
       if (recordProviderFailure) {
         recordProviderFailure(
           { role, family: entry.family, provider: entry.provider },
-          { code: 'PROVIDER_AUTH_FAILED', recoveredFromDurableAuthExhaustion: true },
+          {
+            code: entry.failureCode ?? 'PROVIDER_UNAVAILABLE',
+            recoveredFromDurableTransientExhaustion: true,
+            recoveredFromDurableAuthExhaustion: entry.transientAuth === true,
+            recoveredFromDurableNetworkExhaustion: entry.transientNetwork === true,
+          },
         );
       }
       onEvent?.({
-        type: 'ROLE_PROVIDER_TRANSIENT_AUTH_EXHAUSTION_RESTORED',
+        type: 'ROLE_PROVIDER_TRANSIENT_EXHAUSTION_RESTORED',
         role,
         family: entry.family,
         provider: entry.provider,
+        failureCode: entry.failureCode ?? null,
         failures: entry.failures,
       });
     }
@@ -969,15 +991,14 @@ export function createReviewLoopController({
       // Exhaustion is a dispatch invariant, not a routing implementation
       // detail. A route-less controller has no selection to consult, so the
       // default family must be blocked here too once durable history proves
-      // that its initial auth failure + both same-family retries were spent.
+      // that its initial safe transient failure + both same-family retries were
+      // spent.
       if (exhaustedFamilies.has(family)) {
         lastErr ??= Object.assign(
-          new Error('ReviewLoop: transient auth retry budget exhausted for ' + family),
+          new Error('ReviewLoop: transient retry budget exhausted for ' + family),
           {
-            code: 'PROVIDER_AUTH_FAILED',
-            providerFailure: 'PROVIDER_AUTH_FAILED',
-            transientAuth: true,
-            transientAuthExhausted: true,
+            code: 'AGY_TRANSIENT_RETRY_EXHAUSTED',
+            providerFailure: 'AGY_TRANSIENT_RETRY_EXHAUSTED',
           },
         );
         break;
@@ -1005,27 +1026,34 @@ export function createReviewLoopController({
         const transientAuth =
           code === 'PROVIDER_AUTH_FAILED'
           && err?.transientAuth === true;
+        const transientNetwork =
+          code === 'AGY_NETWORK_UNAVAILABLE'
+          && err?.transientNetwork === true;
+        const transientSameFamily = transientAuth || transientNetwork;
 
         onAttempt?.({
           attempt, family, provider, quotaPools: selection?.quotaPools ?? null, outcome: 'FAILURE', code,
         });
         if (!RETRYABLE.has(code)) throw err;
 
-        if (transientAuth && transientAuthRetriesUsed < transientAuthRetryDelays.length) {
-          const delayMs = transientAuthRetryDelays[transientAuthRetriesUsed];
-          transientAuthRetriesUsed += 1;
+        if (transientSameFamily && transientRetriesUsed < transientAuthRetryDelays.length) {
+          const delayMs = transientAuthRetryDelays[transientRetriesUsed];
+          transientRetriesUsed += 1;
 
-          // Do NOT mark provider health AUTH_FAILED for a one-off OAuth refresh
-          // race. Let the deterministic router select the same healthy primary
-          // again. The next physical call still gets a fresh spend permit.
+          // Do NOT poison provider health for a one-off OAuth refresh race or
+          // transient VPN/socket path loss. Let the deterministic router select
+          // the same healthy family again. The next physical call is a fresh
+          // provider process/connection and still gets a fresh spend permit.
           if (selection) tried.delete(selection.family);
           onEvent?.({
-            type: 'ROLE_PROVIDER_TRANSIENT_AUTH_RETRY',
+            type: transientAuth
+              ? 'ROLE_PROVIDER_TRANSIENT_AUTH_RETRY'
+              : 'ROLE_PROVIDER_TRANSIENT_NETWORK_RETRY',
             role,
             family,
             provider,
             attempt,
-            retry: transientAuthRetriesUsed,
+            retry: transientRetriesUsed,
             delayMs,
           });
 
@@ -1036,10 +1064,10 @@ export function createReviewLoopController({
         }
 
         // Either this was an ordinary retryable provider failure, or the AGY
-        // transient-auth budget was exhausted. Exhaustion is a dispatch
+        // safe-transient retry budget was exhausted. Exhaustion is a dispatch
         // invariant: record it immediately in THIS process too, not only on
         // restart reconstruction from durable history.
-        if (transientAuth) {
+        if (transientSameFamily) {
           exhaustedFamilies.add(family);
         }
 
@@ -1051,7 +1079,7 @@ export function createReviewLoopController({
         // calls have no alternate selection, so once the default family is
         // exhausted they must stop here instead of entering a fourth physical
         // attempt in the same process.
-        if (transientAuth && !selection) break;
+        if (transientSameFamily && !selection) break;
         // loop -> next attempt re-routes (or ordinary retryable default failure)
       }
     }
