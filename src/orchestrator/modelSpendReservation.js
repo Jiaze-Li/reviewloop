@@ -72,6 +72,12 @@ export function isBlockingReservationStatus(status) {
   return BLOCKING_RESERVATION_STATUSES.has(status);
 }
 
+function isHumanAcknowledgedUnresolved(record) {
+  return record?.status === RESERVATION_STATUS.UNRESOLVED
+    && record?.humanAcknowledgement?.accepted === true
+    && record?.humanAcknowledgement?.accountingRecorded === true;
+}
+
 export function newReservationRecord({
   reservationId, workflowId, intent, physicalAttempt, createdAt,
 }) {
@@ -187,11 +193,49 @@ export class ReservationLedger {
     const map = await this._loadWorkflow(workflowId);
     const record = map.get(reservationId);
     if (!record) throw new Error(`ReservationLedger.markDispatching: unknown reservation ${reservationId}`);
-    record.status = RESERVATION_STATUS.DISPATCHING;
-    record.dispatchStartedAt = new Date().toISOString();
-    await this._persistWorkflow(workflowId);
+
+    const dispatchStartedAt = new Date().toISOString();
+    const candidateMap = new Map(map);
+    const candidate = {
+      ...record,
+      status: RESERVATION_STATUS.DISPATCHING,
+      dispatchStartedAt,
+    };
+
+    // A human-authorized retry grant is consumed at the durable DISPATCHING
+    // boundary, not when the RESERVED permit is merely allocated. That keeps a
+    // crash-before-dispatch retry recoverable while still guaranteeing that one
+    // acknowledged unknown-spend event can authorize at most one real provider
+    // dispatch.
+    if (record.humanRetrySourceReservationId) {
+      const source = map.get(record.humanRetrySourceReservationId);
+      const ack = source?.humanAcknowledgement;
+      const grant = ack?.retryGrant;
+      if (!isHumanAcknowledgedUnresolved(source)
+        || grant?.reservedForReservationId !== reservationId
+        || grant?.consumedAt) {
+        throw new Error(
+          `ReservationLedger.markDispatching: invalid human retry grant for reservation ${reservationId}`,
+        );
+      }
+      candidateMap.set(source.reservationId, {
+        ...source,
+        humanAcknowledgement: {
+          ...ack,
+          retryGrant: {
+            ...grant,
+            consumedAt: dispatchStartedAt,
+            consumedByReservationId: reservationId,
+          },
+        },
+      });
+    }
+
+    candidateMap.set(reservationId, candidate);
+    await this._persistCandidate(workflowId, candidateMap);
+    for (const [id, value] of candidateMap.entries()) map.set(id, value);
     this._onEvent?.({ type: 'RESERVATION_DISPATCHING', reservationId, workflowId: workflowId ?? null });
-    return record;
+    return candidate;
   }
 
   // Idempotent: settling an already-SETTLED_KNOWN reservation again is a
@@ -279,11 +323,43 @@ export class ReservationLedger {
     const map = await this._loadWorkflow(workflowId);
     const record = map.get(reservationId);
     if (!record || record.status !== RESERVATION_STATUS.RESERVED) return record ?? null;
-    record.status = RESERVATION_STATUS.CANCELLED_PRE_DISPATCH;
-    record.settledAt = new Date().toISOString();
-    record.settlementReason = reason;
-    await this._persistWorkflow(workflowId);
-    return record;
+    const settledAt = new Date().toISOString();
+    const candidateMap = new Map(map);
+    const candidate = {
+      ...record,
+      status: RESERVATION_STATUS.CANCELLED_PRE_DISPATCH,
+      settledAt,
+      settlementReason: reason,
+    };
+    candidateMap.set(reservationId, candidate);
+
+    // Release an allocated human retry grant when the retry reservation never
+    // crossed DISPATCHING. This is safe: CANCELLED_PRE_DISPATCH is mechanical
+    // proof that the provider was never reached.
+    if (record.humanRetrySourceReservationId) {
+      const source = map.get(record.humanRetrySourceReservationId);
+      const ack = source?.humanAcknowledgement;
+      const grant = ack?.retryGrant;
+      if (isHumanAcknowledgedUnresolved(source)
+        && grant?.reservedForReservationId === reservationId
+        && !grant?.consumedAt) {
+        candidateMap.set(source.reservationId, {
+          ...source,
+          humanAcknowledgement: {
+            ...ack,
+            retryGrant: {
+              ...grant,
+              reservedForReservationId: null,
+              reservedAt: null,
+            },
+          },
+        });
+      }
+    }
+
+    await this._persistCandidate(workflowId, candidateMap);
+    for (const [id, value] of candidateMap.entries()) map.set(id, value);
+    return candidate;
   }
 
   // Blocking predicate (§ Failure 2): DISPATCHING is itself unsafe, not only
@@ -296,7 +372,13 @@ export class ReservationLedger {
   async hasUnresolved(workflowId) {
     const map = await this._loadWorkflow(workflowId);
     for (const record of map.values()) {
-      if (isBlockingReservationStatus(record.status)) return true;
+      if (!isBlockingReservationStatus(record.status)) continue;
+      // A human acknowledgement does NOT rewrite history: the reservation
+      // stays UNRESOLVED. It only says the operator accepts the irrecoverable
+      // unknown spend and authorizes one bounded retry. DISPATCHING is never
+      // acknowledgeable and always remains blocking.
+      if (isHumanAcknowledgedUnresolved(record)) continue;
+      return true;
     }
     return false;
   }
@@ -304,6 +386,81 @@ export class ReservationLedger {
   async list(workflowId) {
     const map = await this._loadWorkflow(workflowId);
     return Array.from(map.values());
+  }
+
+  async findHumanRetryGrant({ workflowId, role, operationId, evidenceIds = [] } = {}) {
+    const map = await this._loadWorkflow(workflowId);
+    const ids = new Set((evidenceIds ?? []).map(String));
+    const matches = [];
+    for (const record of map.values()) {
+      if (!isHumanAcknowledgedUnresolved(record)) continue;
+      if ((record.role ?? null) !== (role ?? null) || (record.taskId ?? null) !== (operationId ?? null)) continue;
+      const ack = record.humanAcknowledgement;
+      const grant = ack?.retryGrant;
+      if (!grant || grant.consumedAt || grant.reservedForReservationId) continue;
+      if (!ids.has(String(ack.evidenceId ?? ''))) continue;
+      matches.push(record);
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `ReservationLedger.findHumanRetryGrant: multiple active grants for ${role}/${operationId}`,
+      );
+    }
+    return matches[0] ?? null;
+  }
+
+  async reserveWithHumanRetryGrant({
+    workflowId, sourceReservationId, evidenceId, intent, physicalAttempt,
+    reservationId = randomUUID(),
+  }) {
+    const map = await this._loadWorkflow(workflowId);
+    const source = map.get(sourceReservationId);
+    const ack = source?.humanAcknowledgement;
+    const grant = ack?.retryGrant;
+    if (!isHumanAcknowledgedUnresolved(source)
+      || (source.role ?? null) !== (intent?.role ?? null)
+      || (source.taskId ?? null) !== (intent?.operationId ?? null)
+      || String(ack?.evidenceId ?? '') !== String(evidenceId ?? '')
+      || !grant
+      || grant.consumedAt
+      || grant.reservedForReservationId) {
+      throw new Error(
+        `ReservationLedger.reserveWithHumanRetryGrant: grant unavailable for ${sourceReservationId}`,
+      );
+    }
+
+    const createdAt = new Date().toISOString();
+    const record = {
+      ...newReservationRecord({
+        reservationId, workflowId, intent, physicalAttempt, createdAt,
+      }),
+      humanRetrySourceReservationId: sourceReservationId,
+      humanRetryEvidenceId: String(evidenceId),
+    };
+    const candidateMap = new Map(map);
+    candidateMap.set(sourceReservationId, {
+      ...source,
+      humanAcknowledgement: {
+        ...ack,
+        retryGrant: {
+          ...grant,
+          reservedForReservationId: reservationId,
+          reservedAt: createdAt,
+        },
+      },
+    });
+    candidateMap.set(reservationId, record);
+    await this._persistCandidate(workflowId, candidateMap);
+    for (const [id, value] of candidateMap.entries()) map.set(id, value);
+    this._onEvent?.({
+      type: 'HUMAN_SPEND_RETRY_RESERVED',
+      workflowId: workflowId ?? null,
+      sourceReservationId,
+      reservationId,
+      role: intent?.role,
+    });
+    this._onEvent?.({ type: 'RESERVATION_RESERVED', reservationId, workflowId: workflowId ?? null, role: intent?.role, family: intent?.family });
+    return record;
   }
 
   // Resume reconciliation (§10):
@@ -335,6 +492,23 @@ export class ReservationLedger {
         record.status = RESERVATION_STATUS.CANCELLED_PRE_DISPATCH;
         record.settledAt = new Date().toISOString();
         record.settlementReason = 'RESUME_RECONCILE_NEVER_DISPATCHED';
+        if (record.humanRetrySourceReservationId) {
+          const source = map.get(record.humanRetrySourceReservationId);
+          const ack = source?.humanAcknowledgement;
+          const grant = ack?.retryGrant;
+          if (isHumanAcknowledgedUnresolved(source)
+            && grant?.reservedForReservationId === record.reservationId
+            && !grant?.consumedAt) {
+            source.humanAcknowledgement = {
+              ...ack,
+              retryGrant: {
+                ...grant,
+                reservedForReservationId: null,
+                reservedAt: null,
+              },
+            };
+          }
+        }
         changed = true;
       }
     }
