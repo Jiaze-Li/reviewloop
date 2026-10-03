@@ -321,3 +321,113 @@ test('two transient AGY network retries then fail over after the third failure',
   assert.equal(records[3].family, 'codex:default');
   assert.equal(records[3].businessOutcome, 'SUCCESS');
 });
+
+
+test('restart after mixed auth then network exhaustion stays operation-local and never poisons AUTH_FAILED', async () => {
+  const persistence = new MemoryPersistence();
+
+  const { createReviewLoopController } = await import('../src/reviewloop/controller.js');
+
+  const seedController = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      fingerprint: 'd', diff: 'x', changedFiles: ['a.js'],
+      currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false,
+    }),
+    runGateFn: async () => ({
+      verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+  const { loopId } = await seedController.begin({ goal: 'g', cwd: '/r' });
+  const operationId = loopId + ':round-1:chunk-0';
+
+  const state = await persistence.readWorkflowState(loopId);
+  const baseRecord = {
+    role: 'reviewer',
+    family: 'agy:opus',
+    provider: 'agy-claude-gpt',
+    model: 'claude-opus-4-6-thinking',
+    usageKnown: true,
+    usageVolume: 0,
+    costUsd: 0,
+    costKnown: true,
+    businessOutcome: 'FAILURE',
+    operationId,
+    rawUsage: { input_tokens: 0, output_tokens: 0 },
+    round: 1,
+    chunkIndex: 0,
+    chunkTotal: 1,
+    at: new Date(0).toISOString(),
+  };
+  await persistence.updateWorkflowState(loopId, {
+    reviewLoopSpend: {
+      records: [
+        {
+          ...baseRecord,
+          attempt: 1,
+          failureCode: 'PROVIDER_AUTH_FAILED',
+          transientAuth: true,
+          transientNetwork: false,
+        },
+        {
+          ...baseRecord,
+          attempt: 2,
+          failureCode: 'AGY_NETWORK_UNAVAILABLE',
+          transientAuth: false,
+          transientNetwork: true,
+        },
+        {
+          ...baseRecord,
+          attempt: 3,
+          failureCode: 'AGY_NETWORK_UNAVAILABLE',
+          transientAuth: false,
+          transientNetwork: true,
+        },
+      ],
+    },
+    modelSpendReservations: state.modelSpendReservations ?? {},
+  });
+
+  const healthFailures = [];
+  const families = [];
+  const controller = createReviewLoopController({
+    persistence,
+    routeReviewerFn: (signals = {}) => {
+      const excluded = new Set(signals.excludeFamilies ?? []);
+      return excluded.has('agy:opus')
+        ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
+        : { family: 'agy:opus', provider: 'agy-claude-gpt', model: 'claude-opus-4-6-thinking', transport: async () => ({}) };
+    },
+    recordProviderFailure: (selection, failure) => {
+      healthFailures.push({ family: selection.family, code: failure.code });
+    },
+    reviewerFn: async ({ selection }) => {
+      families.push(selection.family);
+      return {
+        value: { findings: [] },
+        usage: { input_tokens: 3, output_tokens: 1 },
+        model: selection.family === 'codex:default' ? 'codex-test' : 'unexpected-agy',
+      };
+    },
+    captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      fingerprint: 'd', diff: 'x', changedFiles: ['a.js'],
+      currentHead: 'B', evidenceComplete: true, noWorkerChangeYet: false,
+    }),
+    runGateFn: async () => ({
+      verdict: 'PASS', pass: true, fingerprint: 'g', failureIdentities: [], results: [],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+  });
+
+  const result = await controller.review({ loopId });
+  assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
+  assert.deepEqual(families, ['codex:default'], 'restart should operation-skip exhausted AGY and fail over');
+  assert.deepEqual(
+    healthFailures,
+    [],
+    'an earlier auth race must not become permanent AUTH_FAILED when network was the exhausting condition',
+  );
+});

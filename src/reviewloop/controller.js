@@ -928,14 +928,28 @@ export function createReviewLoopController({
         family: record.family,
         provider: record.provider,
         failures: 0,
-        failureCode: record.failureCode,
-        transientAuth: false,
-        transientNetwork: false,
+        lastAttempt: -1,
+        lastFailureCode: null,
+        lastTransientAuth: false,
+        lastTransientNetwork: false,
       };
       entry.failures += 1;
-      entry.failureCode = record.failureCode;
-      entry.transientAuth ||= record?.transientAuth === true;
-      entry.transientNetwork ||= record?.transientNetwork === true;
+
+      // Mixed transient sequences share one retry budget, but the LAST
+      // physical failure is what exhausted that budget. Never let an earlier
+      // auth-refresh race poison provider health when a later network outage is
+      // the actual exhausting condition (or vice versa).
+      const physicalAttempt = Number(record?.attempt);
+      const ordering = Number.isInteger(physicalAttempt) && physicalAttempt > 0
+        ? physicalAttempt
+        : entry.lastAttempt + 1;
+      if (ordering >= entry.lastAttempt) {
+        entry.lastAttempt = ordering;
+        entry.provider = record.provider ?? entry.provider;
+        entry.lastFailureCode = record.failureCode ?? null;
+        entry.lastTransientAuth = record?.transientAuth === true;
+        entry.lastTransientNetwork = record?.transientNetwork === true;
+      }
       exhaustedTransientFamilies.set(record.family, entry);
     }
     for (const entry of exhaustedTransientFamilies.values()) {
@@ -946,7 +960,10 @@ export function createReviewLoopController({
       // durable operator concern until corrected.
       exhaustedFamilies.add(entry.family);
       tried.add(entry.family);
-      if (entry.transientAuth === true && recordProviderFailure) {
+      const exhaustedByAuth =
+        entry.lastFailureCode === 'PROVIDER_AUTH_FAILED'
+        && entry.lastTransientAuth === true;
+      if (exhaustedByAuth && recordProviderFailure) {
         recordProviderFailure(
           { role, family: entry.family, provider: entry.provider },
           {
@@ -961,7 +978,10 @@ export function createReviewLoopController({
         role,
         family: entry.family,
         provider: entry.provider,
-        failureCode: entry.failureCode ?? null,
+        failureCode: entry.lastFailureCode,
+        exhaustedBy: exhaustedByAuth
+          ? 'auth'
+          : (entry.lastTransientNetwork === true ? 'network' : 'unknown'),
         failures: entry.failures,
       });
     }
