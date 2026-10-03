@@ -253,19 +253,22 @@ test('two transient AGY network retries then fail over after the third failure',
   const families = [];
   const delays = [];
   const healthFailures = [];
-  let agyBlocked = false;
+  let routedCalls = 0;
 
   const { createReviewLoopController, DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS } =
     await import('../src/reviewloop/controller.js');
 
   const controller = createReviewLoopController({
     persistence,
-    routeReviewerFn: () => (agyBlocked
-      ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
-      : { family: 'agy:opus', provider: 'agy-claude-gpt', model: 'claude-opus-4-6-thinking', transport: async () => ({}) }),
+    routeReviewerFn: (signals = {}) => {
+      routedCalls += 1;
+      const excluded = new Set(signals.excludeFamilies ?? []);
+      return excluded.has('agy:opus')
+        ? { family: 'codex:default', provider: 'codex', model: null, transport: async () => ({}) }
+        : { family: 'agy:opus', provider: 'agy-claude-gpt', model: 'claude-opus-4-6-thinking', transport: async () => ({}) };
+    },
     recordProviderFailure: (selection, failure) => {
       healthFailures.push({ family: selection.family, code: failure.code });
-      if (selection.family === 'agy:opus') agyBlocked = true;
     },
     sleepFn: async (ms) => { delays.push(ms); },
     reviewerFn: async ({ selection }) => {
@@ -301,7 +304,8 @@ test('two transient AGY network retries then fail over after the third failure',
   assert.equal(result.status, 'PASS', result.reason ?? JSON.stringify(result));
   assert.deepEqual(families, ['agy:opus', 'agy:opus', 'agy:opus', 'codex:default']);
   assert.deepEqual(delays, [...DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS]);
-  assert.deepEqual(healthFailures, [{ family: 'agy:opus', code: 'AGY_NETWORK_UNAVAILABLE' }]);
+  assert.deepEqual(healthFailures, [], 'transient network exhaustion must not poison provider health');
+  assert.ok(routedCalls >= 4, 'controller re-routes after operation-local exhaustion');
 
   const state = await persistence.readWorkflowState(loopId);
   const records = (state.reviewLoopSpend?.records ?? [])

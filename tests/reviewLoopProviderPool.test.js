@@ -315,3 +315,29 @@ test('the controller feeds real loopId/round/operationId/attempt/chunk attributi
   assert.ok(forThisLoop.every((e) => Number.isInteger(e.attempt)));
 });
 
+
+
+test('operation-local exclusions skip a transiently exhausted family once but do not poison future reviews', () => {
+  const pool = createReviewLoopProviderPool({ callAgy: async () => ({}) });
+
+  const failoverSelection = pool.route('reviewer', {
+    excludeFamilies: ['agy:opus'],
+  });
+  assert.equal(
+    failoverSelection.family,
+    'agy:gemini-reviewer',
+    'current operation should route past the exhausted AGY family',
+  );
+
+  const freshReviewSelection = pool.route('reviewer');
+  assert.equal(
+    freshReviewSelection.family,
+    'agy:opus',
+    'a later independent review should retry the primary after the network recovers',
+  );
+  assert.notEqual(
+    pool.router.providerHealth.get('agy:opus').status,
+    'UNAVAILABLE',
+    'operation-local exclusion must not mutate durable/process-wide provider health',
+  );
+});

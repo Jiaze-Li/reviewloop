@@ -209,6 +209,11 @@ export const ROUTE_SKIP_REASONS = Object.freeze({
   HIGH_CONTEXT: 'high_context',
   QUOTA_COOLDOWN: 'quota_cooldown',
   PROVIDER_HEALTH: 'provider_health',
+  // Per-operation exclusion supplied by the controller after a bounded
+  // attempt-local transient recovery budget is exhausted. This is deliberately
+  // NOT provider health: the next independent review should be free to try the
+  // family again after the network path recovers.
+  OPERATION_EXCLUDED: 'operation_excluded',
   // No transport function is actually wired for this family in THIS process
   // — independent of what health/quota say. Checked before health so a
   // family that was never wired is never even offered to revalidation.
@@ -426,6 +431,11 @@ export class RoleRouter {
       // A high-context family is excluded from automatic selection unless a
       // caller explicitly opts in. Purely deterministic — never a token probe.
       if (candidate.highContext && signals.allowHighContext !== true) { recordSkip(ROUTE_SKIP_REASONS.HIGH_CONTEXT); continue; }
+      const excludedFamilies = Array.isArray(signals.excludeFamilies) ? signals.excludeFamilies : [];
+      if (excludedFamilies.includes(candidate.family)) {
+        recordSkip(ROUTE_SKIP_REASONS.OPERATION_EXCLUDED);
+        continue;
+      }
       if (!this.quotaRegistry.usable(candidate.family)) { recordSkip(ROUTE_SKIP_REASONS.QUOTA_COOLDOWN, { pools: this.quotaRegistry.poolsFor(candidate.family) }); continue; }
       // No transport wired for this family in THIS process at all (e.g. AGY
       // isolation never came up at startup) — never selectable regardless of
@@ -462,7 +472,7 @@ export class RoleRouter {
   }
   recordFailure(selection, failure) {
     this.quotaRegistry.recordProviderFailure(selection.requestedFamily, failure);
-    if (['PROVIDER_AUTH_FAILED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_TIMEOUT', 'EXECUTOR_TIMEOUT', 'AGY_NETWORK_UNAVAILABLE'].includes(failure.code)) {
+    if (['PROVIDER_AUTH_FAILED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_TIMEOUT', 'EXECUTOR_TIMEOUT'].includes(failure.code)) {
       // Record failure on the specific candidate family so other models under the same provider remain eligible.
       // reasonCode = the failure code itself: a post-dispatch provider error
       // is its own, already-enumerated failure class — a provisioning-only

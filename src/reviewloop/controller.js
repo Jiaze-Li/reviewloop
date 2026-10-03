@@ -940,19 +940,19 @@ export function createReviewLoopController({
     }
     for (const entry of exhaustedTransientFamilies.values()) {
       if (entry.failures <= transientAuthRetryDelays.length) continue;
-      // Seed tried as defense-in-depth. Production routing honors the restored
-      // health failure; a test/custom router that ignores health still cannot
-      // dispatch this already-exhausted family again.
+      // Keep exhaustion scoped to THIS logical operation. Network path loss is
+      // attempt-local and must not poison provider health for future reviews.
+      // Auth exhaustion still records AUTH_FAILED because credentials remain a
+      // durable operator concern until corrected.
       exhaustedFamilies.add(entry.family);
       tried.add(entry.family);
-      if (recordProviderFailure) {
+      if (entry.transientAuth === true && recordProviderFailure) {
         recordProviderFailure(
           { role, family: entry.family, provider: entry.provider },
           {
-            code: entry.failureCode ?? 'PROVIDER_UNAVAILABLE',
+            code: 'PROVIDER_AUTH_FAILED',
             recoveredFromDurableTransientExhaustion: true,
-            recoveredFromDurableAuthExhaustion: entry.transientAuth === true,
-            recoveredFromDurableNetworkExhaustion: entry.transientNetwork === true,
+            recoveredFromDurableAuthExhaustion: true,
           },
         );
       }
@@ -980,7 +980,10 @@ export function createReviewLoopController({
           chunkIndex: auditContext?.chunkIndex ?? null,
           chunkTotal: auditContext?.chunkTotal ?? null,
         };
-        selection = routeFn({ reworkCycles: attempt - startAttempt }, requestContext);
+        selection = routeFn({
+          reworkCycles: attempt - startAttempt,
+          excludeFamilies: [...exhaustedFamilies],
+        }, requestContext);
         if (!selection) break;
         if (tried.has(selection.family)) break;
         tried.add(selection.family);
@@ -1071,7 +1074,10 @@ export function createReviewLoopController({
           exhaustedFamilies.add(family);
         }
 
-        if (selection && recordProviderFailure) {
+        // Auth exhaustion is durable health. A transient network outage is
+        // only operation-local: exclude this family for the remainder of the
+        // current dispatch, but let a future independent review try it again.
+        if (selection && recordProviderFailure && !transientNetwork) {
           recordProviderFailure(selection, { code });
         }
 
