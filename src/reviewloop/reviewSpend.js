@@ -108,11 +108,20 @@ const METERED_ROLES = new Set(['reviewer', 'supervisor']);
 export const PRE_SEND_ZERO_CODES = new Set([
   'PROVIDER_UNAVAILABLE', 'PROVIDER_NOT_STARTED', 'PROVIDER_AUTH_FAILED',
   'ENOENT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED', 'AGY_BAD_INPUT',
+  'AGY_NETWORK_UNAVAILABLE',
 ]);
 
 export function isMechanicallyZeroPreSend(err) {
   const code = err?.code ?? err?.providerFailure ?? '';
-  return PRE_SEND_ZERO_CODES.has(code) && !err?.details?.usage && !err?.usage;
+  if (!PRE_SEND_ZERO_CODES.has(code) || err?.details?.usage || err?.usage) return false;
+  // A network error is mechanically zero only when the AGY transport
+  // classifier explicitly proved that no provider response was established.
+  // Never let an arbitrary caller manufacture AGY_NETWORK_UNAVAILABLE and gain
+  // failover eligibility without that provenance.
+  if (code === 'AGY_NETWORK_UNAVAILABLE') {
+    return err?.preSendZeroProven === true || err?.details?.preSendZeroProven === true;
+  }
+  return true;
 }
 
 function num(env, key, fallback) {
@@ -1207,6 +1216,7 @@ export function createReviewLoopSpend({
             // cannot reset the same-family OAuth retry budget. Generic
             // PROVIDER_AUTH_FAILED failures remain distinguishable.
             transientAuth: err?.transientAuth === true,
+            transientNetwork: err?.transientNetwork === true,
             // Durable physical-call-audit identity (see auditContext above).
             operationId: operationId ?? null,
             attempt,

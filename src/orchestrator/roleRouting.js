@@ -462,7 +462,7 @@ export class RoleRouter {
   }
   recordFailure(selection, failure) {
     this.quotaRegistry.recordProviderFailure(selection.requestedFamily, failure);
-    if (['PROVIDER_AUTH_FAILED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_TIMEOUT', 'EXECUTOR_TIMEOUT'].includes(failure.code)) {
+    if (['PROVIDER_AUTH_FAILED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_TIMEOUT', 'EXECUTOR_TIMEOUT', 'AGY_NETWORK_UNAVAILABLE'].includes(failure.code)) {
       // Record failure on the specific candidate family so other models under the same provider remain eligible.
       // reasonCode = the failure code itself: a post-dispatch provider error
       // is its own, already-enumerated failure class — a provisioning-only

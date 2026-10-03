@@ -71,6 +71,10 @@ export class AgyExitError extends AgyError {
       ? 'present'
       : envelope.usageEvidenceState;
     this.usageEvidencePresent = this.usageEvidenceState === 'present';
+    // Content-free transport provenance used by narrowly-scoped recovery
+    // classifiers. A non-empty stdout means AGY produced some response bytes;
+    // never call that a proven pre-send network failure.
+    this.stdoutWasEmpty = !(typeof stdout === 'string' && stdout.trim() !== '');
 
     // stderr from agy is diagnostic (auth / rate-limit / usage), not prompt
     // content — safe to surface, but bounded for error propagation.
