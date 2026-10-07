@@ -269,6 +269,7 @@ test('consumed PR reconsideration with unchanged evidence returns NO_PROGRESS wi
   const persistent = { findings: [finding('P2', 'a.js', 'persistent concern')] };
   const { controller, calls } = build({
     prBackend: backend,
+    gates: [{ verdict: 'PASS', fingerprint: 'stable-gate' }],
     reviews: [persistent, persistent, persistent],
     supervisorReplies: [{
       guidance: 'Reconsider against the frozen contract.',
