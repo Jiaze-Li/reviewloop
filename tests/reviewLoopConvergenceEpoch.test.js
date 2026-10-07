@@ -134,3 +134,77 @@ test('Supervisor HUMAN_REQUIRED remains immediately terminal', async () => {
   assert.equal(result.budgetExhausted, true);
   assert.equal(calls.supervisor, 1);
 });
+
+test('pre-upgrade supervisorInvoked migrates to one consumed escalation and cannot gain a third', async () => {
+  const blockers = ['C', 'D', 'E', 'F'].map((title) => blocker(title));
+  const { controller, persistence, calls } = makeHarness({
+    deltas: [
+      { fingerprint: 'd3', diff: 'after legacy supervisor 1' },
+      { fingerprint: 'd4', diff: 'after legacy supervisor 2' },
+      { fingerprint: 'd5', diff: 'final epoch 1' },
+      { fingerprint: 'd6', diff: 'final epoch 2' },
+    ],
+    reviews: blockers,
+    supervisorReplies: [{ guidance: 'new strategy after legacy guidance', recommendation: 'REWORK' }],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+
+  const raw = await persistence.readWorkflowState(loopId);
+  raw.reviewLoop.round = 2;
+  raw.reviewLoop.gateRound = 2;
+  raw.reviewLoop.state = 'REWORK';
+  raw.reviewLoop.supervisorInvoked = true;
+  raw.reviewLoop.lastSupervisorGuidance = 'legacy strategy';
+  delete raw.reviewLoop.supervisorEscalationCount;
+  delete raw.reviewLoop.convergenceEpoch;
+  delete raw.reviewLoop.epochReviewRound;
+  delete raw.reviewLoop.lastSupervisorRecommendation;
+  await persistence.writeWorkflowState(loopId, raw);
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  const second = await controller.review({ loopId });
+  assert.equal(second.status, 'REWORK');
+  assert.equal(second.supervisorEscalationCount, 2, 'legacy Supervisor use counts as escalation #1');
+  assert.equal(calls.supervisor, 1, 'only one post-upgrade Supervisor call was needed');
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  const terminal = await controller.review({ loopId });
+  assert.equal(terminal.status, 'HUMAN_REQUIRED');
+  assert.equal(terminal.supervisorEscalationCount, 2);
+  assert.equal(calls.supervisor, 1, 'a third automatic Supervisor escalation is never granted');
+});
+
+test('identical normalized Supervisor strategy is not New Information and opens no new epoch', async () => {
+  const same = blocker('persistent invariant');
+  const { controller, calls } = makeHarness({
+    deltas: [
+      { fingerprint: 'd1', diff: 'first' },
+      { fingerprint: 'd2', diff: 'second' },
+      { fingerprint: 'd3', diff: 'third' },
+      { fingerprint: 'd4', diff: 'fourth' },
+    ],
+    reviews: [same, same, same, same],
+    supervisorReplies: [
+      { guidance: 'repair   the shared invariant', recommendation: 'REWORK' },
+      { guidance: ' repair the shared invariant ', recommendation: 'REWORK' },
+    ],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  const firstEscalation = await controller.review({ loopId });
+  assert.equal(firstEscalation.status, 'REWORK');
+  assert.equal(firstEscalation.convergenceEpoch, 1);
+  assert.equal(firstEscalation.supervisorEscalationCount, 1);
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  const duplicate = await controller.review({ loopId });
+  assert.equal(duplicate.status, 'HUMAN_REQUIRED');
+  assert.equal(duplicate.terminal, true);
+  assert.equal(duplicate.convergenceEpoch, 1, 'duplicate guidance cannot manufacture epoch 2');
+  assert.equal(duplicate.supervisorEscalationCount, 1, 'duplicate guidance cannot consume escalation #2');
+  assert.equal(calls.supervisor, 2, 'the second physical Supervisor call is accounted even though its strategy is rejected');
+  assert.ok(
+    (duplicate.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_NO_NEW_STRATEGY'),
+  );
+});
