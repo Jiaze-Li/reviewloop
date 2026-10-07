@@ -218,6 +218,7 @@ test('consumed REVIEWER_RECONSIDER restores canonical NO_PROGRESS identity', asy
       { fingerprint: 'd2', diff: 'second' },
       { fingerprint: 'd2', diff: 'second' },
     ],
+    gates: [{ verdict: 'PASS', fingerprint: 'stable-gate' }],
     reviews: [same, same, same],
     supervisorReplies: [{
       guidance: 'Reconsider against the frozen contract.',
