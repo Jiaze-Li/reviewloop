@@ -483,29 +483,50 @@ unchanged since a prior actionable review (fix not pushed yet).
 
 ## Convergence
 
-Default: `blockingSeverities = [P1, P2]`, `maxReviewRounds = 3`.
+Default automatic convergence is **epoch-based**:
 
-- Round 1: Gate → Reviewer. P1/P2 → direct REWORK (Supervisor calls = 0).
-- Round 2: same blocking finding survives a genuine changed diff → Supervisor
-  **exactly once** → guidance → REWORK.
-- Round 3: P1/P2 still present → HUMAN_REQUIRED.
-- Any round with no P1 and no P2 → PASS. Waiting never consumes a round.
-- Identical evidence resubmitted → deterministic `NO_PROGRESS`, no model call.
+- **Epoch 0** gets `maxReviewRounds` Reviewer rounds (default **3**).
+- The Supervisor is triggered when the same blocking set survives a genuine
+  changed review state, findings oscillate (`A → B → A`), or the current epoch
+  exhausts its Reviewer budget.
+- A Supervisor `REWORK` creates a new convergence epoch with **2** Reviewer
+  rounds and a materially new repair strategy.
+- A Supervisor `REVIEWER_RECONSIDER` also creates a new epoch and records its
+  adjudication as new review evidence. The Reviewer may therefore reconsider
+  the SAME code/gate state because the reasoning evidence changed; the
+  Supervisor still cannot declare PASS.
+- At most **2** automatic Supervisor escalations occur per gate. With defaults,
+  the longest automatic path is `3 reviews → Supervisor → 2 reviews →
+  Supervisor → 2 reviews → HUMAN_REQUIRED`.
+- Any Reviewer round with no P1/P2 findings immediately PASSes the current gate.
+  Waiting/polling and deterministic Gate repair never consume Reviewer rounds.
 
-Only a Supervisor that actually adjudicates the loop non-convergent
-(`recommendation = "HUMAN_REQUIRED"`) ends it — that HUMAN_REQUIRED is terminal
-(`budgetExhausted`). A *degradable transient* Supervisor failure — caller
-cancelled before dispatch, provider pool exhausted with settled accounting,
-output unusable but the call settled — is never valid guidance and never
-terminal: the round degrades to a plain REWORK
-(`REVIEWLOOP_SUPERVISOR_UNAVAILABLE` non-blocking safety event,
-`supervisorInvoked` reset so a later persistent round can retry). The
-`maxReviewRounds` cap remains the stagnation circuit-breaker regardless. The one
-exception is the same spend-safety stop as everywhere else: a Supervisor call
-that was dispatched but whose usage cannot be settled
-(`MODEL_SPEND_USAGE_UNRESOLVED`, UNKNOWN ≠ ZERO) fails closed to a
-non-terminal `HUMAN_REQUIRED` and does not degrade.
+The counters have different ownership:
 
+- `round`: task-global audit round, monotonic forever.
+- `gateRound`: all Reviewer rounds in the current phase/final gate.
+- `convergenceEpoch`: repair-strategy generation inside the gate.
+- `epochReviewRound`: Reviewer rounds spent under the current strategy.
+- `supervisorEscalationCount`: durable automatic escalation count for the gate.
+
+Supervisor guidance never resets task-wide token/cost spend, reservation or
+information ledgers, audit history, the original baseline, or the frozen
+objective. Only the **epoch-local Reviewer counter** resets when a valid new
+Supervisor strategy is accepted.
+
+Supervisor recommendations are structured:
+
+- `REWORK`: blocker is valid; give the Worker a materially new repair strategy.
+- `REVIEWER_RECONSIDER`: the prior blocker appears mistaken/out-of-scope/already
+  satisfied; register the adjudication as new information and ask the independent
+  Reviewer to certify again. No code change is required solely for this path.
+- `HUMAN_REQUIRED`: genuine contract/product ambiguity, conflicting requirement,
+  or no safe automatic convergence strategy remains. This is terminal.
+
+Transient Supervisor transport/output failure is not a strategy and therefore
+does not create a new epoch. Model-spend safety failures remain fail-closed.
+`budgetExhausted=true` now means the **full automatic convergence strategy** is
+spent, not merely that three Reviewer calls occurred.
 The zero-provider `benchmark:transports` harness mechanically covers the
 controller paths E2E-A (one-round PASS), E2E-B (REWORK → changed implementation
 → PASS), and E2E-C (persistent blocker after changed implementation →
