@@ -102,6 +102,7 @@ export function initialLoopState(objective) {
     // REVIEWER_RECONSIDER is durable New Information that authorizes exactly
     // one Reviewer reconsideration even when code/gate evidence is unchanged.
     pendingReviewerReconsideration: null,
+    lastSupervisorRecommendation: null,
     // Set true only when the full automatic convergence strategy is exhausted
     // or the Supervisor explicitly recommends human involvement.
     budgetExhausted: false,
