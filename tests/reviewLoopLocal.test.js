@@ -56,7 +56,7 @@ test('ordinary Reviewer P1/P2 -> REWORK, supervisor=0 on first occurrence', asyn
   assert.match(r.nextAction, /same session/);
 });
 
-test('persistent blocking finding after a genuine changed diff -> Supervisor exactly once', async () => {
+test('persistent blocker triggers Supervisor and opens a supervised epoch instead of round-3 HUMAN_REQUIRED', async () => {
   const { controller, calls } = makeHarness({
     deltas: [
       { fingerprint: 'd1', diff: 'a', changedFiles: ['a.js'] },
@@ -80,8 +80,10 @@ test('persistent blocking finding after a genuine changed diff -> Supervisor exa
   assert.equal(calls.supervisor, 1);
   assert.equal(r2.supervisorGuidance, 'refactor the parser');
   const r3 = await controller.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
-  assert.equal(calls.supervisor, 1, 'supervisor still only called once');
+  assert.equal(r3.status, 'REWORK');
+  assert.equal(r3.convergenceEpoch, 1);
+  assert.equal(r3.epochReviewRound, 1);
+  assert.equal(calls.supervisor, 1, 'first supervised epoch does not immediately re-escalate on its first review');
 });
 
 test('no new information: identical delta + gate -> no Reviewer/Supervisor call', async () => {

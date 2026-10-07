@@ -7,7 +7,7 @@ already using. It does not replace or spawn that coding agent.
 > agents. The user's current coding agent (the **Worker**) owns execution;
 > ReviewLoop owns independent verification, review, non-convergence detection,
 > and exception guidance. It has ONE review engine — the same deterministic
-> Gate, internal Reviewer routing, Supervisor and 3-round convergence policy
+> Gate, internal Reviewer routing, Supervisor and epoch-based convergence policy
 > judge a LOCAL target (baseline → Worker delta) and a PR target (PR base →
 > exact PR HEAD).
 

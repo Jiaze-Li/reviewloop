@@ -57,9 +57,9 @@ test('agy:gpt-oss is still a Reviewer candidate', () => {
   assert.equal(supportsProductionRole('agy:gpt-oss', 'reviewer'), true);
 });
 
-test('MAX_SUPERVISOR_CALLS matches the 4-candidate pool', () => {
-  assert.equal(REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS, 4);
-  assert.equal(resolveReviewLoopLimits({}).maxSupervisorCalls, 4);
+test('MAX_SUPERVISOR_CALLS covers two bounded traversals of the 4-candidate pool', () => {
+  assert.equal(REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS, 8);
+  assert.equal(resolveReviewLoopLimits({}).maxSupervisorCalls, 8);
 });
 
 // ---- B. Token Sentinel unit behaviour ---------------------------------

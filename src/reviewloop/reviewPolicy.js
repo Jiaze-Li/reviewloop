@@ -3,11 +3,13 @@
 // Severity policy:  P1 = blocking, P2 = blocking, P3/OTHER = non-blocking.
 // Default completion rule: no P1 and no P2  ->  PASS.
 //
-// Convergence (§13), default max fresh review rounds = 3:
-//   Round 1: Gate -> Reviewer.  P1/P2 -> direct REWORK (Supervisor calls = 0).
-//   Round 2: same blocking finding survives a genuine changed diff
-//            -> Supervisor exactly once -> guidance -> REWORK.
-//   Round 3: P1/P2 still present -> HUMAN_REQUIRED.
+// Convergence (§13) is epoch-based.
+//   Epoch 0 gets the frozen maxReviewRounds budget (default 3).
+//   A repeated/oscillating blocker or an exhausted epoch escalates to Supervisor.
+//   A valid Supervisor strategy creates a NEW convergence epoch with 2 Reviewer
+//   rounds. At most 2 Supervisor escalations are automatic per gate.
+//   Only after the final supervised epoch still fails to converge does the gate
+//   become terminal HUMAN_REQUIRED. Task-wide round/spend/audit never reset.
 //   Any round with P1 = 0 and P2 = 0 -> PASS.
 //   Waiting/polling never consumes a round.
 
@@ -27,6 +29,26 @@ export const REVIEW_VERDICTS = Object.freeze({
   HUMAN_REQUIRED: 'HUMAN_REQUIRED',
   WAITING_FOR_REVIEW: 'WAITING_FOR_REVIEW',
 });
+
+export const CONVERGENCE_DEFAULTS = Object.freeze({
+  POST_SUPERVISOR_REVIEW_ROUNDS: 2,
+  MAX_SUPERVISOR_ESCALATIONS: 2,
+});
+
+function normalizedSignatures(signatures) {
+  return [...(signatures ?? [])].map(String).sort();
+}
+
+function signaturesEqual(a, b) {
+  return JSON.stringify(normalizedSignatures(a)) === JSON.stringify(normalizedSignatures(b));
+}
+
+export function convergenceEpochBudget(loopState) {
+  const epoch = Number.isInteger(loopState?.convergenceEpoch) ? loopState.convergenceEpoch : 0;
+  return epoch === 0
+    ? (loopState?.objective?.maxReviewRounds ?? 3)
+    : CONVERGENCE_DEFAULTS.POST_SUPERVISOR_REVIEW_ROUNDS;
+}
 
 // Compact normalized review the Core stores and (partly) returns to the Worker.
 // Raw findings text and full diff stay in local persistence, never echoed
@@ -117,10 +139,17 @@ export function normalizeReview({
 // Returns { verdict, reason, invokeSupervisor: boolean }.
 export function decideConvergence({ loopState, review }) {
   const objective = loopState.objective;
-  const maxRounds = objective?.maxReviewRounds ?? 3;
-  // Convergence budget is per review gate. `loopState.round` remains the
-  // task-global audit round, while gateRound resets after PHASE_PASS.
-  const round = loopState.gateRound ?? loopState.round; // already incremented for this fresh review
+  const initialBudget = objective?.maxReviewRounds ?? 3;
+  const epoch = Number.isInteger(loopState.convergenceEpoch) ? loopState.convergenceEpoch : 0;
+  const epochRound = Number.isInteger(loopState.epochReviewRound)
+    ? loopState.epochReviewRound
+    : (loopState.gateRound ?? loopState.round);
+  const escalationCount = Number.isInteger(loopState.supervisorEscalationCount)
+    ? loopState.supervisorEscalationCount
+    : (loopState.supervisorInvoked ? 1 : 0);
+  const epochBudget = epoch === 0
+    ? initialBudget
+    : CONVERGENCE_DEFAULTS.POST_SUPERVISOR_REVIEW_ROUNDS;
 
   if (review.status === 'FAILED') {
     return {
@@ -135,36 +164,51 @@ export function decideConvergence({ loopState, review }) {
     return { verdict: REVIEW_VERDICTS.PASS, reason: 'no P1/P2 findings', invokeSupervisor: false };
   }
 
-  // Blocking findings present. Is this the SAME blocking set as the previous
-  // round despite a genuine changed diff?
-  const prev = (loopState.findingSignatureHistory ?? []).slice(-1)[0];
-  const sameAsPrev = prev
-    && prev.signatures.length > 0
-    && JSON.stringify([...prev.signatures].sort()) === JSON.stringify([...review.findingSignatures].sort());
+  const epochHistory = (loopState.findingSignatureHistory ?? [])
+    .filter((entry) => (Number.isInteger(entry.epoch) ? entry.epoch : 0) === epoch);
+  const prev = epochHistory.slice(-1)[0];
+  const prevPrev = epochHistory.slice(-2, -1)[0];
+  const sameAsPrev = Boolean(
+    prev
+    && prev.signatures?.length
+    && signaturesEqual(prev.signatures, review.findingSignatures)
+  );
+  const oscillating = Boolean(
+    prevPrev
+    && prev
+    && !signaturesEqual(prev.signatures, review.findingSignatures)
+    && signaturesEqual(prevPrev.signatures, review.findingSignatures)
+  );
 
-  if (round >= maxRounds) {
+  const canEscalate = escalationCount < CONVERGENCE_DEFAULTS.MAX_SUPERVISOR_ESCALATIONS;
+  const epochExhausted = epochRound >= epochBudget;
+  if (canEscalate && (sameAsPrev || oscillating || epochExhausted)) {
+    const trigger = sameAsPrev
+      ? 'same blocking finding persists after a genuine changed review state'
+      : oscillating
+        ? 'blocking findings are oscillating across repair rounds'
+        : `convergence epoch ${epoch} exhausted its ${epochBudget} Reviewer round budget`;
     return {
-      verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
-      reason: `still ${blockingCount} blocking finding(s) after ${round} review round(s) in this gate`,
-      invokeSupervisor: false,
+      verdict: REVIEW_VERDICTS.REWORK,
+      reason: `${trigger}; escalate to Supervisor before more repair/review cycles`,
+      invokeSupervisor: true,
     };
   }
 
-  if (sameAsPrev && !loopState.supervisorInvoked) {
+  if (epochExhausted && !canEscalate) {
     return {
-      verdict: REVIEW_VERDICTS.REWORK,
-      reason: 'same blocking finding persists after a genuine changed implementation',
-      invokeSupervisor: true,
+      verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
+      reason: `still ${blockingCount} blocking finding(s) after ${escalationCount} Supervisor escalation(s) and ${epochRound} Reviewer round(s) in convergence epoch ${epoch}`,
+      invokeSupervisor: false,
     };
   }
 
   return {
     verdict: REVIEW_VERDICTS.REWORK,
-    reason: `${blockingCount} blocking finding(s) to fix`,
+    reason: `${blockingCount} blocking finding(s) to fix in convergence epoch ${epoch} (${epochRound}/${epochBudget})`,
     invokeSupervisor: false,
   };
 }
-
 // Compact payload returned to the Worker on REWORK — never a raw evidence blob.
 export function compactReworkPayload({ loopState, review, gate, supervisorGuidance = null }) {
   const phases = loopState.objective?.phases ?? [];
@@ -172,6 +216,7 @@ export function compactReworkPayload({ loopState, review, gate, supervisorGuidan
   const currentPhase = Number.isInteger(phaseIndex) && phaseIndex < phases.length
     ? phases[phaseIndex]?.id ?? null
     : (Number.isInteger(phaseIndex) && phaseIndex === phases.length ? 'final' : null);
+  const reconsider = loopState.pendingReviewerReconsideration;
   return {
     status: 'REWORK',
     loopId: loopState.loopId,
@@ -180,11 +225,18 @@ export function compactReworkPayload({ loopState, review, gate, supervisorGuidan
     currentPhase,
     maxRounds: loopState.objective?.maxReviewRounds ?? 3,
     gateRepairCount: loopState.gateRepairCount ?? 0,
+    convergenceEpoch: loopState.convergenceEpoch ?? 0,
+    epochReviewRound: loopState.epochReviewRound ?? 0,
+    epochReviewBudget: convergenceEpochBudget(loopState),
+    supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
+    maxSupervisorEscalations: CONVERGENCE_DEFAULTS.MAX_SUPERVISOR_ESCALATIONS,
     blockingFindings: review.blockingFindings,
     nonBlockingCount: review.nonBlockingFindings.length + (review.nonBlockingOmitted ?? 0),
     gate: gate ? { verdict: gate.verdict, failures: gate.failureIdentities?.slice(0, 10) ?? [] } : null,
     supervisorGuidance,
-    nextAction: 'Fix the blocking findings for the current review gate in this same session, then call reviewloop_review again.',
+    nextAction: reconsider
+      ? 'Supervisor requested Reviewer reconsideration. Re-call reviewloop_review in this same loop; a code change is not required solely to consume this adjudication.'
+      : 'Fix the blocking findings for the current review gate in this same session, then call reviewloop_review again.',
   };
 }
 

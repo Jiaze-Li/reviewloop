@@ -100,6 +100,46 @@ function sha256Hex(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
 }
 
+function logicalEvidenceFingerprint(loopState, proofFingerprint = '') {
+  const reconsider = loopState?.pendingReviewerReconsideration?.fingerprint;
+  if (!reconsider) return proofFingerprint;
+  return sha256Hex(`${proofFingerprint || 'none'}::supervisor-reconsideration::${reconsider}`);
+}
+
+function normalizeSupervisorStrategyText(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function migrateConvergenceState(loopState) {
+  const gateRound = Number.isInteger(loopState.gateRound)
+    ? loopState.gateRound
+    : (Number.isInteger(loopState.round) ? loopState.round : 0);
+  const legacySupervisorUsed = loopState.supervisorInvoked === true;
+
+  if (!Number.isInteger(loopState.supervisorEscalationCount)) {
+    loopState.supervisorEscalationCount = legacySupervisorUsed ? 1 : 0;
+  }
+  if (!Number.isInteger(loopState.convergenceEpoch)) {
+    loopState.convergenceEpoch = loopState.supervisorEscalationCount > 0 ? 1 : 0;
+  }
+  if (!Number.isInteger(loopState.epochReviewRound)) {
+    // Before epoch convergence existed, a valid Supervisor could only have
+    // been invoked when the same blocker survived round 1 and round 2.
+    // Preserve that prior escalation as epoch 1 without charging its old
+    // pre-guidance Reviewer rounds against the new epoch.
+    loopState.epochReviewRound = legacySupervisorUsed
+      ? Math.max(0, gateRound - 2)
+      : gateRound;
+  }
+  if (!('pendingReviewerReconsideration' in loopState)) {
+    loopState.pendingReviewerReconsideration = null;
+  }
+  if (!('lastSupervisorRecommendation' in loopState)) {
+    loopState.lastSupervisorRecommendation = loopState.lastSupervisorGuidance ? 'REWORK' : null;
+  }
+  return loopState;
+}
+
 function phasesOf(objective) {
   return Array.isArray(objective?.phases) ? objective.phases : [];
 }
@@ -731,6 +771,7 @@ export function createReviewLoopController({
     assertObjectiveNotWeakened(objective, raw.objective);
     raw.objective = objective;
     assertPhaseProgressionValid(raw, objective);
+    migrateConvergenceState(raw);
     return raw;
   }
 
@@ -782,9 +823,14 @@ export function createReviewLoopController({
     // provider spend, token sentinel, baseline and objective stay intact.
     loopState.gateRound = 0;
     loopState.gateRepairCount = 0;
+    loopState.convergenceEpoch = 0;
+    loopState.epochReviewRound = 0;
+    loopState.supervisorEscalationCount = 0;
     loopState.findingSignatureHistory = [];
     loopState.supervisorInvoked = false;
+    loopState.pendingReviewerReconsideration = null;
     loopState.lastSupervisorGuidance = null;
+    loopState.lastSupervisorRecommendation = null;
     loopState.lastReviewedFingerprint = null;
     loopState.lastReviewedPrHead = null;
     loopState.lastGateFingerprint = null;
@@ -1174,10 +1220,11 @@ export function createReviewLoopController({
     const loopState = await loadLoop(loopId);
     const objective = loopState.objective;
 
-    // Each review GATE gets its own convergence budget (default 3 Reviewer
-    // rounds). A phase PHASE_PASS resets gate-local convergence state and keeps
-    // the same loop/baseline/task-wide token budget. If any gate exhausts its
-    // convergence budget, the whole task stops at HUMAN_REQUIRED.
+    // Each review gate owns bounded convergence epochs. Epoch 0 uses the
+    // frozen maxReviewRounds budget; valid Supervisor strategy may open bounded
+    // follow-up epochs without resetting task-wide round/spend/audit. Only the
+    // full automatic convergence strategy (or explicit Supervisor adjudication)
+    // can make HUMAN_REQUIRED terminal.
     if (isTerminal(loopState.state)
       && (loopState.state !== REVIEW_LOOP_STATES.HUMAN_REQUIRED || loopState.budgetExhausted)) {
       return terminalResult(loopState);
@@ -1299,20 +1346,32 @@ export function createReviewLoopController({
       && Number.isInteger(resumeCheckpoint.round)) {
       loopState.round = resumeCheckpoint.round;
       // Backward compatibility: persisted loops/checkpoints from before
-      // gate-local convergence existed have only the task-global round. For a
-      // no-phase legacy loop that round WAS the convergence budget, so migrate
-      // it forward instead of silently resetting paid-review allowance.
+      // gate-local/epoch convergence existed fall back to their paid round
+      // counters instead of silently resetting allowance.
       loopState.gateRound = Number.isInteger(resumeCheckpoint.gateRound)
         ? resumeCheckpoint.gateRound
         : (Number.isInteger(loopState.gateRound)
           ? loopState.gateRound
           : resumeCheckpoint.round);
+      loopState.convergenceEpoch = Number.isInteger(resumeCheckpoint.convergenceEpoch)
+        ? resumeCheckpoint.convergenceEpoch
+        : (Number.isInteger(loopState.convergenceEpoch) ? loopState.convergenceEpoch : 0);
+      loopState.epochReviewRound = Number.isInteger(resumeCheckpoint.epochReviewRound)
+        ? resumeCheckpoint.epochReviewRound
+        : (Number.isInteger(loopState.epochReviewRound)
+          ? loopState.epochReviewRound
+          : loopState.gateRound);
     } else {
       const priorGateRound = Number.isInteger(loopState.gateRound)
         ? loopState.gateRound
         : loopState.round;
+      const priorEpochRound = Number.isInteger(loopState.epochReviewRound)
+        ? loopState.epochReviewRound
+        : priorGateRound;
+      if (!Number.isInteger(loopState.convergenceEpoch)) loopState.convergenceEpoch = 0;
       loopState.round += 1;
       loopState.gateRound = priorGateRound + 1;
+      loopState.epochReviewRound = priorEpochRound + 1;
     }
 
     // Durable per-chunk checkpoint. Keyed to the exact review state INCLUDING
@@ -1331,6 +1390,8 @@ export function createReviewLoopController({
         chunks: {},
         round: loopState.round,
         gateRound: loopState.gateRound,
+        convergenceEpoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
         reviewScopeFingerprint: reviewScope.fingerprint,
       };
       loopState.chunkReviewCheckpoint = checkpoint;
@@ -1412,6 +1473,7 @@ export function createReviewLoopController({
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
+          supervisorGuidance: loopState.pendingReviewerReconsideration?.guidance ?? null,
           evidence: evidenceBundle,
           selection,
           signal,
@@ -1820,11 +1882,22 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
-    const fp = reviewFingerprint({
+    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+    const canonicalFp = reviewFingerprint({
       deltaFingerprint: delta.fingerprint,
       gateFingerprint: gate.fingerprint,
       reviewScopeFingerprint: reviewScope.fingerprint,
       evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
+    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
+      loopState,
+      evidenceCheck.proofFingerprint,
+    );
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: effectiveEvidenceFingerprint,
     });
     if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
       await saveLoop(loopState);
@@ -1849,7 +1922,7 @@ export function createReviewLoopController({
       reviewOut = await runReviewerOverEvidence({
         spend, loopState, objective, delta, gate, reviewScope,
         evidenceBundle: evidenceCheck.bundle,
-        evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+        evidenceProofFingerprint: effectiveEvidenceFingerprint,
         signal,
       });
     } catch (err) {
@@ -1858,7 +1931,11 @@ export function createReviewLoopController({
     }
     const review = reviewOut.review;
     review.reviewedFingerprint = fp;
-    loopState.lastReviewedFingerprint = fp;
+    // The Reviewer audit identity includes one-shot Supervisor adjudication,
+    // but once that adjudication is consumed, future NO_PROGRESS checks must
+    // compare the canonical code/gate/runtime-evidence state. Otherwise the
+    // disappearing adjudication hash itself looks like fresh information.
+    loopState.lastReviewedFingerprint = reconsiderationPending ? canonicalFp : fp;
     loopState.lastGateFingerprint = gate.fingerprint;
     loopState.lastReview = review;
     // The round's chunks are all reviewed (or it failed closed) — the
@@ -1878,20 +1955,29 @@ export function createReviewLoopController({
       };
     }
 
+    // A valid reconsideration has now been consumed by this Reviewer result.
+    // Failed/cancelled reviews above leave it pending for safe retry.
+    loopState.pendingReviewerReconsideration = null;
     const decision = decideConvergence({ loopState, review });
     loopState.findingSignatureHistory = [
       ...(loopState.findingSignatureHistory ?? []),
-      { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
+      {
+        round: loopState.round,
+        gateRound: loopState.gateRound,
+        epoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+        signatures: review.findingSignatures,
+      },
     ];
 
     let supervisorGuidance = null;
-    if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
+    if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
       const sup = await runSupervisor({
         spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
       });
       if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
       const outcome = await applySupervisorOutcome({
-        sup, loopState, review, spend, escalationReason: 'non-convergence escalation',
+        sup, loopState, review, spend, escalationReason: decision.reason,
       });
       if (outcome.result) return outcome.result;
       supervisorGuidance = outcome.guidance;
@@ -1915,7 +2001,7 @@ export function createReviewLoopController({
       return passResult(loopState, review, telemetry);
     }
     if (decision.verdict === REVIEW_VERDICTS.HUMAN_REQUIRED) {
-      loopState.budgetExhausted = true; // 3 rounds spent, still blocking — terminal
+      loopState.budgetExhausted = true; // all automatic convergence epochs/escalations spent
       recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason);
       await saveLoop(loopState);
       return humanRequiredResult(loopState, review, await spend.telemetry(), supervisorGuidance);
@@ -1954,7 +2040,9 @@ export function createReviewLoopController({
     const findingsEvidence = await spend.registerEvidence({
       kind: 'findings',
       taskId: `${loopState.loopId}:${reviewScope.id}`,
-      signature: review.findingSignatures.join('|') || 'none',
+      // A later Supervisor call is justified by a fresh independently reviewed
+      // state, never by incrementing an escalation counter over identical data.
+      signature: `${review.reviewedFingerprint ?? 'unknown'}::${review.findingSignatures.join('|') || 'none'}`,
     });
     let raw;
     try {
@@ -1978,7 +2066,12 @@ export function createReviewLoopController({
           selection, attempt, family, provider,
         }) => Promise.resolve(supervisorFn({
           objective, blockingFindings: review.blockingFindings, gate, reviewScope, evidence: evidenceBundle,
-          round: loopState.round, priorSignatures: loopState.findingSignatureHistory, selection, signal,
+          round: loopState.round,
+          convergenceEpoch: loopState.convergenceEpoch ?? 0,
+          supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
+          priorSignatures: loopState.findingSignatureHistory,
+          priorSupervisorGuidance: loopState.lastSupervisorGuidance,
+          selection, signal,
         })).then((out) => {
           physicalCalls.push({
             role: 'supervisor', round: loopState.round, chunkIndex: null, chunkTotal: null,
@@ -2027,7 +2120,11 @@ export function createReviewLoopController({
         humanRequired: true, terminal: true, reason: 'Supervisor recommends human involvement', guidance: raw.guidance, physicalCalls,
       };
     }
-    return { guidance: raw.guidance, physicalCalls };
+    return {
+      guidance: raw.guidance,
+      recommendation: String(raw.recommendation ?? 'REWORK').toUpperCase(),
+      physicalCalls,
+    };
   }
 
   // Apply a Supervisor result to the loop. Returns:
@@ -2048,13 +2145,18 @@ export function createReviewLoopController({
   }) {
     if (sup.humanRequired && sup.terminal) {
       loopState.budgetExhausted = true;
+      loopState.supervisorEscalationCount = (loopState.supervisorEscalationCount ?? 0) + 1;
       recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
       recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, sup.reason);
       await saveLoop(loopState);
       return { result: humanRequiredResult(loopState, review, await spend.telemetry(), sup.guidance) };
     }
     if (sup.humanRequired) {
-      loopState.supervisorInvoked = false; // transient — let a later round retry
+      // A settled-but-unusable/transient Supervisor attempt is not a valid
+      // escalation. Preserve the old observable meaning of supervisorInvoked:
+      // it only latches when usable strategy/adjudication was produced.
+      loopState.supervisorInvoked = (loopState.supervisorEscalationCount ?? 0) > 0;
+      // Transient Supervisor failure creates no strategy and no new epoch.
       collectSafetyEvent({
         code: 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE', severity: 'NON_BLOCKING', role: 'supervisor',
         taskId: loopState.loopId, reason: sup.reason,
@@ -2062,11 +2164,70 @@ export function createReviewLoopController({
       });
       return { guidance: null };
     }
-    recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
-    loopState.lastSupervisorGuidance = sup.guidance;
-    return { guidance: sup.guidance };
-  }
 
+    const recommendation = String(sup.recommendation ?? 'REWORK').toUpperCase();
+    const previousRecommendation = String(loopState.lastSupervisorRecommendation ?? '').toUpperCase();
+    const previousGuidance = normalizeSupervisorStrategyText(loopState.lastSupervisorGuidance);
+    const currentGuidance = normalizeSupervisorStrategyText(sup.guidance);
+    const repeatsPriorStrategy = Boolean(
+      previousGuidance
+      && previousRecommendation === recommendation
+      && previousGuidance === currentGuidance
+    );
+
+    if (repeatsPriorStrategy) {
+      // A repeated strategy is not New Information. Do not consume another
+      // escalation slot or manufacture a new epoch around already-failed advice.
+      loopState.budgetExhausted = true;
+      collectSafetyEvent({
+        code: 'REVIEWLOOP_SUPERVISOR_NO_NEW_STRATEGY',
+        severity: 'BLOCKING',
+        role: 'supervisor',
+        taskId: loopState.loopId,
+        reason: 'Supervisor repeated the prior strategy without material change',
+        actionTaken: 'automatic convergence stopped; human adjudication required',
+      });
+      recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
+      recordTransition(
+        loopState,
+        REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        'Supervisor produced no materially new convergence strategy',
+      );
+      await saveLoop(loopState);
+      return {
+        result: humanRequiredResult(
+          loopState,
+          review,
+          await spend.telemetry(),
+          sup.guidance,
+        ),
+      };
+    }
+
+    recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
+    loopState.supervisorInvoked = true;
+    loopState.lastSupervisorGuidance = sup.guidance;
+    loopState.lastSupervisorRecommendation = recommendation;
+    loopState.supervisorEscalationCount += 1;
+    loopState.convergenceEpoch += 1;
+    loopState.epochReviewRound = 0;
+
+    if (recommendation === 'REVIEWER_RECONSIDER') {
+      const escalation = loopState.supervisorEscalationCount;
+      loopState.pendingReviewerReconsideration = {
+        recommendation,
+        guidance: sup.guidance,
+        escalation,
+        fingerprint: sha256Hex(
+          `${loopState.loopId}::${loopState.convergenceEpoch}::${escalation}::${sup.guidance}`,
+        ),
+        createdAt: new Date(clock()).toISOString(),
+      };
+    } else {
+      loopState.pendingReviewerReconsideration = null;
+    }
+    return { guidance: sup.guidance, reconsideration: recommendation === 'REVIEWER_RECONSIDER' };
+  }
   // One physical provider attempt, shaped for the durable audit. `usage` is
   // the raw provider envelope (never re-derived/estimated) — null on a
   // failed/pre-dispatch attempt, present on a settled success.
@@ -2361,6 +2522,7 @@ export function createReviewLoopController({
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
         && loopState.lastReview?.status === 'ACTIONABLE'
+        && !loopState.pendingReviewerReconsideration
         && validatedEvidence.length === 0) {
         await saveLoop(loopState);
         return {
@@ -2503,11 +2665,22 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
-      const fp = reviewFingerprint({
+      const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+      const canonicalFp = reviewFingerprint({
         deltaFingerprint: delta.fingerprint,
         gateFingerprint: gate.fingerprint,
         reviewScopeFingerprint: reviewScope.fingerprint,
         evidenceFingerprint: evidenceCheck.proofFingerprint,
+      });
+      const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
+        loopState,
+        evidenceCheck.proofFingerprint,
+      );
+      const fp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+        evidenceFingerprint: effectiveEvidenceFingerprint,
       });
       if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
         await saveLoop(loopState);
@@ -2526,7 +2699,7 @@ export function createReviewLoopController({
         reviewOut = await runReviewerOverEvidence({
           spend, loopState, objective, delta, gate, reviewScope,
           evidenceBundle: evidenceCheck.bundle,
-          evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+          evidenceProofFingerprint: effectiveEvidenceFingerprint,
           signal,
         });
       } catch (err) {
@@ -2536,7 +2709,7 @@ export function createReviewLoopController({
       const review = reviewOut.review;
       review.reviewedFingerprint = fp;
       review.reviewedHead = observedHead;
-      loopState.lastReviewedFingerprint = fp;
+      loopState.lastReviewedFingerprint = reconsiderationPending ? canonicalFp : fp;
       loopState.lastGateFingerprint = gate.fingerprint;
       loopState.lastReviewedPrHead = observedHead;
       loopState.lastReview = review;
@@ -2552,24 +2725,58 @@ export function createReviewLoopController({
         };
       }
 
+      loopState.pendingReviewerReconsideration = null;
       const decision = decideConvergence({ loopState, review });
       loopState.findingSignatureHistory = [
         ...(loopState.findingSignatureHistory ?? []),
-        { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
+        {
+          round: loopState.round,
+          gateRound: loopState.gateRound,
+          epoch: loopState.convergenceEpoch ?? 0,
+          epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+          signatures: review.findingSignatures,
+        },
       ];
 
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];
-      if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
+      if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
         const sup = await runSupervisor({
           spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
         });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
         const outcome = await applySupervisorOutcome({
-          sup, loopState, review, spend, escalationReason: 'PR non-convergence escalation',
+          sup, loopState, review, spend, escalationReason: decision.reason,
         });
-        if (outcome.result) return outcome.result;
+        if (outcome.result) {
+          // A Supervisor terminal verdict is still the outcome of THIS exact PR
+          // review round. Persist the same durable PR audit/publication evidence
+          // as every other terminal PR path before returning it to the Worker.
+          const terminalTelemetry = outcome.result.telemetry ?? await spend.telemetry();
+          const terminalDecision = {
+            ...decision,
+            verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
+            reason: outcome.result.reason ?? loopState.history?.slice(-1)[0]?.reason ?? decision.reason,
+          };
+          appendAuditRecord({
+            loopState, objective, delta, gate, review,
+            decision: terminalDecision,
+            telemetry: terminalTelemetry,
+            supervisorPhysicalCalls,
+            observedHeadSha: observedHead,
+            finalObservedHeadSha: observedHead,
+            headStillCurrent: true,
+            result: 'HUMAN_REQUIRED',
+            reviewScope,
+          });
+          await saveLoop(loopState);
+          await maybePublishPrResult({
+            loopState, objective, result: 'HUMAN_REQUIRED',
+            review, headSha: observedHead, telemetry: terminalTelemetry,
+          });
+          return { ...outcome.result, head: observedHead };
+        }
         supervisorGuidance = outcome.guidance;
       }
 
@@ -2665,7 +2872,9 @@ export function createReviewLoopController({
       return {
         ...compactReworkPayload({ loopState, review, gate, supervisorGuidance }),
         head: observedHead,
-        reason: `${decision.reason}; push your fix so ReviewLoop reviews the new HEAD`,
+        reason: loopState.pendingReviewerReconsideration
+          ? `${decision.reason}; Supervisor requested reconsideration, so re-call reviewloop_review on the same HEAD`
+          : `${decision.reason}; push your fix so ReviewLoop reviews the new HEAD`,
         telemetry, safetyEvents,
       };
     }
@@ -2684,6 +2893,8 @@ export function createReviewLoopController({
   function passResult(loopState, review, telemetry) {
     return {
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
+      convergenceEpoch: loopState.convergenceEpoch ?? 0,
+      supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
       evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
@@ -2695,10 +2906,13 @@ export function createReviewLoopController({
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
       gateRound: loopState.gateRound ?? loopState.round,
-      // This HUMAN_REQUIRED is TERMINAL — the loop's review-round budget is
-      // spent. The Worker must report to the user and stop: not another
-      // reviewloop_review on this loop, not a fresh reviewloop_begin in the
-      // same task. A new user instruction starts a new task and a new budget.
+      convergenceEpoch: loopState.convergenceEpoch ?? 0,
+      epochReviewRound: loopState.epochReviewRound ?? 0,
+      supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
+      // budgetExhausted means the FULL automatic convergence strategy is spent
+      // (Reviewer epochs plus Supervisor escalations), not merely three reviews.
+      // The Worker must report to the user and stop: not another reviewloop_review
+      // on this loop, not a fresh reviewloop_begin in the same task.
       terminal: budgetExhausted || undefined,
       budgetExhausted: budgetExhausted || undefined,
       blockingFindings: review?.blockingFindings ?? [],
