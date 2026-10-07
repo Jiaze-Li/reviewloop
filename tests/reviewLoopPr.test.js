@@ -15,7 +15,7 @@ import {
 
 function build({
   prBackend, reviews = [], gates = [], supervisorReplies = [], onReviewer,
-  captureWorktreeSnapshotFn = null, persistence = new MemoryPersistence(),
+  captureWorktreeSnapshotFn = null, persistence = new MemoryPersistence(), env = null,
 } = {}) {
   const calls = { reviewer: 0, supervisor: 0, gate: 0 };
   let ri = 0;
@@ -24,6 +24,7 @@ function build({
   const controller = createReviewLoopController({
     persistence,
     prBackend,
+    ...(env ? { env } : {}),
     ...prTestFakes(prBackend),
     ...(captureWorktreeSnapshotFn ? { captureWorktreeSnapshotFn } : {}),
     discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo test'], manifestFingerprint: 'mf' }),
@@ -193,6 +194,74 @@ test('revised runtime evidence can be re-reviewed on the same PR HEAD', async ()
   });
   assert.equal(improved.status, 'PASS');
   assert.equal(calls.reviewer, 2, 'evidence-only progress must not require an unrelated push');
+});
+
+test('Supervisor REVIEWER_RECONSIDER may re-review the same PR HEAD without forcing a push', async () => {
+  const backend = mockPrBackend({ heads: ['H1', 'H2'] });
+  const persistent = { findings: [finding('P2', 'a.js', 'questionable invariant')] };
+  const { controller, calls } = build({
+    prBackend: backend,
+    reviews: [persistent, persistent, { findings: [] }],
+    supervisorReplies: [{
+      guidance: 'The prior blocker applies an invariant outside the frozen contract; reconsider the same implementation.',
+      recommendation: 'REVIEWER_RECONSIDER',
+    }],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  backend.advanceHead();
+
+  const escalated = await controller.review({ loopId });
+  assert.equal(escalated.status, 'REWORK');
+  assert.equal(calls.supervisor, 1);
+  assert.match(escalated.nextAction, /re-call reviewloop_review/i);
+
+  // No new push. Supervisor adjudication itself is New Information and must
+  // reach the independent Reviewer rather than being blocked by PUSH_REQUIRED.
+  const reconsidered = await controller.review({ loopId });
+  assert.equal(reconsidered.status, 'PASS');
+  assert.equal(calls.reviewer, 3);
+});
+
+test('Supervisor terminal HUMAN_REQUIRED on a PR writes the durable audit and publishes the result', async () => {
+  const backend = mockPrBackend({ base: 'B1', heads: ['H1', 'H2'] });
+  const persistence = new MemoryPersistence();
+  const persistent = { findings: [finding('P2', 'a.js', 'contract conflict')] };
+  const { controller, calls } = build({
+    prBackend: backend,
+    persistence,
+    env: { REVIEWLOOP_PUBLISH_PR_RESULT: '1' },
+    reviews: [persistent, persistent],
+    supervisorReplies: [{
+      guidance: 'The frozen requirements conflict and need a human product decision.',
+      recommendation: 'HUMAN_REQUIRED',
+    }],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  backend.advanceHead();
+
+  const terminal = await controller.review({ loopId });
+  assert.equal(terminal.status, 'HUMAN_REQUIRED');
+  assert.equal(terminal.terminal, true);
+  assert.equal(terminal.head, 'H2');
+  assert.equal(calls.supervisor, 1);
+
+  const persisted = await persistence.readWorkflowState(loopId);
+  assert.deepEqual(
+    persisted.reviewLoop.audit.map((record) => record.result),
+    ['REWORK', 'HUMAN_REQUIRED'],
+  );
+  const finalAudit = persisted.reviewLoop.audit.at(-1);
+  assert.equal(finalAudit.target.reviewedHeadSha, 'H2');
+  assert.equal(finalAudit.target.headStillCurrent, true);
+  assert.equal(finalAudit.convergence.verdict, 'HUMAN_REQUIRED');
+  assert.equal(finalAudit.supervisor.invoked, true);
+  assert.ok(finalAudit.supervisor.physicalCalls.length >= 1);
+
+  assert.match(backend.state.published.at(-1), /ReviewLoop HUMAN_REQUIRED/);
 });
 
 // F -- durable audit record.
