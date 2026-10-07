@@ -240,7 +240,7 @@ export function compactReworkPayload({ loopState, review, gate, supervisorGuidan
   };
 }
 
-export function reviewFingerprint({export function reviewFingerprint({
+export function reviewFingerprint({
   deltaFingerprint,
   gateFingerprint,
   reviewScopeFingerprint = '',
