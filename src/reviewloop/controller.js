@@ -106,6 +106,40 @@ function logicalEvidenceFingerprint(loopState, proofFingerprint = '') {
   return sha256Hex(`${proofFingerprint || 'none'}::supervisor-reconsideration::${reconsider}`);
 }
 
+function normalizeSupervisorStrategyText(value) {
+  return String(value ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function migrateConvergenceState(loopState) {
+  const gateRound = Number.isInteger(loopState.gateRound)
+    ? loopState.gateRound
+    : (Number.isInteger(loopState.round) ? loopState.round : 0);
+  const legacySupervisorUsed = loopState.supervisorInvoked === true;
+
+  if (!Number.isInteger(loopState.supervisorEscalationCount)) {
+    loopState.supervisorEscalationCount = legacySupervisorUsed ? 1 : 0;
+  }
+  if (!Number.isInteger(loopState.convergenceEpoch)) {
+    loopState.convergenceEpoch = loopState.supervisorEscalationCount > 0 ? 1 : 0;
+  }
+  if (!Number.isInteger(loopState.epochReviewRound)) {
+    // Before epoch convergence existed, a valid Supervisor could only have
+    // been invoked when the same blocker survived round 1 and round 2.
+    // Preserve that prior escalation as epoch 1 without charging its old
+    // pre-guidance Reviewer rounds against the new epoch.
+    loopState.epochReviewRound = legacySupervisorUsed
+      ? Math.max(0, gateRound - 2)
+      : gateRound;
+  }
+  if (!('pendingReviewerReconsideration' in loopState)) {
+    loopState.pendingReviewerReconsideration = null;
+  }
+  if (!('lastSupervisorRecommendation' in loopState)) {
+    loopState.lastSupervisorRecommendation = loopState.lastSupervisorGuidance ? 'REWORK' : null;
+  }
+  return loopState;
+}
+
 function phasesOf(objective) {
   return Array.isArray(objective?.phases) ? objective.phases : [];
 }
@@ -737,6 +771,7 @@ export function createReviewLoopController({
     assertObjectiveNotWeakened(objective, raw.objective);
     raw.objective = objective;
     assertPhaseProgressionValid(raw, objective);
+    migrateConvergenceState(raw);
     return raw;
   }
 
@@ -795,6 +830,7 @@ export function createReviewLoopController({
     loopState.supervisorInvoked = false;
     loopState.pendingReviewerReconsideration = null;
     loopState.lastSupervisorGuidance = null;
+    loopState.lastSupervisorRecommendation = null;
     loopState.lastReviewedFingerprint = null;
     loopState.lastReviewedPrHead = null;
     loopState.lastGateFingerprint = null;
@@ -1184,10 +1220,11 @@ export function createReviewLoopController({
     const loopState = await loadLoop(loopId);
     const objective = loopState.objective;
 
-    // Each review GATE gets its own convergence budget (default 3 Reviewer
-    // rounds). A phase PHASE_PASS resets gate-local convergence state and keeps
-    // the same loop/baseline/task-wide token budget. If any gate exhausts its
-    // convergence budget, the whole task stops at HUMAN_REQUIRED.
+    // Each review gate owns bounded convergence epochs. Epoch 0 uses the
+    // frozen maxReviewRounds budget; valid Supervisor strategy may open bounded
+    // follow-up epochs without resetting task-wide round/spend/audit. Only the
+    // full automatic convergence strategy (or explicit Supervisor adjudication)
+    // can make HUMAN_REQUIRED terminal.
     if (isTerminal(loopState.state)
       && (loopState.state !== REVIEW_LOOP_STATES.HUMAN_REQUIRED || loopState.budgetExhausted)) {
       return terminalResult(loopState);
@@ -2117,14 +2154,53 @@ export function createReviewLoopController({
       return { guidance: null };
     }
 
+    const recommendation = String(sup.recommendation ?? 'REWORK').toUpperCase();
+    const previousRecommendation = String(loopState.lastSupervisorRecommendation ?? '').toUpperCase();
+    const previousGuidance = normalizeSupervisorStrategyText(loopState.lastSupervisorGuidance);
+    const currentGuidance = normalizeSupervisorStrategyText(sup.guidance);
+    const repeatsPriorStrategy = Boolean(
+      previousGuidance
+      && previousRecommendation === recommendation
+      && previousGuidance === currentGuidance
+    );
+
+    if (repeatsPriorStrategy) {
+      // A repeated strategy is not New Information. Do not consume another
+      // escalation slot or manufacture a new epoch around already-failed advice.
+      loopState.budgetExhausted = true;
+      collectSafetyEvent({
+        code: 'REVIEWLOOP_SUPERVISOR_NO_NEW_STRATEGY',
+        severity: 'BLOCKING',
+        role: 'supervisor',
+        taskId: loopState.loopId,
+        reason: 'Supervisor repeated the prior strategy without material change',
+        actionTaken: 'automatic convergence stopped; human adjudication required',
+      });
+      recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
+      recordTransition(
+        loopState,
+        REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        'Supervisor produced no materially new convergence strategy',
+      );
+      await saveLoop(loopState);
+      return {
+        result: humanRequiredResult(
+          loopState,
+          review,
+          await spend.telemetry(),
+          sup.guidance,
+        ),
+      };
+    }
+
     recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
     loopState.supervisorInvoked = true;
     loopState.lastSupervisorGuidance = sup.guidance;
-    loopState.supervisorEscalationCount = (loopState.supervisorEscalationCount ?? 0) + 1;
-    loopState.convergenceEpoch = (loopState.convergenceEpoch ?? 0) + 1;
+    loopState.lastSupervisorRecommendation = recommendation;
+    loopState.supervisorEscalationCount += 1;
+    loopState.convergenceEpoch += 1;
     loopState.epochReviewRound = 0;
 
-    const recommendation = String(sup.recommendation ?? 'REWORK').toUpperCase();
     if (recommendation === 'REVIEWER_RECONSIDER') {
       const escalation = loopState.supervisorEscalationCount;
       loopState.pendingReviewerReconsideration = {
