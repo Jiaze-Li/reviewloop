@@ -91,8 +91,10 @@ test('malformed Supervisor output is not treated as valid REWORK guidance, and d
   assert.equal(r2.status, 'REWORK');
   assert.equal(r2.supervisorGuidance ?? null, null);
   assert.ok((r2.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE'));
-  // The round cap still terminates the loop on a persistent finding.
+  // At the old round-3 boundary ReviewLoop retries Supervisor rather than
+  // handing the problem to a human merely because three reviews elapsed.
   const r3 = await controller.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
-  assert.equal(r3.terminal, true);
+  assert.equal(r3.status, 'REWORK');
+  assert.notEqual(r3.terminal, true);
+  assert.equal(r3.convergenceEpoch, 0, 'unusable Supervisor output never creates a new strategy epoch');
 });
