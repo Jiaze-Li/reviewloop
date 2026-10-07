@@ -1907,20 +1907,29 @@ export function createReviewLoopController({
       };
     }
 
+    // A valid reconsideration has now been consumed by this Reviewer result.
+    // Failed/cancelled reviews above leave it pending for safe retry.
+    loopState.pendingReviewerReconsideration = null;
     const decision = decideConvergence({ loopState, review });
     loopState.findingSignatureHistory = [
       ...(loopState.findingSignatureHistory ?? []),
-      { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
+      {
+        round: loopState.round,
+        gateRound: loopState.gateRound,
+        epoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+        signatures: review.findingSignatures,
+      },
     ];
 
     let supervisorGuidance = null;
-    if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
+    if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
       const sup = await runSupervisor({
         spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
       });
       if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
       const outcome = await applySupervisorOutcome({
-        sup, loopState, review, spend, escalationReason: 'non-convergence escalation',
+        sup, loopState, review, spend, escalationReason: decision.reason,
       });
       if (outcome.result) return outcome.result;
       supervisorGuidance = outcome.guidance;
@@ -1944,7 +1953,7 @@ export function createReviewLoopController({
       return passResult(loopState, review, telemetry);
     }
     if (decision.verdict === REVIEW_VERDICTS.HUMAN_REQUIRED) {
-      loopState.budgetExhausted = true; // 3 rounds spent, still blocking — terminal
+      loopState.budgetExhausted = true; // all automatic convergence epochs/escalations spent
       recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason);
       await saveLoop(loopState);
       return humanRequiredResult(loopState, review, await spend.telemetry(), supervisorGuidance);
@@ -1983,7 +1992,9 @@ export function createReviewLoopController({
     const findingsEvidence = await spend.registerEvidence({
       kind: 'findings',
       taskId: `${loopState.loopId}:${reviewScope.id}`,
-      signature: review.findingSignatures.join('|') || 'none',
+      // A later Supervisor call is justified by a fresh independently reviewed
+      // state, never by incrementing an escalation counter over identical data.
+      signature: `${review.reviewedFingerprint ?? 'unknown'}::${review.findingSignatures.join('|') || 'none'}`,
     });
     let raw;
     try {
@@ -2007,7 +2018,12 @@ export function createReviewLoopController({
           selection, attempt, family, provider,
         }) => Promise.resolve(supervisorFn({
           objective, blockingFindings: review.blockingFindings, gate, reviewScope, evidence: evidenceBundle,
-          round: loopState.round, priorSignatures: loopState.findingSignatureHistory, selection, signal,
+          round: loopState.round,
+          convergenceEpoch: loopState.convergenceEpoch ?? 0,
+          supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
+          priorSignatures: loopState.findingSignatureHistory,
+          priorSupervisorGuidance: loopState.lastSupervisorGuidance,
+          selection, signal,
         })).then((out) => {
           physicalCalls.push({
             role: 'supervisor', round: loopState.round, chunkIndex: null, chunkTotal: null,
@@ -2056,7 +2072,11 @@ export function createReviewLoopController({
         humanRequired: true, terminal: true, reason: 'Supervisor recommends human involvement', guidance: raw.guidance, physicalCalls,
       };
     }
-    return { guidance: raw.guidance, physicalCalls };
+    return {
+      guidance: raw.guidance,
+      recommendation: String(raw.recommendation ?? 'REWORK').toUpperCase(),
+      physicalCalls,
+    };
   }
 
   // Apply a Supervisor result to the loop. Returns:
@@ -2077,13 +2097,14 @@ export function createReviewLoopController({
   }) {
     if (sup.humanRequired && sup.terminal) {
       loopState.budgetExhausted = true;
+      loopState.supervisorEscalationCount = (loopState.supervisorEscalationCount ?? 0) + 1;
       recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
       recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, sup.reason);
       await saveLoop(loopState);
       return { result: humanRequiredResult(loopState, review, await spend.telemetry(), sup.guidance) };
     }
     if (sup.humanRequired) {
-      loopState.supervisorInvoked = false; // transient — let a later round retry
+      // Transient Supervisor failure creates no strategy and no new epoch.
       collectSafetyEvent({
         code: 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE', severity: 'NON_BLOCKING', role: 'supervisor',
         taskId: loopState.loopId, reason: sup.reason,
@@ -2091,11 +2112,31 @@ export function createReviewLoopController({
       });
       return { guidance: null };
     }
-    recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
-    loopState.lastSupervisorGuidance = sup.guidance;
-    return { guidance: sup.guidance };
-  }
 
+    recordTransition(loopState, REVIEW_LOOP_STATES.SUPERVISING, escalationReason);
+    loopState.supervisorInvoked = true;
+    loopState.lastSupervisorGuidance = sup.guidance;
+    loopState.supervisorEscalationCount = (loopState.supervisorEscalationCount ?? 0) + 1;
+    loopState.convergenceEpoch = (loopState.convergenceEpoch ?? 0) + 1;
+    loopState.epochReviewRound = 0;
+
+    const recommendation = String(sup.recommendation ?? 'REWORK').toUpperCase();
+    if (recommendation === 'REVIEWER_RECONSIDER') {
+      const escalation = loopState.supervisorEscalationCount;
+      loopState.pendingReviewerReconsideration = {
+        recommendation,
+        guidance: sup.guidance,
+        escalation,
+        fingerprint: sha256Hex(
+          `${loopState.loopId}::${loopState.convergenceEpoch}::${escalation}::${sup.guidance}`,
+        ),
+        createdAt: new Date(clock()).toISOString(),
+      };
+    } else {
+      loopState.pendingReviewerReconsideration = null;
+    }
+    return { guidance: sup.guidance, reconsideration: recommendation === 'REVIEWER_RECONSIDER' };
+  }
   // One physical provider attempt, shaped for the durable audit. `usage` is
   // the raw provider envelope (never re-derived/estimated) — null on a
   // failed/pre-dispatch attempt, present on a settled success.
@@ -2585,22 +2626,29 @@ export function createReviewLoopController({
         };
       }
 
+      loopState.pendingReviewerReconsideration = null;
       const decision = decideConvergence({ loopState, review });
       loopState.findingSignatureHistory = [
         ...(loopState.findingSignatureHistory ?? []),
-        { round: loopState.round, gateRound: loopState.gateRound, signatures: review.findingSignatures },
+        {
+          round: loopState.round,
+          gateRound: loopState.gateRound,
+          epoch: loopState.convergenceEpoch ?? 0,
+          epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+          signatures: review.findingSignatures,
+        },
       ];
 
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];
-      if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor && !loopState.supervisorInvoked) {
+      if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
         const sup = await runSupervisor({
           spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
         });
         supervisorPhysicalCalls = sup.physicalCalls ?? [];
         if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
         const outcome = await applySupervisorOutcome({
-          sup, loopState, review, spend, escalationReason: 'PR non-convergence escalation',
+          sup, loopState, review, spend, escalationReason: decision.reason,
         });
         if (outcome.result) return outcome.result;
         supervisorGuidance = outcome.guidance;
@@ -2698,7 +2746,9 @@ export function createReviewLoopController({
       return {
         ...compactReworkPayload({ loopState, review, gate, supervisorGuidance }),
         head: observedHead,
-        reason: `${decision.reason}; push your fix so ReviewLoop reviews the new HEAD`,
+        reason: loopState.pendingReviewerReconsideration
+          ? `${decision.reason}; Supervisor requested reconsideration, so re-call reviewloop_review on the same HEAD`
+          : `${decision.reason}; push your fix so ReviewLoop reviews the new HEAD`,
         telemetry, safetyEvents,
       };
     }
@@ -2717,6 +2767,8 @@ export function createReviewLoopController({
   function passResult(loopState, review, telemetry) {
     return {
       status: 'PASS', loopId: loopState.loopId, round: loopState.round, gateRound: loopState.gateRound,
+      convergenceEpoch: loopState.convergenceEpoch ?? 0,
+      supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
       evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
@@ -2728,10 +2780,13 @@ export function createReviewLoopController({
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
       gateRound: loopState.gateRound ?? loopState.round,
-      // This HUMAN_REQUIRED is TERMINAL — the loop's review-round budget is
-      // spent. The Worker must report to the user and stop: not another
-      // reviewloop_review on this loop, not a fresh reviewloop_begin in the
-      // same task. A new user instruction starts a new task and a new budget.
+      convergenceEpoch: loopState.convergenceEpoch ?? 0,
+      epochReviewRound: loopState.epochReviewRound ?? 0,
+      supervisorEscalationCount: loopState.supervisorEscalationCount ?? 0,
+      // budgetExhausted means the FULL automatic convergence strategy is spent
+      // (Reviewer epochs plus Supervisor escalations), not merely three reviews.
+      // The Worker must report to the user and stop: not another reviewloop_review
+      // on this loop, not a fresh reviewloop_begin in the same task.
       terminal: budgetExhausted || undefined,
       budgetExhausted: budgetExhausted || undefined,
       blockingFindings: review?.blockingFindings ?? [],
