@@ -2511,6 +2511,7 @@ export function createReviewLoopController({
       // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
       if (loopState.lastReviewedPrHead === observedHead
         && loopState.lastReview?.status === 'ACTIONABLE'
+        && !loopState.pendingReviewerReconsideration
         && validatedEvidence.length === 0) {
         await saveLoop(loopState);
         return {
@@ -2730,7 +2731,34 @@ export function createReviewLoopController({
         const outcome = await applySupervisorOutcome({
           sup, loopState, review, spend, escalationReason: decision.reason,
         });
-        if (outcome.result) return outcome.result;
+        if (outcome.result) {
+          // A Supervisor terminal verdict is still the outcome of THIS exact PR
+          // review round. Persist the same durable PR audit/publication evidence
+          // as every other terminal PR path before returning it to the Worker.
+          const terminalTelemetry = outcome.result.telemetry ?? await spend.telemetry();
+          const terminalDecision = {
+            ...decision,
+            verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
+            reason: outcome.result.reason ?? loopState.history?.slice(-1)[0]?.reason ?? decision.reason,
+          };
+          appendAuditRecord({
+            loopState, objective, delta, gate, review,
+            decision: terminalDecision,
+            telemetry: terminalTelemetry,
+            supervisorPhysicalCalls,
+            observedHeadSha: observedHead,
+            finalObservedHeadSha: observedHead,
+            headStillCurrent: true,
+            result: 'HUMAN_REQUIRED',
+            reviewScope,
+          });
+          await saveLoop(loopState);
+          await maybePublishPrResult({
+            loopState, objective, result: 'HUMAN_REQUIRED',
+            review, headSha: observedHead, telemetry: terminalTelemetry,
+          });
+          return { ...outcome.result, head: observedHead };
+        }
         supervisorGuidance = outcome.guidance;
       }
 
