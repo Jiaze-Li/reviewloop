@@ -208,3 +208,36 @@ test('identical normalized Supervisor strategy is not New Information and opens 
     (duplicate.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_NO_NEW_STRATEGY'),
   );
 });
+
+test('consumed REVIEWER_RECONSIDER restores canonical NO_PROGRESS identity', async () => {
+  const same = blocker('reviewer still disagrees');
+  const { controller, calls } = makeHarness({
+    deltas: [
+      { fingerprint: 'd1', diff: 'first' },
+      { fingerprint: 'd2', diff: 'second' },
+      { fingerprint: 'd2', diff: 'second' },
+      { fingerprint: 'd2', diff: 'second' },
+    ],
+    reviews: [same, same, same],
+    supervisorReplies: [{
+      guidance: 'Reconsider against the frozen contract.',
+      recommendation: 'REVIEWER_RECONSIDER',
+    }],
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+
+  const escalated = await controller.review({ loopId });
+  assert.equal(escalated.status, 'REWORK');
+  assert.equal(calls.supervisor, 1);
+
+  const reconsidered = await controller.review({ loopId });
+  assert.equal(reconsidered.status, 'REWORK');
+  assert.equal(calls.reviewer, 3);
+
+  const unchanged = await controller.review({ loopId });
+  assert.equal(unchanged.status, 'NO_PROGRESS');
+  assert.equal(calls.reviewer, 3, 'consumed adjudication must not manufacture fresh review information');
+});
+
