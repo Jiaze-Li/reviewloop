@@ -41,8 +41,9 @@ const TRANSITIONS = Object.freeze({
   // A HUMAN_REQUIRED from a TRANSIENT/infra failure (a chunk-review crash, a
   // provider blip, GitHub unreachable) is resumed by re-calling
   // reviewloop_review with the durable checkpoint. A HUMAN_REQUIRED from the
-  // convergence policy (the 3-round budget is spent) is truly terminal — the
-  // controller marks loopState.budgetExhausted and refuses to re-enter.
+  // convergence policy is truly terminal only after the Reviewer epochs plus
+  // Supervisor escalations are exhausted; budgetExhausted then latches and the
+  // controller refuses to re-enter.
   HUMAN_REQUIRED: ['REVIEWING'],
   FAILED: [],
   STOPPED: [],
@@ -87,13 +88,22 @@ export function initialLoopState(objective) {
     lastReviewedPrHead: null,
     lastGateFingerprint: null,
     // convergence tracking
-    // Gate-local convergence history. Cleared after PHASE_PASS.
-    findingSignatureHistory: [], // [{ round, gateRound, signatures: [] }]
+    // gateRound is the total Reviewer rounds in this gate; epochReviewRound is
+    // the local counter for the current repair strategy. Supervisor guidance
+    // advances convergenceEpoch without resetting task-wide round/spend/audit.
+    convergenceEpoch: 0,
+    epochReviewRound: 0,
+    supervisorEscalationCount: 0,
+    // Gate-local convergence history. Entries retain their epoch for diagnosis.
+    findingSignatureHistory: [], // [{ round, gateRound, epoch, epochReviewRound, signatures: [] }]
+    // Kept for backward-compatible telemetry/state inspection. It means at
+    // least one Supervisor was used in this gate; it is NOT an "only once" lock.
     supervisorInvoked: false,
-    // Set true only when the CONVERGENCE POLICY ends the loop (3 review rounds
-    // spent, findings still blocking). Makes HUMAN_REQUIRED truly terminal — a
-    // further reviewloop_review returns the terminal result instead of
-    // re-entering. A transient-failure HUMAN_REQUIRED leaves this false.
+    // REVIEWER_RECONSIDER is durable New Information that authorizes exactly
+    // one Reviewer reconsideration even when code/gate evidence is unchanged.
+    pendingReviewerReconsideration: null,
+    // Set true only when the full automatic convergence strategy is exhausted
+    // or the Supervisor explicitly recommends human involvement.
     budgetExhausted: false,
     // Durable per-round audit trail. One entry per PR review round,
     // recoverable and tamper-evident. See controller.js `appendAuditRecord`.
