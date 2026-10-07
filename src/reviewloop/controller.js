@@ -2104,6 +2104,10 @@ export function createReviewLoopController({
       return { result: humanRequiredResult(loopState, review, await spend.telemetry(), sup.guidance) };
     }
     if (sup.humanRequired) {
+      // A settled-but-unusable/transient Supervisor attempt is not a valid
+      // escalation. Preserve the old observable meaning of supervisorInvoked:
+      // it only latches when usable strategy/adjudication was produced.
+      loopState.supervisorInvoked = (loopState.supervisorEscalationCount ?? 0) > 0;
       // Transient Supervisor failure creates no strategy and no new epoch.
       collectSafetyEvent({
         code: 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE', severity: 'NON_BLOCKING', role: 'supervisor',
