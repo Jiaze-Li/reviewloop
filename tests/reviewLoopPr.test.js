@@ -264,6 +264,50 @@ test('Supervisor terminal HUMAN_REQUIRED on a PR writes the durable audit and pu
   assert.match(backend.state.published.at(-1), /ReviewLoop HUMAN_REQUIRED/);
 });
 
+test('consumed PR reconsideration with unchanged evidence returns NO_PROGRESS without another paid review', async () => {
+  const backend = mockPrBackend({ heads: ['H1', 'H2'] });
+  const persistent = { findings: [finding('P2', 'a.js', 'persistent concern')] };
+  const { controller, calls } = build({
+    prBackend: backend,
+    reviews: [persistent, persistent, persistent],
+    supervisorReplies: [{
+      guidance: 'Reconsider against the frozen contract.',
+      recommendation: 'REVIEWER_RECONSIDER',
+    }],
+  });
+  const { loopId } = await controller.begin({
+    goal: 'g',
+    contractText: 'Goal: validate the reviewed PR behavior.',
+    cwd: '/r',
+    prNumber: 4,
+    evidenceRequirements: [{
+      id: 'runtime-ui',
+      type: 'runtime',
+      description: 'Exercise the real interaction.',
+      gate: 'final',
+    }],
+  });
+  const evidence = [{
+    requirementId: 'runtime-ui',
+    summary: 'Observed the expected production behavior.',
+  }];
+
+  assert.equal((await controller.review({ loopId, evidence })).status, 'REWORK');
+  backend.advanceHead();
+
+  const escalated = await controller.review({ loopId, evidence });
+  assert.equal(escalated.status, 'REWORK');
+  assert.equal(calls.supervisor, 1);
+
+  const reconsidered = await controller.review({ loopId, evidence });
+  assert.equal(reconsidered.status, 'REWORK');
+  assert.equal(calls.reviewer, 3);
+
+  const unchanged = await controller.review({ loopId, evidence });
+  assert.equal(unchanged.status, 'NO_PROGRESS');
+  assert.equal(calls.reviewer, 3, 'same PR HEAD/evidence after adjudication consumption must not spend again');
+});
+
 // F -- durable audit record.
 test('F: every PR round writes a recoverable, tamper-evident audit record', async () => {
   const backend = mockPrBackend({ base: 'BASEabc', heads: ['H1'] });
