@@ -17,6 +17,7 @@ const P1 = { severity: 'P1', file: 'a.js', title: 'bug' };
 function prController(persistence, prBackend, {
   resultByHead = {}, defaultResult = { findings: [P1] }, supervisorFn,
 } = {}) {
+  let defaultSupervisorRound = 0;
   return createReviewLoopController({
     persistence,
     prBackend,
@@ -29,12 +30,19 @@ function prController(persistence, prBackend, {
       model: 'test-reviewer',
     }),
     supervisorFn: supervisorFn
-      ?? (async () => ({ value: { guidance: 'g', recommendation: 'REWORK' }, usage: { input_tokens: 1, output_tokens: 1 } })),
+      ?? (async () => {
+        defaultSupervisorRound += 1;
+        return {
+          value: { guidance: `strategy-${defaultSupervisorRound}`, recommendation: 'REWORK' },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        };
+      }),
   });
 }
 
 function localController(persistence, { reviews }) {
   let i = 0;
+  let supervisorRound = 0;
   return createReviewLoopController({
     persistence,
     captureBaselineFn: async () => ({ head: 'H', baselineRef: 'H', dirtyFiles: [], untrackedHashes: {}, evidenceComplete: true }),
@@ -42,7 +50,13 @@ function localController(persistence, { reviews }) {
     runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: `g${i}`, failureIdentities: [], results: [] }),
     discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo'], manifestFingerprint: 'mf' }),
     reviewerFn: async () => { const r = reviews[Math.min(i, reviews.length - 1)]; i += 1; return { value: r, usage: { input_tokens: 1, output_tokens: 1 } }; },
-    supervisorFn: async () => ({ value: { guidance: 'try again', recommendation: 'REWORK' }, usage: { input_tokens: 1, output_tokens: 1 } }),
+    supervisorFn: async () => {
+      supervisorRound += 1;
+      return {
+        value: { guidance: `local-strategy-${supervisorRound}`, recommendation: 'REWORK' },
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
   });
 }
 
