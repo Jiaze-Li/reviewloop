@@ -232,8 +232,12 @@ export function validateSupervisorPayload(parsed, { raw } = {}) {
     return { malformed: true, reason: 'supervisor output is not a JSON object', raw };
   }
   const rec = String(parsed.recommendation ?? '').trim().toUpperCase();
-  if (rec !== 'REWORK' && rec !== 'HUMAN_REQUIRED') {
-    return { malformed: true, reason: `supervisor recommendation must be REWORK|HUMAN_REQUIRED, got ${JSON.stringify(parsed.recommendation)}`, raw };
+  if (!['REWORK', 'REVIEWER_RECONSIDER', 'HUMAN_REQUIRED'].includes(rec)) {
+    return {
+      malformed: true,
+      reason: `supervisor recommendation must be REWORK|REVIEWER_RECONSIDER|HUMAN_REQUIRED, got ${JSON.stringify(parsed.recommendation)}`,
+      raw,
+    };
   }
   if (!String(parsed.guidance ?? '').trim()) {
     return { malformed: true, reason: 'supervisor guidance is empty', raw };
@@ -682,7 +686,8 @@ function reviewScopePromptLines(reviewScope) {
 
 export function buildReviewerInvoke() {
   return async ({
-    objective, diff, changedFiles, gate, reviewScope = null, evidence = null, transport, model, signal,
+    objective, diff, changedFiles, gate, reviewScope = null, evidence = null,
+    supervisorGuidance = null, transport, model, signal,
   }) => {
     const prompt = [
       'You are an INDEPENDENT code reviewer.',
@@ -695,6 +700,9 @@ export function buildReviewerInvoke() {
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
       ...evidencePromptLines(evidence),
+      supervisorGuidance
+        ? `SUPERVISOR ADJUDICATION (new review evidence; reconsider the prior blocker, but independently certify the code):\n${supervisorGuidance}`
+        : '',
       'GIT DIFF (primary evidence):',
       String(diff ?? ''),
       '',
@@ -720,7 +728,10 @@ export function buildReviewerInvoke() {
 
 export function buildSupervisorInvoke() {
   return async ({
-    objective, blockingFindings, reviewScope = null, evidence = null, transport, model, signal,
+    objective, blockingFindings, reviewScope = null, evidence = null,
+    round = null, convergenceEpoch = 0, supervisorEscalationCount = 0,
+    priorSignatures = [], priorSupervisorGuidance = null,
+    transport, model, signal,
   }) => {
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
@@ -730,10 +741,20 @@ export function buildSupervisorInvoke() {
         : '',
       ...reviewScopePromptLines(reviewScope),
       ...evidencePromptLines(evidence),
-      `PERSISTENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
-      'Give concise repair guidance for the Worker within the CURRENT review scope, or recommend HUMAN_REQUIRED.',
+      `CURRENT GLOBAL REVIEW ROUND: ${round ?? 'unknown'}; CONVERGENCE EPOCH: ${convergenceEpoch}; PRIOR SUPERVISOR ESCALATIONS: ${supervisorEscalationCount}`,
+      priorSignatures?.length
+        ? `RECENT CONVERGENCE HISTORY (signatures only):\n${JSON.stringify(priorSignatures.slice(-6), null, 2)}`
+        : '',
+      priorSupervisorGuidance
+        ? `PRIOR SUPERVISOR GUIDANCE:\n${priorSupervisorGuidance}`
+        : '',
+      `CURRENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
+      'Diagnose WHY Reviewer/Worker repair has not converged. Do not merely repeat the latest Reviewer finding.',
+      'Choose REWORK when the blocker is valid but the Worker needs a genuinely new repair strategy.',
+      'Choose REVIEWER_RECONSIDER when the implementation should be independently re-reviewed without requiring a code change because the blocker is out of scope, already satisfied, or based on a mistaken invariant.',
+      'Choose HUMAN_REQUIRED only for a genuine product/contract ambiguity, conflicting requirement, or when no safe automatic strategy remains.',
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
-      'Return JSON: {"guidance":"","recommendation":"REWORK|HUMAN_REQUIRED"}.',
+      'Return JSON: {"guidance":"","recommendation":"REWORK|REVIEWER_RECONSIDER|HUMAN_REQUIRED"}.',
     ].filter(Boolean).join('\n');
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
