@@ -100,6 +100,12 @@ function sha256Hex(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
 }
 
+function logicalEvidenceFingerprint(loopState, proofFingerprint = '') {
+  const reconsider = loopState?.pendingReviewerReconsideration?.fingerprint;
+  if (!reconsider) return proofFingerprint;
+  return sha256Hex(`${proofFingerprint || 'none'}::supervisor-reconsideration::${reconsider}`);
+}
+
 function phasesOf(objective) {
   return Array.isArray(objective?.phases) ? objective.phases : [];
 }
@@ -782,8 +788,12 @@ export function createReviewLoopController({
     // provider spend, token sentinel, baseline and objective stay intact.
     loopState.gateRound = 0;
     loopState.gateRepairCount = 0;
+    loopState.convergenceEpoch = 0;
+    loopState.epochReviewRound = 0;
+    loopState.supervisorEscalationCount = 0;
     loopState.findingSignatureHistory = [];
     loopState.supervisorInvoked = false;
+    loopState.pendingReviewerReconsideration = null;
     loopState.lastSupervisorGuidance = null;
     loopState.lastReviewedFingerprint = null;
     loopState.lastReviewedPrHead = null;
@@ -1299,20 +1309,32 @@ export function createReviewLoopController({
       && Number.isInteger(resumeCheckpoint.round)) {
       loopState.round = resumeCheckpoint.round;
       // Backward compatibility: persisted loops/checkpoints from before
-      // gate-local convergence existed have only the task-global round. For a
-      // no-phase legacy loop that round WAS the convergence budget, so migrate
-      // it forward instead of silently resetting paid-review allowance.
+      // gate-local/epoch convergence existed fall back to their paid round
+      // counters instead of silently resetting allowance.
       loopState.gateRound = Number.isInteger(resumeCheckpoint.gateRound)
         ? resumeCheckpoint.gateRound
         : (Number.isInteger(loopState.gateRound)
           ? loopState.gateRound
           : resumeCheckpoint.round);
+      loopState.convergenceEpoch = Number.isInteger(resumeCheckpoint.convergenceEpoch)
+        ? resumeCheckpoint.convergenceEpoch
+        : (Number.isInteger(loopState.convergenceEpoch) ? loopState.convergenceEpoch : 0);
+      loopState.epochReviewRound = Number.isInteger(resumeCheckpoint.epochReviewRound)
+        ? resumeCheckpoint.epochReviewRound
+        : (Number.isInteger(loopState.epochReviewRound)
+          ? loopState.epochReviewRound
+          : loopState.gateRound);
     } else {
       const priorGateRound = Number.isInteger(loopState.gateRound)
         ? loopState.gateRound
         : loopState.round;
+      const priorEpochRound = Number.isInteger(loopState.epochReviewRound)
+        ? loopState.epochReviewRound
+        : priorGateRound;
+      if (!Number.isInteger(loopState.convergenceEpoch)) loopState.convergenceEpoch = 0;
       loopState.round += 1;
       loopState.gateRound = priorGateRound + 1;
+      loopState.epochReviewRound = priorEpochRound + 1;
     }
 
     // Durable per-chunk checkpoint. Keyed to the exact review state INCLUDING
@@ -1331,6 +1353,8 @@ export function createReviewLoopController({
         chunks: {},
         round: loopState.round,
         gateRound: loopState.gateRound,
+        convergenceEpoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
         reviewScopeFingerprint: reviewScope.fingerprint,
       };
       loopState.chunkReviewCheckpoint = checkpoint;
@@ -1412,6 +1436,7 @@ export function createReviewLoopController({
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
+          supervisorGuidance: loopState.pendingReviewerReconsideration?.guidance ?? null,
           evidence: evidenceBundle,
           selection,
           signal,
@@ -1820,11 +1845,15 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
+    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
+      loopState,
+      evidenceCheck.proofFingerprint,
+    );
     const fp = reviewFingerprint({
       deltaFingerprint: delta.fingerprint,
       gateFingerprint: gate.fingerprint,
       reviewScopeFingerprint: reviewScope.fingerprint,
-      evidenceFingerprint: evidenceCheck.proofFingerprint,
+      evidenceFingerprint: effectiveEvidenceFingerprint,
     });
     if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
       await saveLoop(loopState);
@@ -1849,7 +1878,7 @@ export function createReviewLoopController({
       reviewOut = await runReviewerOverEvidence({
         spend, loopState, objective, delta, gate, reviewScope,
         evidenceBundle: evidenceCheck.bundle,
-        evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+        evidenceProofFingerprint: effectiveEvidenceFingerprint,
         signal,
       });
     } catch (err) {
@@ -2503,11 +2532,15 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
+      const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
+        loopState,
+        evidenceCheck.proofFingerprint,
+      );
       const fp = reviewFingerprint({
         deltaFingerprint: delta.fingerprint,
         gateFingerprint: gate.fingerprint,
         reviewScopeFingerprint: reviewScope.fingerprint,
-        evidenceFingerprint: evidenceCheck.proofFingerprint,
+        evidenceFingerprint: effectiveEvidenceFingerprint,
       });
       if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
         await saveLoop(loopState);
@@ -2526,7 +2559,7 @@ export function createReviewLoopController({
         reviewOut = await runReviewerOverEvidence({
           spend, loopState, objective, delta, gate, reviewScope,
           evidenceBundle: evidenceCheck.bundle,
-          evidenceProofFingerprint: evidenceCheck.proofFingerprint,
+          evidenceProofFingerprint: effectiveEvidenceFingerprint,
           signal,
         });
       } catch (err) {
