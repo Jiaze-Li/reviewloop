@@ -51,16 +51,14 @@ export const REVIEWLOOP_DEFAULTS = Object.freeze({
   // when a large diff is deterministically chunked (each chunk is separately
   // metered / New-Information-gated). This is a coarse backstop; MAX_COST_USD
   // and MAX_USAGE_VOLUME are the real runaway guards. Default headroom is
-  // (rounds) x (max chunks + 1).
-  MAX_REVIEWER_CALLS: 3 * 13,
-  // The Supervisor is invoked at most ONCE per loop (controller guards on
-  // supervisorInvoked), but that single invocation drives automatic
-  // provider failover across the whole Supervisor pool. This ceiling must
-  // therefore be >= the Supervisor pool candidate count (currently 4:
-  // agy:gemini-supervisor, codex:default, agy:sonnet, claude:opus) so the tail candidate
-  // stays mechanically reachable when every earlier one fails safely.
+  // Default convergence can spend 3 initial Reviewer rounds plus two
+  // Supervisor-guided epochs of 2 rounds each = 7 logical Reviewer rounds.
+  // Each may chunk into at most 12 chunks; +1 keeps the existing coarse margin.
+  MAX_REVIEWER_CALLS: 7 * 13,
+  // Up to two logical Supervisor escalations are automatic per gate. Each can
+  // traverse the full four-candidate Supervisor pool under bounded failover.
   // MAX_COST_USD / MAX_USAGE_VOLUME remain the real runaway guards.
-  MAX_SUPERVISOR_CALLS: 4,
+  MAX_SUPERVISOR_CALLS: 2 * 4,
   // ---- post-settlement single-call Token Sentinel -------------------------
   // A runaway guard for ONE physical call: the durable aggregate ceilings
   // (MAX_USAGE_VOLUME / MAX_COST_USD) only fire once the running total crosses
@@ -147,8 +145,10 @@ export function resolveReviewLoopLimits(env = process.env, { gateCount = 1 } = {
     // Cost / aggregate usage remain TASK-WIDE across all phase gates.
     maxCostUsd: num(env, REVIEWLOOP_ENV.MAX_COST_USD, REVIEWLOOP_DEFAULTS.MAX_COST_USD),
     maxUsageVolume: num(env, REVIEWLOOP_ENV.MAX_USAGE_VOLUME, REVIEWLOOP_DEFAULTS.MAX_USAGE_VOLUME),
-    // Convergence rounds are PER GATE; the coarse physical-call ceilings gain
-    // headroom proportional to the frozen number of gates. Explicit env
+    // maxReviewRounds is the INITIAL convergence-epoch Reviewer budget per gate;
+    // Supervisor-guided epochs add their own bounded 2-round budgets. Coarse
+    // physical-call ceilings gain headroom proportional to the frozen number
+    // of gates. Explicit env
     // overrides remain absolute operator limits.
     maxReviewRounds: num(env, REVIEWLOOP_ENV.MAX_REVIEW_ROUNDS, REVIEWLOOP_DEFAULTS.MAX_REVIEW_ROUNDS),
     maxReviewerCalls: num(
