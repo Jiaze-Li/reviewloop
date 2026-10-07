@@ -1882,6 +1882,13 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
+    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+    const canonicalFp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
     const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
       loopState,
       evidenceCheck.proofFingerprint,
@@ -1924,7 +1931,11 @@ export function createReviewLoopController({
     }
     const review = reviewOut.review;
     review.reviewedFingerprint = fp;
-    loopState.lastReviewedFingerprint = fp;
+    // The Reviewer audit identity includes one-shot Supervisor adjudication,
+    // but once that adjudication is consumed, future NO_PROGRESS checks must
+    // compare the canonical code/gate/runtime-evidence state. Otherwise the
+    // disappearing adjudication hash itself looks like fresh information.
+    loopState.lastReviewedFingerprint = reconsiderationPending ? canonicalFp : fp;
     loopState.lastGateFingerprint = gate.fingerprint;
     loopState.lastReview = review;
     // The round's chunks are all reviewed (or it failed closed) — the
@@ -2654,6 +2665,13 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
+      const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+      const canonicalFp = reviewFingerprint({
+        deltaFingerprint: delta.fingerprint,
+        gateFingerprint: gate.fingerprint,
+        reviewScopeFingerprint: reviewScope.fingerprint,
+        evidenceFingerprint: evidenceCheck.proofFingerprint,
+      });
       const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
         loopState,
         evidenceCheck.proofFingerprint,
@@ -2691,7 +2709,7 @@ export function createReviewLoopController({
       const review = reviewOut.review;
       review.reviewedFingerprint = fp;
       review.reviewedHead = observedHead;
-      loopState.lastReviewedFingerprint = fp;
+      loopState.lastReviewedFingerprint = reconsiderationPending ? canonicalFp : fp;
       loopState.lastGateFingerprint = gate.fingerprint;
       loopState.lastReviewedPrHead = observedHead;
       loopState.lastReview = review;
