@@ -1,7 +1,8 @@
-// One user instruction == one ReviewLoop execution budget (default 3 review
-// rounds). Round 3 still blocking -> HUMAN_REQUIRED, and the loop is TERMINAL:
-// re-calling reviewloop_review on it cannot continue it. A separate
-// reviewloop_begin (a new task) starts a fresh budget from round 1.
+// One user instruction == one bounded ReviewLoop convergence strategy.
+// The initial epoch keeps the default 3 Reviewer rounds, but round 3 no longer
+// hands ordinary non-convergence to the user: Supervisor guidance may open up to
+// two bounded 2-review epochs. HUMAN_REQUIRED is terminal only after the full
+// automatic strategy is exhausted (or Supervisor explicitly asks for a human).
 // Cooperative-Worker model — no crypto, no approval tokens, no reset CLI.
 
 import test from 'node:test';
@@ -45,9 +46,9 @@ function localController(persistence, { reviews }) {
   });
 }
 
-const PR_HEADS = ['H1', 'H2', 'H3', 'H4'];
+const PR_HEADS = ['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'H7', 'H8'];
 
-test('PR: a loop runs at most 3 review rounds; round 3 still blocking -> HUMAN_REQUIRED', async () => {
+test('PR: round 3 still blocking escalates/continues automatically instead of HUMAN_REQUIRED', async () => {
   const persistence = new MemoryPersistence();
   const backend = mockPrBackend({ heads: PR_HEADS });
   const controller = prController(persistence, backend);
@@ -58,61 +59,75 @@ test('PR: a loop runs at most 3 review rounds; round 3 still blocking -> HUMAN_R
   const r2 = await controller.review({ loopId }); assert.equal(r2.status, 'REWORK'); assert.equal(r2.round, 2);
   backend.advanceHead();
   const r3 = await controller.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
+  assert.equal(r3.status, 'REWORK');
   assert.equal(r3.round, 3);
+  assert.notEqual(r3.terminal, true);
+  assert.equal(r3.convergenceEpoch, 1, 'persistent blocker already caused one Supervisor-guided epoch');
 });
 
-test('PR: HUMAN_REQUIRED is terminal — a further reviewloop_review cannot continue the loop', async () => {
+test('PR: full convergence exhaustion is terminal — a further reviewloop_review cannot continue the loop', async () => {
   const persistence = new MemoryPersistence();
   const backend = mockPrBackend({ heads: PR_HEADS });
   const controller = prController(persistence, backend);
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
-  await controller.review({ loopId }); backend.advanceHead();
-  await controller.review({ loopId }); backend.advanceHead();
-  const r3 = await controller.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
+
+  let terminal = null;
+  for (let round = 1; round <= 6; round += 1) {
+    // Repeated blocker escalates early, so the bounded path is:
+    // review, Supervisor, review, Supervisor, review, terminal review.
+    // eslint-disable-next-line no-await-in-loop
+    terminal = await controller.review({ loopId });
+    if (round < 6) backend.advanceHead();
+  }
+  assert.equal(terminal.status, 'HUMAN_REQUIRED');
+  assert.equal(terminal.terminal, true);
+  assert.equal(terminal.budgetExhausted, true);
+  assert.equal(terminal.round, 6);
+  assert.equal(terminal.supervisorEscalationCount, 2);
 
   const diffReadsBefore = backend.state.diffReads;
-  backend.advanceHead(); // "Worker pushed a new HEAD and tried again"
-  const r4 = await controller.review({ loopId });
-  assert.equal(r4.status, 'HUMAN_REQUIRED', 'still terminal, not REVIEWING/REWORK');
-  assert.equal(r4.terminal, true);
-  assert.match(r4.reason, /budget is spent|already reached HUMAN_REQUIRED/);
-  assert.equal(r4.round, 3, 'the round counter did not advance');
+  backend.advanceHead();
+  const again = await controller.review({ loopId });
+  assert.equal(again.status, 'HUMAN_REQUIRED', 'terminal convergence exhaustion cannot re-enter REVIEWING');
+  assert.equal(again.terminal, true);
+  assert.equal(again.round, 6, 'the global review round did not advance');
   assert.equal(backend.state.diffReads, diffReadsBefore, 'the PR was not re-reviewed');
 
   const persisted = await persistence.readWorkflowState(loopId);
   assert.equal(persisted.reviewLoop.state, 'HUMAN_REQUIRED');
 });
 
-test('PR: a new independent reviewloop_begin starts a fresh budget from round 1', async () => {
+test('PR: a new independent task starts fresh after a fully exhausted prior loop', async () => {
   const persistence = new MemoryPersistence();
   const b1 = mockPrBackend({ heads: PR_HEADS });
   const c1 = prController(persistence, b1);
   const first = await c1.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
-  await c1.review({ loopId: first.loopId }); b1.advanceHead();
-  await c1.review({ loopId: first.loopId }); b1.advanceHead();
-  assert.equal((await c1.review({ loopId: first.loopId })).status, 'HUMAN_REQUIRED');
 
-  // The user says "continue PR #4" -> a new task -> a new loop, fresh budget.
+  let exhausted = null;
+  for (let round = 1; round <= 6; round += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    exhausted = await c1.review({ loopId: first.loopId });
+    if (round < 6) b1.advanceHead();
+  }
+  assert.equal(exhausted.status, 'HUMAN_REQUIRED');
+  assert.equal(exhausted.terminal, true);
+
+  // A genuinely new user task gets a new immutable objective + budget.
   const b2 = mockPrBackend({ heads: ['H9'] });
   const c2 = prController(persistence, b2, { defaultResult: { findings: [] } });
-  const second = await c2.begin({ goal: 'continue PR #4', cwd: '/r', prNumber: 4 });
+  const second = await c2.begin({ goal: 'continue PR #4 as a new task', cwd: '/r', prNumber: 4 });
   assert.notEqual(second.loopId, first.loopId);
   assert.equal(second.status, 'READY');
-  const r = await c2.review({ loopId: second.loopId });
-  assert.equal(r.round, 1, 'the fresh loop starts at round 1');
-  assert.equal(r.status, 'PASS');
+  const result = await c2.review({ loopId: second.loopId });
+  assert.equal(result.round, 1);
+  assert.equal(result.status, 'PASS');
 });
 
-test('PR: a settled-but-unusable Supervisor result degrades to a plain REWORK — loop not stalled, budget not spent', async () => {
+test('PR: a settled-but-unusable Supervisor result remains resumable and creates no strategy epoch', async () => {
   const persistence = new MemoryPersistence();
-  // Same P1 on every HEAD -> round 2 triggers the Supervisor.
   const backend = mockPrBackend({ heads: PR_HEADS });
   let supCalls = 0;
   const controller = prController(persistence, backend, {
-    // A call that SETTLES (known usage) but yields no usable guidance -> a
-    // degradable transient failure, NOT terminal.
     supervisorFn: async () => {
       supCalls += 1;
       return { value: { guidance: '', recommendation: 'REWORK' }, usage: { input_tokens: 1, output_tokens: 1 } };
@@ -126,22 +141,20 @@ test('PR: a settled-but-unusable Supervisor result degrades to a plain REWORK �
   assert.equal(r2.status, 'REWORK', 'a transient Supervisor failure does not stall the loop');
   assert.equal(r2.round, 2);
   assert.equal(r2.supervisorGuidance, null);
-  assert.ok(supCalls >= 1, 'the Supervisor was attempted');
-  assert.ok(
-    (r2.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE'),
-    'the transient Supervisor failure is surfaced as a non-blocking safety event',
-  );
+  assert.ok(supCalls >= 1);
+  assert.ok((r2.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE'));
 
-  const persisted = await persistence.readWorkflowState(loopId);
-  assert.notEqual(persisted.reviewLoop.budgetExhausted, true, 'the budget was not spent');
-  assert.equal(persisted.reviewLoop.supervisorInvoked, false, 'a later round may retry the Supervisor');
+  let persisted = await persistence.readWorkflowState(loopId);
+  assert.notEqual(persisted.reviewLoop.budgetExhausted, true);
+  assert.equal(persisted.reviewLoop.supervisorInvoked, false, 'unusable output is not a valid escalation');
+  assert.equal(persisted.reviewLoop.convergenceEpoch, 0);
 
-  // Round 3 still blocking -> the round cap is still the circuit-breaker.
   backend.advanceHead();
   const r3 = await controller.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
-  assert.equal(r3.round, 3);
-  assert.equal(r3.terminal, true);
+  assert.equal(r3.status, 'REWORK', 'the old round-3 boundary does not force a human after Supervisor unavailability');
+  assert.notEqual(r3.terminal, true);
+  persisted = await persistence.readWorkflowState(loopId);
+  assert.equal(persisted.reviewLoop.convergenceEpoch, 0, 'no new strategy epoch exists without usable guidance');
 });
 
 test('PR: a Supervisor call dispatched with unresolvable usage is the deliberate fail-closed stop (not a degrade)', async () => {
@@ -172,30 +185,33 @@ test('PR: a clean review PASSes normally', async () => {
   assert.equal((await controller.review({ loopId })).status, 'PASS');
 });
 
-test('LOCAL: 3 rounds still blocking -> HUMAN_REQUIRED, terminal; a fresh begin restarts at round 1; clean -> PASS', async () => {
+test('LOCAL: bounded Supervisor-guided convergence eventually becomes terminal; a fresh task still starts at round 1', async () => {
   const persistence = new MemoryPersistence();
   const blocking = { findings: [{ severity: 'P1', file: 'a.js', line: 1, title: 'bug' }] };
-  const c1 = localController(persistence, { reviews: [blocking, blocking, blocking] });
+  const c1 = localController(persistence, { reviews: Array.from({ length: 6 }, () => blocking) });
   const { loopId } = await c1.begin({ goal: 'g', cwd: '/r' });
-  assert.equal((await c1.review({ loopId })).status, 'REWORK');
-  assert.equal((await c1.review({ loopId })).status, 'REWORK');
-  const r3 = await c1.review({ loopId });
-  assert.equal(r3.status, 'HUMAN_REQUIRED');
-  assert.equal(r3.round, 3);
 
-  const r4 = await c1.review({ loopId });
-  assert.equal(r4.status, 'HUMAN_REQUIRED');
-  assert.equal(r4.terminal, true);
-  assert.equal(r4.round, 3);
+  let terminal = null;
+  for (let round = 1; round <= 6; round += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    terminal = await c1.review({ loopId });
+  }
+  assert.equal(terminal.status, 'HUMAN_REQUIRED');
+  assert.equal(terminal.terminal, true);
+  assert.equal(terminal.round, 6);
+  assert.equal(terminal.supervisorEscalationCount, 2);
+
+  const again = await c1.review({ loopId });
+  assert.equal(again.status, 'HUMAN_REQUIRED');
+  assert.equal(again.terminal, true);
+  assert.equal(again.round, 6);
 
   const c2 = localController(persistence, { reviews: [{ findings: [] }] });
   const fresh = await c2.begin({ goal: 'continue', cwd: '/r' });
-  const rf = await c2.review({ loopId: fresh.loopId });
-  assert.equal(rf.round, 1);
-  assert.equal(rf.status, 'PASS');
+  const clean = await c2.review({ loopId: fresh.loopId });
+  assert.equal(clean.round, 1);
+  assert.equal(clean.status, 'PASS');
 
-  // K: LOCAL is not regressed by the PR snapshot-correctness machinery — no
-  // exact-HEAD worktree, no repository identity check, no PR audit trail.
   const persistedFresh = await persistence.readWorkflowState(fresh.loopId);
   assert.deepEqual(persistedFresh.reviewLoop.audit ?? [], [], 'a LOCAL loop never writes a PR audit record');
 });
