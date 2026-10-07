@@ -85,6 +85,10 @@ test('phase pass is non-terminal and resets gate-local convergence state only', 
   assert.equal(persisted.reviewLoop.state, 'READY_FOR_WORK');
   assert.equal(persisted.reviewLoop.round, 2, 'task-global audit round is monotonic');
   assert.equal(persisted.reviewLoop.gateRound, 0, 'next gate gets a fresh convergence counter');
+  assert.equal(persisted.reviewLoop.convergenceEpoch, 0);
+  assert.equal(persisted.reviewLoop.epochReviewRound, 0);
+  assert.equal(persisted.reviewLoop.supervisorEscalationCount, 0);
+  assert.equal(persisted.reviewLoop.pendingReviewerReconsideration, null);
   assert.deepEqual(persisted.reviewLoop.findingSignatureHistory, []);
   assert.equal(persisted.reviewLoop.supervisorInvoked, false);
   assert.equal(persisted.reviewLoop.budgetExhausted, false);
@@ -365,8 +369,9 @@ test('legacy no-phase loop without gateRound keeps its already-spent convergence
   await persistence.writeWorkflowState(loopId, raw);
 
   const third = await controller.review({ loopId });
-  assert.equal(third.status, 'HUMAN_REQUIRED');
-  assert.equal(third.gateRound, 3, 'legacy round 2 must migrate to gateRound 2 before the third review');
+  assert.equal(third.status, 'REWORK');
+  assert.equal(third.gateRound, 3, 'legacy paid review rounds remain monotonic after the third review');
+  assert.notEqual(third.status, 'HUMAN_REQUIRED', 'round 3 alone no longer exhausts the full convergence strategy');
 });
 
 test('legacy checkpoint without gateRound resumes at its previously assigned round', async () => {
