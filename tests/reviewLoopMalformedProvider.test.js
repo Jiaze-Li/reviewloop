@@ -70,7 +70,7 @@ test('Supervisor invalid JSON -> fail closed / HUMAN_REQUIRED', () => {
 });
 
 test('malformed Supervisor output is not treated as valid REWORK guidance, and does not stall the loop', async () => {
-  const { controller } = makeHarness({
+  const { controller, persistence, calls } = makeHarness({
     deltas: [
       { fingerprint: 'd1', diff: 'a', changedFiles: ['a.js'] },
       { fingerprint: 'd2', diff: 'b', changedFiles: ['a.js'] },
@@ -91,10 +91,17 @@ test('malformed Supervisor output is not treated as valid REWORK guidance, and d
   assert.equal(r2.status, 'REWORK');
   assert.equal(r2.supervisorGuidance ?? null, null);
   assert.ok((r2.safetyEvents ?? []).some((e) => e.code === 'REVIEWLOOP_SUPERVISOR_UNAVAILABLE'));
+  const afterMalformed = await persistence.readWorkflowState(loopId);
+  assert.equal(afterMalformed.reviewLoop.convergenceEpoch, 0, 'unusable Supervisor output itself creates no strategy epoch');
+  assert.equal(afterMalformed.reviewLoop.supervisorInvoked, false);
+
   // At the old round-3 boundary ReviewLoop retries Supervisor rather than
-  // handing the problem to a human merely because three reviews elapsed.
+  // handing the problem to a human merely because three reviews elapsed. The
+  // harness then supplies its default valid REWORK guidance, which legitimately
+  // opens the first supervised epoch.
   const r3 = await controller.review({ loopId });
   assert.equal(r3.status, 'REWORK');
   assert.notEqual(r3.terminal, true);
-  assert.equal(r3.convergenceEpoch, 0, 'unusable Supervisor output never creates a new strategy epoch');
+  assert.equal(calls.supervisor, 2);
+  assert.equal(r3.convergenceEpoch, 1);
 });
