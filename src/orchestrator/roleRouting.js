@@ -168,7 +168,8 @@ export class QuotaPoolRegistry {
     mkdirSync(path.dirname(this.filePath), { recursive: true });
     const lockDir = `${this.filePath}.lock`;
     const ownerFile = path.join(lockDir, 'owner');
-    const token = `${process.pid}:${Math.random().toString(36).slice(2)}`;
+    const host = os.hostname();
+    const token = `${host}|${process.pid}|${Math.random().toString(36).slice(2)}`;
     let locked = false;
     for (let i = 0; i < 50 && !locked; i += 1) {
       try {
@@ -180,13 +181,18 @@ export class QuotaPoolRegistry {
         // a live-but-slow holder is never evicted by elapsed time alone.
         try {
           const observed = String(readFileSync(ownerFile, 'utf8'));
-          const ownerPid = Number(observed.split(':')[0]);
+          const [ownerHost, ownerPidRaw] = observed.split('|');
+          const ownerPid = Number(ownerPidRaw);
+          // A PID is only meaningful on the host that wrote it (shared storage):
+          // never judge a foreign host's holder dead from our process table.
           let alive = true;
-          try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
+          if (ownerHost === host) {
+            try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
+          }
           if (!alive) {
             // Reclaim by atomic rename, then confirm we moved the DEAD owner's
             // lock (not a successor's fresh one) before discarding it.
-            const grave = `${lockDir}.reclaim.${token.replace(':', '-')}`;
+            const grave = `${lockDir}.reclaim.${process.pid}-${Date.now()}`;
             renameSync(lockDir, grave);
             let moved = null;
             try { moved = String(readFileSync(path.join(grave, 'owner'), 'utf8')); } catch { /* ignore */ }

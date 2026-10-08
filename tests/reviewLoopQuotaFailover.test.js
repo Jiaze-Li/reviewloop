@@ -168,9 +168,22 @@ test('a lock whose owner process is dead is broken; the update is then persisted
   try {
     const file = path.join(dir, 'quota-pools.json');
     mkdirSync(`${file}.lock`);
-    writeFileSync(`${file}.lock/owner`, '2147483646:dead');
+    writeFileSync(`${file}.lock/owner`, `${os.hostname()}|2147483646|dead`);
     new QuotaPoolRegistry({ filePath: file }).recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
     assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:opus'), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a foreign-host lock owner is never judged dead from the local process table', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
+  try {
+    const file = path.join(dir, 'quota-pools.json');
+    mkdirSync(`${file}.lock`);
+    writeFileSync(`${file}.lock/owner`, 'other-host|2147483646|x');
+    const reg = new QuotaPoolRegistry({ filePath: file });
+    reg.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:opus'), true, 'not written: lock not taken');
+    assert.equal(reg.usable('agy:opus'), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -181,7 +194,7 @@ test('lock timeout never writes the shared file; the cooldown holds in-process a
     new QuotaPoolRegistry({ filePath: file }).recordProviderFailure('agy:gemini-reviewer', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
     // A live (fresh) foreign lock that we cannot take.
     mkdirSync(`${file}.lock`);
-    writeFileSync(`${file}.lock/owner`, `${process.pid}:live`); // live owner is never evicted
+    writeFileSync(`${file}.lock/owner`, `${os.hostname()}|${process.pid}|live`); // live owner is never evicted
     const reg = new QuotaPoolRegistry({ filePath: file });
     reg.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
     assert.equal(reg.usable('agy:opus'), false, 'in-process view honours it');
