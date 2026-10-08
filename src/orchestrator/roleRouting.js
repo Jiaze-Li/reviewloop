@@ -1,7 +1,7 @@
 // Deterministic, zero-token role routing.  Policy, quota, transport health,
 // effort and physical-session decisions deliberately live in separate modules.
 import {
-  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, renameSync, statSync,
+  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, renameSync, statSync, rmSync,
 } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -136,26 +136,60 @@ export class QuotaPoolRegistry {
     renameSync(tmp, this.filePath);
     try { this._loadedMtimeMs = statSync(this.filePath).mtimeMs; } catch { /* ignore */ }
   }
+  // Cross-process read-modify-write: take a mkdir lock, re-read the LATEST file,
+  // apply `mutate` to it, persist, release. Two MCP processes recording
+  // different pools therefore merge instead of the later rename dropping the
+  // other's cooldown. A stale lock (crashed holder) is broken after 10s; if the
+  // lock cannot be taken within ~5s we proceed unlocked rather than block a
+  // review (a lost cooldown only costs one extra zero-cost rejection).
+  _update(mutate) {
+    if (!this.filePath) { mutate(); return; }
+    mkdirSync(path.dirname(this.filePath), { recursive: true });
+    const lockDir = `${this.filePath}.lock`;
+    let locked = false;
+    for (let i = 0; i < 250 && !locked; i += 1) {
+      try { mkdirSync(lockDir); locked = true; } catch {
+        try { if (Date.now() - statSync(lockDir).mtimeMs > 10_000) rmSync(lockDir, { recursive: true, force: true }); } catch { /* raced */ }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    try {
+      this._loadedMtimeMs = null;
+      this.refresh();
+      mutate();
+      this.persist();
+    } finally {
+      if (locked) { try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+    }
+  }
   poolsFor(family) { return [...(this.topology[family] ?? [])]; }
   setTopology(family, poolIds) { this.topology[family] = [...new Set(poolIds)]; }
   get(poolId) {
     this.refresh();
     const pool = this.pools[poolId] ?? { poolId, status: POOL_STATUS.UNKNOWN, reason: 'unknown', checkedAt: null, cooldownSince: null, resetAt: null, retryAfter: null, source: 'cached', failures: 0 };
     if (pool.status === POOL_STATUS.COOLDOWN && pool.resetAt && Date.parse(pool.resetAt) <= this.now()) {
-      pool.status = POOL_STATUS.UNKNOWN; pool.reason = 'unknown'; pool.checkedAt = nowIso(this.now()); pool.resetAt = null; pool.retryAfter = null;
-      this.pools[poolId] = pool; this.persist();
+      this._update(() => {
+        const latest = this.pools[poolId];
+        // Another process may have already renewed/changed this pool.
+        if (latest?.status !== POOL_STATUS.COOLDOWN || !latest.resetAt || Date.parse(latest.resetAt) > this.now()) return;
+        this.pools[poolId] = { ...latest, status: POOL_STATUS.UNKNOWN, reason: 'unknown', checkedAt: nowIso(this.now()), resetAt: null, retryAfter: null };
+      });
+      return copy(this.pools[poolId] ?? pool);
     }
     return copy(pool);
   }
   usable(family) { return this.poolsFor(family).every((poolId) => this.get(poolId).status !== POOL_STATUS.COOLDOWN); }
   recordReady(poolId, { source = 'runtime_probe' } = {}) {
-    this.pools[poolId] = { ...this.get(poolId), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 }; this.persist();
+    this._update(() => {
+      this.pools[poolId] = { ...(this.pools[poolId] ?? { poolId }), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 };
+    });
   }
   recordCooldown(poolId, { reason = 'quota_exhausted', resetAt = null, retryAfter = null, source = 'provider_error' } = {}) {
-    this.refresh();
-    const prior = this.get(poolId); const failures = (prior.failures ?? 0) + 1;
-    const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
-    this.pools[poolId] = { poolId, status: POOL_STATUS.COOLDOWN, reason, checkedAt: nowIso(this.now()), cooldownSince: nowIso(this.now()), resetAt: Number.isFinite(resetMillis) ? nowIso(resetMillis) : null, retryAfter: Number.isFinite(retryAfter) ? retryAfter : null, source: resetAt || retryAfter ? source : 'inferred_backoff', failures }; this.persist();
+    this._update(() => {
+      const failures = (this.pools[poolId]?.failures ?? 0) + 1;
+      const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
+      this.pools[poolId] = { poolId, status: POOL_STATUS.COOLDOWN, reason, checkedAt: nowIso(this.now()), cooldownSince: nowIso(this.now()), resetAt: Number.isFinite(resetMillis) ? nowIso(resetMillis) : null, retryAfter: Number.isFinite(retryAfter) ? retryAfter : null, source: resetAt || retryAfter ? source : 'inferred_backoff', failures };
+    });
   }
   recordProviderFailure(family, failure = {}) {
     if (!['PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_RATE_LIMITED'].includes(failure.code)) return;

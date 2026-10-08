@@ -81,6 +81,13 @@ test('classifier: non-zero exit, short duration, bare RESOURCE_EXHAUSTED, usage,
   assert.equal(classifyAgyQuotaRejection(Object.assign(new Error('x'), { code: 'AGY_TIMEOUT' })).proven, false);
 });
 
+test('classifier: millisecond hints are not misread as minutes', () => {
+  assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, retry after 60ms' })).retryAfterMs, 60);
+  assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, retry after 500 milliseconds' })).retryAfterMs, 500);
+  assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, retry after 90s' })).retryAfterMs, 90_000);
+  assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, resets in 2h 30m' })).retryAfterMs, 9_000_000);
+});
+
 // ---- automatic failover on proven zero-consumption quota rejection ---------
 
 test('proven quota rejection: settles zero, cools the shared pool, auto-switches to Gemini', async () => {
@@ -129,6 +136,22 @@ test('cooldown survives an MCP restart and is visible across registries sharing 
     const b = new QuotaPoolRegistry({ filePath: file });
     b.recordProviderFailure('agy:gemini-reviewer', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 60_000 });
     assert.equal(restarted.usable('agy:gemini-reviewer'), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('concurrent registries on one file merge cooldowns instead of dropping one', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
+  try {
+    const file = path.join(dir, 'quota-pools.json');
+    const a = new QuotaPoolRegistry({ filePath: file });
+    const b = new QuotaPoolRegistry({ filePath: file });
+    a.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    // b holds a stale (empty) snapshot taken before a's write.
+    b.pools = {}; b._loadedMtimeMs = Date.now() + 1e9;
+    b.recordProviderFailure('agy:gemini-reviewer', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    const fresh = new QuotaPoolRegistry({ filePath: file });
+    assert.equal(fresh.usable('agy:opus'), false, 'a\'s cooldown survived b\'s write');
+    assert.equal(fresh.usable('agy:gemini-reviewer'), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

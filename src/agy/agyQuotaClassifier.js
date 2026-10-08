@@ -35,12 +35,19 @@ function envelopeText(envelope) {
   ].filter((v) => v !== undefined && v !== null).map(String).join(' ');
 }
 
+// Units must end at a word boundary so "60ms" / "500 milliseconds" are never
+// misread as minutes. Millisecond hints are honoured explicitly.
 function parseDurationMs(text) {
-  const m = /(?:resets?|retry|try again)\s*(?:in|after)?\s*[:=]?\s*(?:(\d+)\s*d(?:ays?)?\s*)?(?:(\d+)\s*h(?:ours?|rs?)?\s*)?(?:(\d+)\s*m(?:in(?:ute)?s?)?\s*)?(?:(\d+)\s*s(?:ec(?:ond)?s?)?)?/i.exec(text);
+  const m = /(?:resets?|retry|try again)\s*(?:in|after)?\s*[:=]?\s*((?:\d+(?:\.\d+)?\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s|milliseconds?|ms)\b\s*)+)/i.exec(text);
   if (!m) return null;
-  const [d, h, mi, s] = [m[1], m[2], m[3], m[4]].map((v) => (v ? Number(v) : 0));
-  const total = (((d * 24 + h) * 60 + mi) * 60 + s) * 1000;
-  return total > 0 ? total : null;
+  const perUnit = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000, ms: 1 };
+  let total = 0;
+  for (const part of m[1].matchAll(/(\d+(?:\.\d+)?)\s*(milliseconds?|ms|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi)) {
+    const u = part[2].toLowerCase();
+    const key = u.startsWith('ms') || u.startsWith('milli') ? 'ms' : u[0];
+    total += Number(part[1]) * perUnit[key];
+  }
+  return total > 0 ? Math.round(total) : null;
 }
 
 /**
