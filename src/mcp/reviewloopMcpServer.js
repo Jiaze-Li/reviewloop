@@ -31,7 +31,7 @@ import {
   detectAgyCustomAgentSupport,
   narrowAgyGeminiDir,
 } from '../reviewloop/providerWiring.js';
-import { RouteAuditLog } from '../orchestrator/roleRouting.js';
+import { RouteAuditLog, QuotaPoolRegistry } from '../orchestrator/roleRouting.js';
 import { probeAgyModelCatalog } from '../agy/agyModelCatalog.js';
 import { probeReviewTransportRuntime } from '../reviewloop/adapters/cliReviewTransports.js';
 
@@ -59,6 +59,8 @@ export function createReviewLoopMcpServer({
       transportRuntime,
       customAgentSupport,
       routeAudit: new RouteAuditLog({ filePath: path.join(os.homedir(), '.reviewloop', 'route-audit.log') }),
+      // Disk-backed so a quota-pool cooldown survives an MCP restart.
+      quotaRegistry: new QuotaPoolRegistry({ filePath: path.join(os.homedir(), '.reviewloop', 'quota-pools.json') }),
       healthRevalidator: createAgyZeroTokenHealthRevalidator(),
     }),
   );

@@ -52,9 +52,12 @@ async function acknowledgeSpend(rest) {
   const loopId = flagValue(rest, '--loop');
   const reservationId = flagValue(rest, '--reservation');
   const reason = flagValue(rest, '--reason');
+  const excludeFamilies = flagValue(rest, '--exclude-family');
+  const excludePools = flagValue(rest, '--exclude-pool');
   if (!loopId || !reservationId || !reason) {
     throw new Error(
-      'usage: reviewloop acknowledge-spend --loop <loopId> --reservation <reservationId> --reason "<reason>"',
+      'usage: reviewloop acknowledge-spend --loop <loopId> --reservation <reservationId> --reason "<reason>" '
+      + '[--exclude-family <family[,family]>] [--exclude-pool <pool[,pool]>]',
     );
   }
 
@@ -70,7 +73,7 @@ async function acknowledgeSpend(rest) {
   try {
     const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
     const result = await acknowledgeUnresolvedSpend({
-      persistence, loopId, reservationId, reason,
+      persistence, loopId, reservationId, reason, excludeFamilies, excludePools,
     });
     console.log(result.alreadyAcknowledged
       ? 'Unresolved spend was already acknowledged.'
@@ -80,6 +83,9 @@ async function acknowledgeSpend(rest) {
     console.log(`  evidence: ${result.evidenceId}`);
     console.log('  accounting: usage UNKNOWN, cost UNKNOWN (preserved)');
     console.log('  retry: one human-authorized dispatch for the same operation/evidence');
+    console.log(result.excludedFamilies?.length
+      ? `  excluded from routing (this loop, all roles): ${result.excludedFamilies.join(', ')}`
+      : '  excluded from routing: none (pass --exclude-family / --exclude-pool to avoid re-calling a known-bad entry)');
     console.log('Next: call reviewloop_review again with the same loopId.');
   } finally {
     await lease.release();

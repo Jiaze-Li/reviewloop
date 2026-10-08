@@ -1,7 +1,7 @@
 // Deterministic, zero-token role routing.  Policy, quota, transport health,
 // effort and physical-session decisions deliberately live in separate modules.
 import {
-  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync,
+  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, renameSync, statSync, rmSync,
 } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -108,37 +108,170 @@ const DEFAULT_BACKOFF_MS = 15 * 60 * 1000;
 function copy(value) { return JSON.parse(JSON.stringify(value)); }
 function nowIso(now) { return new Date(now).toISOString(); }
 
+// Short synchronous pause. Atomics.wait is allowed on Node's main thread; fall
+// back to a bounded spin if a host ever refuses it.
+function sleepSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* spin */ }
+  }
+}
+
 export class QuotaPoolRegistry {
   constructor({ filePath = path.join(os.homedir(), '.reviewloop', 'quota-pools.json'), topology = DEFAULT_QUOTA_TOPOLOGY, now = () => Date.now(), baseBackoffMs = DEFAULT_BACKOFF_MS } = {}) {
     this.filePath = filePath; this.topology = { ...topology }; this.now = now; this.baseBackoffMs = baseBackoffMs;
     this.pools = {};
-    if (filePath && existsSync(filePath)) {
-      try { this.pools = JSON.parse(readFileSync(filePath, 'utf8')).pools ?? {}; } catch { this.pools = {}; }
+    this._loadedMtimeMs = null;
+    this._pending = {};
+    this.refresh();
+  }
+  // Disk-backed registries re-read the file when another process (or a
+  // restarted MCP server) changed it, so a cooldown recorded anywhere is seen
+  // everywhere. An unreadable file keeps the last in-memory view rather than
+  // silently clearing cooldowns.
+  refresh() {
+    if (!this.filePath || !existsSync(this.filePath)) return;
+    try {
+      const mtimeMs = statSync(this.filePath).mtimeMs;
+      if (mtimeMs === this._loadedMtimeMs) return;
+      this.pools = JSON.parse(readFileSync(this.filePath, 'utf8')).pools ?? {};
+      this._loadedMtimeMs = mtimeMs;
+      this._overlayPending();
+    } catch { /* keep current view */ }
+  }
+  // Updates that could not be persisted (lock timeout) must survive a refresh:
+  // re-apply any that are newer than the file's entry, and flush them on the
+  // next successful locked update.
+  _overlayPending() {
+    for (const [poolId, entry] of Object.entries(this._pending)) {
+      const onDisk = this.pools[poolId];
+      if (!onDisk || Date.parse(entry.checkedAt ?? 0) >= Date.parse(onDisk.checkedAt ?? 0)) this.pools[poolId] = entry;
     }
   }
   persist() {
     if (!this.filePath) return;
     mkdirSync(path.dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, `${JSON.stringify({ schema: 'reviewloop.quota-pools/v1', pools: this.pools }, null, 2)}\n`);
+    const tmp = `${this.filePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify({ schema: 'reviewloop.quota-pools/v1', pools: this.pools }, null, 2)}\n`);
+    renameSync(tmp, this.filePath);
+    try { this._loadedMtimeMs = statSync(this.filePath).mtimeMs; } catch { /* ignore */ }
+  }
+  // Cross-process read-modify-write: take a mkdir lock, re-read the LATEST file,
+  // apply `mutate` to it, persist, release. Two MCP processes recording
+  // different pools therefore merge instead of the later rename dropping the
+  // other's cooldown. A lock owned by a dead process is broken; a live holder
+  // is never evicted.
+  _update(mutate) {
+    if (!this.filePath) { mutate(); return; }
+    mkdirSync(path.dirname(this.filePath), { recursive: true });
+    const lockDir = `${this.filePath}.lock`;
+    const ownerFile = path.join(lockDir, 'owner');
+    const host = os.hostname();
+    const token = `${host}|${process.pid}|${Math.random().toString(36).slice(2)}`;
+    let locked = false;
+    for (let i = 0; i < 50 && !locked; i += 1) {
+      try {
+        mkdirSync(lockDir);
+        writeFileSync(ownerFile, token);
+        locked = true;
+      } catch {
+        // Break a lock only when its owner process is provably gone (crashed);
+        // a live-but-slow holder is never evicted by elapsed time alone.
+        try {
+          const observed = String(readFileSync(ownerFile, 'utf8'));
+          const [ownerHost, ownerPidRaw] = observed.split('|');
+          const ownerPid = Number(ownerPidRaw);
+          // A PID is only meaningful on the host that wrote it (shared storage):
+          // never judge a foreign host's holder dead from our process table.
+          let alive = true;
+          if (ownerHost === host) {
+            try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
+          } else {
+            // Foreign host: only a lease expiry can prove it dead. The critical
+            // section lasts milliseconds, so a lock older than 5 minutes is orphaned.
+            try { alive = Date.now() - statSync(lockDir).mtimeMs <= 300_000; } catch { alive = true; }
+          }
+          if (!alive) {
+            // Reclaim by atomic rename, then confirm we moved the DEAD owner's
+            // lock (not a successor's fresh one) before discarding it.
+            const grave = `${lockDir}.reclaim.${process.pid}-${Date.now()}`;
+            renameSync(lockDir, grave);
+            let moved = null;
+            try { moved = String(readFileSync(path.join(grave, 'owner'), 'utf8')); } catch { /* ignore */ }
+            if (moved === observed) rmSync(grave, { recursive: true, force: true });
+            else { try { renameSync(grave, lockDir); } catch { rmSync(grave, { recursive: true, force: true }); } }
+          }
+        } catch {
+          // No readable owner (holder between mkdir and write, or legacy lock):
+          // only break a very old one.
+          try { if (Date.now() - statSync(lockDir).mtimeMs > 60_000) rmSync(lockDir, { recursive: true, force: true }); } catch { /* raced */ }
+        }
+        sleepSync(20);
+      }
+    }
+    try {
+      if (!locked) {
+        // Never write the shared file without the lock. Keep the update in THIS
+        // process's memory only: it still routes correctly here; other processes
+        // just learn it later. A review is never blocked (wait is bounded ~1s).
+        const before = JSON.stringify(this.pools);
+        mutate();
+        const prior = JSON.parse(before);
+        for (const [id, entry] of Object.entries(this.pools)) {
+          if (JSON.stringify(prior[id]) !== JSON.stringify(entry)) this._pending[id] = entry;
+        }
+        return;
+      }
+      this._loadedMtimeMs = null;
+      this.refresh();
+      mutate();
+      // Last ownership check before touching the shared file: if our lock was
+      // taken over meanwhile, keep the update in memory only.
+      let stillOwner = false;
+      try { stillOwner = readFileSync(ownerFile, 'utf8') === token; } catch { /* lost */ }
+      if (stillOwner) { this.persist(); this._pending = {}; }
+    } finally {
+      if (locked) {
+        try {
+          if (readFileSync(ownerFile, 'utf8') === token) rmSync(lockDir, { recursive: true, force: true });
+        } catch { /* ignore */ }
+      }
+    }
   }
   poolsFor(family) { return [...(this.topology[family] ?? [])]; }
   setTopology(family, poolIds) { this.topology[family] = [...new Set(poolIds)]; }
   get(poolId) {
+    this.refresh();
     const pool = this.pools[poolId] ?? { poolId, status: POOL_STATUS.UNKNOWN, reason: 'unknown', checkedAt: null, cooldownSince: null, resetAt: null, retryAfter: null, source: 'cached', failures: 0 };
     if (pool.status === POOL_STATUS.COOLDOWN && pool.resetAt && Date.parse(pool.resetAt) <= this.now()) {
-      pool.status = POOL_STATUS.UNKNOWN; pool.reason = 'unknown'; pool.checkedAt = nowIso(this.now()); pool.resetAt = null; pool.retryAfter = null;
-      this.pools[poolId] = pool; this.persist();
+      this._update(() => {
+        const latest = this.pools[poolId];
+        // Another process may have already renewed/changed this pool.
+        if (latest?.status !== POOL_STATUS.COOLDOWN || !latest.resetAt || Date.parse(latest.resetAt) > this.now()) return;
+        this.pools[poolId] = { ...latest, status: POOL_STATUS.UNKNOWN, reason: 'unknown', checkedAt: nowIso(this.now()), resetAt: null, retryAfter: null };
+      });
+      return copy(this.pools[poolId] ?? pool);
     }
     return copy(pool);
   }
   usable(family) { return this.poolsFor(family).every((poolId) => this.get(poolId).status !== POOL_STATUS.COOLDOWN); }
   recordReady(poolId, { source = 'runtime_probe' } = {}) {
-    this.pools[poolId] = { ...this.get(poolId), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 }; this.persist();
+    this._update(() => {
+      this.pools[poolId] = { ...(this.pools[poolId] ?? { poolId }), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 };
+    });
   }
   recordCooldown(poolId, { reason = 'quota_exhausted', resetAt = null, retryAfter = null, source = 'provider_error' } = {}) {
-    const prior = this.get(poolId); const failures = (prior.failures ?? 0) + 1;
-    const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
-    this.pools[poolId] = { poolId, status: POOL_STATUS.COOLDOWN, reason, checkedAt: nowIso(this.now()), cooldownSince: nowIso(this.now()), resetAt: Number.isFinite(resetMillis) ? nowIso(resetMillis) : null, retryAfter: Number.isFinite(retryAfter) ? retryAfter : null, source: resetAt || retryAfter ? source : 'inferred_backoff', failures }; this.persist();
+    // Out-of-range hints must never throw (Date overflow) or pin a pool for years.
+    if (!(Number.isFinite(retryAfter) && retryAfter > 0)) retryAfter = null;
+    else retryAfter = Math.min(retryAfter, 30 * 86_400_000);
+    if (resetAt && !Number.isFinite(Date.parse(resetAt))) resetAt = null;
+    this._update(() => {
+      const failures = (this.pools[poolId]?.failures ?? 0) + 1;
+      const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
+      this.pools[poolId] = { poolId, status: POOL_STATUS.COOLDOWN, reason, checkedAt: nowIso(this.now()), cooldownSince: nowIso(this.now()), resetAt: Number.isFinite(resetMillis) ? nowIso(resetMillis) : null, retryAfter: Number.isFinite(retryAfter) ? retryAfter : null, source: resetAt || retryAfter ? source : 'inferred_backoff', failures };
+    });
   }
   recordProviderFailure(family, failure = {}) {
     if (!['PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_RATE_LIMITED'].includes(failure.code)) return;

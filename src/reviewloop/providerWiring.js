@@ -19,6 +19,7 @@ import {
   agyObjectCarriesUsageEvidence,
   agyStderrCarriesUsageEvidence,
 } from '../agy/agyUsageEvidence.js';
+import { classifyAgyQuotaRejection, AGY_QUOTA_ZERO_PROOF } from '../agy/agyQuotaClassifier.js';
 import {
   DEFAULT_ROLE_POLICY,
   PRODUCTION_ROLE_CAPABILITIES,
@@ -156,6 +157,31 @@ function normalizeAgyTransientPreSendNetworkFailure(err) {
   normalized.details = {
     preSendZeroProven: true,
     transientNetworkSource: normalized.transientNetworkSource,
+  };
+  return normalized;
+}
+
+/**
+ * AGY quota/credit exhaustion that is mechanically proven to be a provider
+ * admission rejection (see agyQuotaClassifier.js). Normalized to
+ * PROVIDER_QUOTA_EXHAUSTED carrying explicit zero-consumption provenance so the
+ * spend layer can settle it SETTLED_KNOWN and the router can cool the shared
+ * quota pool and fail over. Unproven quota-looking exits are NOT touched: they
+ * stay AGY_NONZERO_EXIT and fail closed as UNRESOLVED.
+ */
+function normalizeAgyQuotaRejection(err, verdict) {
+  const normalized = new Error('AGY quota/credits exhausted (provider rejected the request before generation)');
+  normalized.name = 'AgyQuotaExhaustedError';
+  normalized.code = 'PROVIDER_QUOTA_EXHAUSTED';
+  normalized.providerFailure = 'PROVIDER_QUOTA_EXHAUSTED';
+  normalized.exitCode = Number.isFinite(err?.exitCode) ? err.exitCode : 1;
+  if (verdict.retryAfterMs != null) normalized.retryAfter = verdict.retryAfterMs;
+  if (err?.stderr) normalized.stderr = String(err.stderr).slice(0, 4000);
+  if (err?.envelope) normalized.envelope = err.envelope;
+  normalized.details = {
+    preSendZeroProven: true,
+    zeroProof: AGY_QUOTA_ZERO_PROOF,
+    quotaClassifier: verdict.reason,
   };
   return normalized;
 }
@@ -478,6 +504,8 @@ export function createReviewLoopProviderPool({
         if (isAgyTransientPreSendNetworkFailure(err)) {
           throw normalizeAgyTransientPreSendNetworkFailure(err);
         }
+        const quotaVerdict = classifyAgyQuotaRejection(err);
+        if (quotaVerdict.proven) throw normalizeAgyQuotaRejection(err, quotaVerdict);
         throw err;
       }
       if (enforcePerCall) {
@@ -826,6 +854,9 @@ export function createProductionReviewLoopProviders({
   routeAudit = undefined,
   healthRevalidator = undefined,
   staleHealthTtlMs = undefined,
+  // Same inert-by-default rule: only the MCP entrypoint passes a disk-backed
+  // registry so quota-pool cooldowns survive an MCP restart.
+  quotaRegistry = undefined,
 } = {}) {
   // `agyCatalog` + `transportRuntime` + `customAgentSupport` are supplied by the
   // MCP entrypoint, which probes them once at startup; left null here so nothing
@@ -836,6 +867,7 @@ export function createProductionReviewLoopProviders({
     callAgy, env, agyCatalog, transportRuntime, customAgentSupport,
     ...(agyGeminiDir ? { agyGeminiDir } : {}),
     ...(routeAudit !== undefined ? { routeAudit } : {}),
+    ...(quotaRegistry !== undefined ? { quotaRegistry } : {}),
     ...(healthRevalidator !== undefined ? { healthRevalidator } : {}),
     ...(staleHealthTtlMs !== undefined ? { staleHealthTtlMs } : {}),
   });

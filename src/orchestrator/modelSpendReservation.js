@@ -56,6 +56,11 @@ const WORKFLOW_STATE_KEY = 'modelSpendReservations';
 // can report usage {0,0} yet still have hit the provider).
 export const SETTLEMENT_REASON = Object.freeze({
   PROVEN_PRE_SEND_ZERO: 'PROVEN_PRE_SEND_ZERO',
+  // The provider mechanically REJECTED admission of the request (AGY quota /
+  // credit exhaustion with empty stdout and explicitly absent usage evidence;
+  // see agyQuotaClassifier.js). Zero-consumption like PROVEN_PRE_SEND_ZERO, but
+  // kept distinct so the audit shows the request did reach the provider.
+  PROVEN_QUOTA_REJECTED_ZERO: 'PROVEN_QUOTA_REJECTED_ZERO',
 });
 
 // A reservation in one of these statuses must block further internal model
@@ -70,6 +75,22 @@ const BLOCKING_RESERVATION_STATUSES = new Set([
 
 export function isBlockingReservationStatus(status) {
   return BLOCKING_RESERVATION_STATUSES.has(status);
+}
+
+// Families a human explicitly excluded (loop-wide, every role) while
+// acknowledging unresolved spend. Pure projection of the durable ledger —
+// exclusions are append-only on the acknowledgement and survive restarts.
+export function humanExcludedFamilies(reservations) {
+  const out = new Set();
+  for (const r of reservations ?? []) {
+    const ack = r?.humanAcknowledgement;
+    if (ack?.accepted !== true) continue;
+    for (const f of ack.routingExclusions?.families ?? []) out.add(String(f));
+    for (const amendment of ack.routingExclusionAmendments ?? []) {
+      for (const f of amendment?.families ?? []) out.add(String(f));
+    }
+  }
+  return out;
 }
 
 function isHumanAcknowledgedUnresolved(record) {
@@ -288,7 +309,7 @@ export class ReservationLedger {
   // (MODEL_SPEND_UNRESOLVED_PERSIST_FAILED) rather than letting the raw
   // persistence error escape unclassified (where it could otherwise be
   // mistaken for a provider failure and trigger failover / health mutation).
-  async markUnresolved({ workflowId, reservationId, reason = null }) {
+  async markUnresolved({ workflowId, reservationId, reason = null, diagnostics = null }) {
     const map = await this._loadWorkflow(workflowId);
     const record = map.get(reservationId);
     if (!record) throw new Error(`ReservationLedger.markUnresolved: unknown reservation ${reservationId}`);
@@ -298,6 +319,7 @@ export class ReservationLedger {
       status: RESERVATION_STATUS.UNRESOLVED,
       settledAt: new Date().toISOString(),
       settlementReason: reason,
+      ...(diagnostics ? { failureDiagnostics: diagnostics } : {}),
     };
     const candidateMap = new Map(map);
     candidateMap.set(reservationId, candidate);
