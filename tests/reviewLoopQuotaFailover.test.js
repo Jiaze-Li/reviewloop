@@ -174,7 +174,7 @@ test('a lock whose owner process is dead is broken; the update is then persisted
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('lock timeout never writes the shared file; the cooldown still holds in-process', () => {
+test('lock timeout never writes the shared file; the cooldown holds in-process and is flushed later', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
   try {
     const file = path.join(dir, 'quota-pools.json');
@@ -185,9 +185,16 @@ test('lock timeout never writes the shared file; the cooldown still holds in-pro
     const reg = new QuotaPoolRegistry({ filePath: file });
     reg.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
     assert.equal(reg.usable('agy:opus'), false, 'in-process view honours it');
-    rmSync(`${file}.lock`, { recursive: true });
     assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:opus'), true, 'file untouched while unlocked');
-    assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:gemini-reviewer'), false, 'prior cooldown intact');
+    // The holder finishes and another process rewrites the file: our pending cooldown survives the refresh.
+    rmSync(`${file}.lock`, { recursive: true });
+    new QuotaPoolRegistry({ filePath: file }).recordProviderFailure('codex:default', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 1_800_000 });
+    assert.equal(reg.usable('agy:opus'), false, 'pending cooldown survives refresh');
+    assert.equal(reg.usable('codex:default'), false, 'other process write is picked up');
+    // Next locked update flushes the pending cooldown to disk.
+    reg.recordProviderFailure('claude:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 1_800_000 });
+    const fresh = new QuotaPoolRegistry({ filePath: file });
+    for (const f of ['agy:opus', 'agy:gemini-reviewer', 'codex:default', 'claude:opus']) assert.equal(fresh.usable(f), false, f);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

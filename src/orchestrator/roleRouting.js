@@ -124,6 +124,7 @@ export class QuotaPoolRegistry {
     this.filePath = filePath; this.topology = { ...topology }; this.now = now; this.baseBackoffMs = baseBackoffMs;
     this.pools = {};
     this._loadedMtimeMs = null;
+    this._pending = {};
     this.refresh();
   }
   // Disk-backed registries re-read the file when another process (or a
@@ -137,7 +138,17 @@ export class QuotaPoolRegistry {
       if (mtimeMs === this._loadedMtimeMs) return;
       this.pools = JSON.parse(readFileSync(this.filePath, 'utf8')).pools ?? {};
       this._loadedMtimeMs = mtimeMs;
+      this._overlayPending();
     } catch { /* keep current view */ }
+  }
+  // Updates that could not be persisted (lock timeout) must survive a refresh:
+  // re-apply any that are newer than the file's entry, and flush them on the
+  // next successful locked update.
+  _overlayPending() {
+    for (const [poolId, entry] of Object.entries(this._pending)) {
+      const onDisk = this.pools[poolId];
+      if (!onDisk || Date.parse(entry.checkedAt ?? 0) >= Date.parse(onDisk.checkedAt ?? 0)) this.pools[poolId] = entry;
+    }
   }
   persist() {
     if (!this.filePath) return;
@@ -195,7 +206,12 @@ export class QuotaPoolRegistry {
         // Never write the shared file without the lock. Keep the update in THIS
         // process's memory only: it still routes correctly here; other processes
         // just learn it later. A review is never blocked (wait is bounded ~1s).
+        const before = JSON.stringify(this.pools);
         mutate();
+        const prior = JSON.parse(before);
+        for (const [id, entry] of Object.entries(this.pools)) {
+          if (JSON.stringify(prior[id]) !== JSON.stringify(entry)) this._pending[id] = entry;
+        }
         return;
       }
       this._loadedMtimeMs = null;
@@ -205,7 +221,7 @@ export class QuotaPoolRegistry {
       // taken over meanwhile, keep the update in memory only.
       let stillOwner = false;
       try { stillOwner = readFileSync(ownerFile, 'utf8') === token; } catch { /* lost */ }
-      if (stillOwner) this.persist();
+      if (stillOwner) { this.persist(); this._pending = {}; }
     } finally {
       if (locked) {
         try {
