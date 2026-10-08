@@ -48,7 +48,9 @@ import {
   AuthorizationError, AUTHORIZATION_ERROR_CODES, isCancellation,
 } from './errors.js';
 import { isExecutorEligible as productionIsExecutorEligible } from './providerCapabilities.js';
-import { ReservationLedger, RESERVATION_STATUS, SETTLEMENT_REASON } from './modelSpendReservation.js';
+import {
+  ReservationLedger, RESERVATION_STATUS, SETTLEMENT_REASON, humanExcludedFamilies,
+} from './modelSpendReservation.js';
 import { NewInformationLedger } from './newInformation.js';
 
 // The strongest invocation identifiers mechanically available at the role
@@ -97,7 +99,8 @@ function isProvenPreSendZero(reservation) {
   if (reservation.status === RESERVATION_STATUS.RESERVED
     || reservation.status === RESERVATION_STATUS.CANCELLED_PRE_DISPATCH) return true;
   return reservation.status === RESERVATION_STATUS.SETTLED_KNOWN
-    && reservation.settlementReason === SETTLEMENT_REASON.PROVEN_PRE_SEND_ZERO;
+    && (reservation.settlementReason === SETTLEMENT_REASON.PROVEN_PRE_SEND_ZERO
+      || reservation.settlementReason === SETTLEMENT_REASON.PROVEN_QUOTA_REJECTED_ZERO);
 }
 
 function computeEvidenceRef(evidenceIds) {
@@ -180,6 +183,24 @@ function extractSettlementUsage(outcome) {
   }
   const usage = outcome.error?.details?.usage ?? outcome.error?.usage ?? null;
   return { known: usage !== null && usage !== undefined, usage, callId: usage?.callId ?? null };
+}
+
+// Content-free, bounded failure metadata persisted on an UNRESOLVED reservation
+// so an unknown-usage failure can later be classified or audited (the original
+// stderr is otherwise lost). Never prompt/reply text: stderr/envelope are the
+// CLI's operational diagnostics, already bounded at the transport.
+function safeFailureDiagnostics(error) {
+  if (!error || typeof error !== 'object') return null;
+  const out = {
+    code: error.code ?? null,
+    exitCode: Number.isFinite(error.exitCode) ? error.exitCode : null,
+    durationMs: Number.isFinite(error.durationMs) ? error.durationMs : null,
+    stdoutWasEmpty: typeof error.stdoutWasEmpty === 'boolean' ? error.stdoutWasEmpty : null,
+    usageEvidenceState: typeof error.usageEvidenceState === 'string' ? error.usageEvidenceState : null,
+    stderrExcerpt: typeof error.stderr === 'string' ? error.stderr.slice(0, 1000) : null,
+    envelope: error.envelope && typeof error.envelope === 'object' ? error.envelope : null,
+  };
+  return Object.values(out).every((v) => v === null) ? null : out;
 }
 
 export class ModelSpendAuthority {
@@ -283,6 +304,25 @@ export class ModelSpendAuthority {
         AUTHORIZATION_ERROR_CODES.MODEL_SPEND_USAGE_UNRESOLVED,
         `workflow ${JSON.stringify(intent.workflowId)} has an unresolved model spend reservation; `
           + 'further internal model spend is blocked until a human clears it',
+        { intent },
+      );
+    }
+    // A family a human explicitly excluded while recovering unresolved spend
+    // must never be dispatched again in this workflow (backstop to routing).
+    let excluded;
+    try {
+      excluded = humanExcludedFamilies(await this._reservationLedger.list(intent.workflowId));
+    } catch (error) {
+      throw new AuthorizationError(
+        AUTHORIZATION_ERROR_CODES.RESERVATION_PERSIST_FAILED,
+        `model spend reservation state could not be read for exclusion check: ${error?.message ?? error}`,
+        { intent },
+      );
+    }
+    if (excluded.has(intent.family)) {
+      throw new AuthorizationError(
+        AUTHORIZATION_ERROR_CODES.FAMILY_EXCLUDED_BY_HUMAN,
+        `provider family ${JSON.stringify(intent.family)} was explicitly excluded by a human recovery; choose another candidate`,
         { intent },
       );
     }
@@ -639,7 +679,9 @@ export class ModelSpendAuthority {
           reason: outcome.ok
             ? 'PROVIDER_CALL_SUCCEEDED'
             : (preSendZeroProven
-              ? SETTLEMENT_REASON.PROVEN_PRE_SEND_ZERO
+              ? (outcome.error?.details?.zeroProof === 'AGY_QUOTA_REJECTION'
+                ? SETTLEMENT_REASON.PROVEN_QUOTA_REJECTED_ZERO
+                : SETTLEMENT_REASON.PROVEN_PRE_SEND_ZERO)
               : 'PROVIDER_CALL_FAILED_WITH_KNOWN_USAGE'),
         });
       } catch (persistError) {
@@ -686,6 +728,7 @@ export class ModelSpendAuthority {
         reason: outcome.ok
           ? 'PROVIDER_CALL_SUCCEEDED_NO_RELIABLE_USAGE'
           : (outcome.error?.code ?? outcome.error?.message ?? 'USAGE_UNKNOWN_AFTER_DISPATCH'),
+        diagnostics: outcome.ok ? null : safeFailureDiagnostics(outcome.error),
       });
     } catch (persistError) {
       throw new AuthorizationError(

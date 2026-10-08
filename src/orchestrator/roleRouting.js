@@ -1,7 +1,7 @@
 // Deterministic, zero-token role routing.  Policy, quota, transport health,
 // effort and physical-session decisions deliberately live in separate modules.
 import {
-  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync,
+  mkdirSync, readFileSync, writeFileSync, existsSync, appendFileSync, renameSync, statSync,
 } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -112,18 +112,34 @@ export class QuotaPoolRegistry {
   constructor({ filePath = path.join(os.homedir(), '.reviewloop', 'quota-pools.json'), topology = DEFAULT_QUOTA_TOPOLOGY, now = () => Date.now(), baseBackoffMs = DEFAULT_BACKOFF_MS } = {}) {
     this.filePath = filePath; this.topology = { ...topology }; this.now = now; this.baseBackoffMs = baseBackoffMs;
     this.pools = {};
-    if (filePath && existsSync(filePath)) {
-      try { this.pools = JSON.parse(readFileSync(filePath, 'utf8')).pools ?? {}; } catch { this.pools = {}; }
-    }
+    this._loadedMtimeMs = null;
+    this.refresh();
+  }
+  // Disk-backed registries re-read the file when another process (or a
+  // restarted MCP server) changed it, so a cooldown recorded anywhere is seen
+  // everywhere. An unreadable file keeps the last in-memory view rather than
+  // silently clearing cooldowns.
+  refresh() {
+    if (!this.filePath || !existsSync(this.filePath)) return;
+    try {
+      const mtimeMs = statSync(this.filePath).mtimeMs;
+      if (mtimeMs === this._loadedMtimeMs) return;
+      this.pools = JSON.parse(readFileSync(this.filePath, 'utf8')).pools ?? {};
+      this._loadedMtimeMs = mtimeMs;
+    } catch { /* keep current view */ }
   }
   persist() {
     if (!this.filePath) return;
     mkdirSync(path.dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, `${JSON.stringify({ schema: 'reviewloop.quota-pools/v1', pools: this.pools }, null, 2)}\n`);
+    const tmp = `${this.filePath}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify({ schema: 'reviewloop.quota-pools/v1', pools: this.pools }, null, 2)}\n`);
+    renameSync(tmp, this.filePath);
+    try { this._loadedMtimeMs = statSync(this.filePath).mtimeMs; } catch { /* ignore */ }
   }
   poolsFor(family) { return [...(this.topology[family] ?? [])]; }
   setTopology(family, poolIds) { this.topology[family] = [...new Set(poolIds)]; }
   get(poolId) {
+    this.refresh();
     const pool = this.pools[poolId] ?? { poolId, status: POOL_STATUS.UNKNOWN, reason: 'unknown', checkedAt: null, cooldownSince: null, resetAt: null, retryAfter: null, source: 'cached', failures: 0 };
     if (pool.status === POOL_STATUS.COOLDOWN && pool.resetAt && Date.parse(pool.resetAt) <= this.now()) {
       pool.status = POOL_STATUS.UNKNOWN; pool.reason = 'unknown'; pool.checkedAt = nowIso(this.now()); pool.resetAt = null; pool.retryAfter = null;
@@ -136,6 +152,7 @@ export class QuotaPoolRegistry {
     this.pools[poolId] = { ...this.get(poolId), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 }; this.persist();
   }
   recordCooldown(poolId, { reason = 'quota_exhausted', resetAt = null, retryAfter = null, source = 'provider_error' } = {}) {
+    this.refresh();
     const prior = this.get(poolId); const failures = (prior.failures ?? 0) + 1;
     const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
     this.pools[poolId] = { poolId, status: POOL_STATUS.COOLDOWN, reason, checkedAt: nowIso(this.now()), cooldownSince: nowIso(this.now()), resetAt: Number.isFinite(resetMillis) ? nowIso(resetMillis) : null, retryAfter: Number.isFinite(retryAfter) ? retryAfter : null, source: resetAt || retryAfter ? source : 'inferred_backoff', failures }; this.persist();

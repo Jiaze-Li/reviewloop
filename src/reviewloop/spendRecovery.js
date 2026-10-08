@@ -12,6 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { RESERVATION_STATUS } from '../orchestrator/modelSpendReservation.js';
+import { DEFAULT_QUOTA_TOPOLOGY } from '../orchestrator/roleRouting.js';
 
 const METERED_ROLES = new Set(['reviewer', 'supervisor']);
 
@@ -19,11 +20,45 @@ function objectValues(value) {
   return value && typeof value === 'object' ? Object.values(value) : [];
 }
 
+function asList(value) {
+  if (value == null) return [];
+  const items = Array.isArray(value) ? value : String(value).split(',');
+  return [...new Set(items.map((v) => String(v).trim()).filter(Boolean))];
+}
+
+// Resolve a human's --exclude-family / --exclude-pool request into the exact
+// set of families to exclude. A pool expands to EVERY family that draws from it
+// (the quota is shared), and unknown names are refused rather than silently
+// ignored so a typo can never leave the failing entry routable.
+export function resolveRoutingExclusions({ families, pools, topology = DEFAULT_QUOTA_TOPOLOGY } = {}) {
+  const requestedFamilies = asList(families);
+  const requestedPools = asList(pools);
+  const known = new Set(Object.values(topology).flat());
+  const resolved = new Set();
+  for (const family of requestedFamilies) {
+    if (!Object.hasOwn(topology, family)) {
+      throw new Error(`unknown family ${JSON.stringify(family)}; known: ${Object.keys(topology).join(', ')}`);
+    }
+    resolved.add(family);
+  }
+  for (const pool of requestedPools) {
+    if (!known.has(pool)) {
+      throw new Error(`unknown quota pool ${JSON.stringify(pool)}; known: ${[...known].join(', ')}`);
+    }
+    for (const [family, poolIds] of Object.entries(topology)) {
+      if (poolIds.includes(pool)) resolved.add(family);
+    }
+  }
+  return { requestedFamilies, requestedPools, families: [...resolved].sort() };
+}
+
 export async function acknowledgeUnresolvedSpend({
   persistence,
   loopId,
   reservationId,
   reason,
+  excludeFamilies = [],
+  excludePools = [],
   now = () => new Date().toISOString(),
 } = {}) {
   if (!persistence || typeof persistence.readWorkflowState !== 'function'
@@ -67,11 +102,43 @@ export async function acknowledgeUnresolvedSpend({
   const spendRecords = Array.isArray(spendState.records) ? [...spendState.records] : [];
   const existingSpend = spendRecords.find((r) => r?.reservationId === reservationId);
 
+  const exclusions = resolveRoutingExclusions({ families: excludeFamilies, pools: excludePools });
+  const wantsExclusion = exclusions.families.length > 0;
+
   if (existingAck?.accepted === true) {
     if (!existingSpend || existingSpend.usageKnown !== false || existingSpend.costKnown !== false) {
       throw new Error(
         `reservation ${reservationId} has an acknowledgement but its UNKNOWN spend accounting record is missing/inconsistent`,
       );
+    }
+    // Exclusions may be added to an already-acknowledged reservation. This only
+    // APPENDS an amendment: the original acknowledgement, retry grant and spend
+    // record are never touched or re-issued.
+    if (wantsExclusion) {
+      const prior = new Set([
+        ...(existingAck.routingExclusions?.families ?? []),
+        ...(existingAck.routingExclusionAmendments ?? []).flatMap((a) => a?.families ?? []),
+      ]);
+      const added = exclusions.families.filter((f) => !prior.has(f));
+      if (added.length > 0) {
+        reservations[reservationId] = {
+          ...reservation,
+          humanAcknowledgement: {
+            ...existingAck,
+            routingExclusionAmendments: [
+              ...(existingAck.routingExclusionAmendments ?? []),
+              {
+                amendedAt: now(),
+                reason: reason.trim(),
+                families: added,
+                requestedFamilies: exclusions.requestedFamilies,
+                requestedPools: exclusions.requestedPools,
+              },
+            ],
+          },
+        };
+        await persistence.updateWorkflowState(loopId, { modelSpendReservations: reservations });
+      }
     }
     return {
       loopId,
@@ -82,6 +149,7 @@ export async function acknowledgeUnresolvedSpend({
       operationId: reservation.taskId ?? null,
       evidenceId: existingAck.evidenceId ?? null,
       retryAvailable: !existingAck.retryGrant?.consumedAt,
+      excludedFamilies: exclusions.families,
     };
   }
 
@@ -114,6 +182,13 @@ export async function acknowledgeUnresolvedSpend({
     reason: reason.trim(),
     evidenceId,
     accountingRecorded: true,
+    ...(wantsExclusion ? {
+      routingExclusions: {
+        families: exclusions.families,
+        requestedFamilies: exclusions.requestedFamilies,
+        requestedPools: exclusions.requestedPools,
+      },
+    } : {}),
     retryGrant: {
       maxDispatches: 1,
       reservedForReservationId: null,
@@ -188,5 +263,6 @@ export async function acknowledgeUnresolvedSpend({
     operationId: reservation.taskId ?? null,
     evidenceId,
     retryAvailable: true,
+    excludedFamilies: exclusions.families,
   };
 }

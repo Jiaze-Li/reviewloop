@@ -146,6 +146,11 @@ export const AUTHORIZATION_ERROR_CODES = Object.freeze({
   // latch cannot be established (or cannot be guaranteed to survive a restart),
   // so further internal model spend is refused. Never interpret unreadable
   // state as "no anomaly".
+  // The selected family was explicitly excluded by a human while recovering an
+  // unresolved reservation (spendRecovery.js). Routing normally never offers it;
+  // this is the authorization-layer backstop so a known-bad entry can never be
+  // dispatched again, whatever the router did.
+  FAMILY_EXCLUDED_BY_HUMAN: 'FAMILY_EXCLUDED_BY_HUMAN',
   MODEL_SPEND_TOKEN_ANOMALY_STATE_UNAVAILABLE: 'MODEL_SPEND_TOKEN_ANOMALY_STATE_UNAVAILABLE',
 });
 

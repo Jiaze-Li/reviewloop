@@ -916,6 +916,11 @@ export function createReviewLoopController({
     // The New Information ledger remains the authorization authority; these
     // records only restore bounded sequencing state.
     let startAttempt = 1;
+    // Durable human exclusions (fail closed: if the ledger cannot be read, no
+    // physical attempt is made — authorize() would reject anyway).
+    const humanExcluded = typeof spend.excludedFamilies === 'function'
+      ? await spend.excludedFamilies()
+      : new Set();
     try {
       priorAttempts = typeof spend.attemptRecords === 'function'
         ? await spend.attemptRecords({ role, operationId })
@@ -1048,7 +1053,7 @@ export function createReviewLoopController({
         };
         selection = routeFn({
           reworkCycles: attempt - startAttempt,
-          excludeFamilies: [...exhaustedFamilies],
+          excludeFamilies: [...new Set([...exhaustedFamilies, ...humanExcluded])],
         }, requestContext);
         if (!selection) break;
         if (tried.has(selection.family)) break;
@@ -1056,6 +1061,14 @@ export function createReviewLoopController({
       }
       const family = selection?.family ?? defaultFamily;
       const provider = selection?.provider ?? defaultProvider;
+
+      if (humanExcluded.has(family)) {
+        lastErr ??= Object.assign(
+          new Error('ReviewLoop: ' + family + ' was excluded by a human recovery and no other candidate is eligible'),
+          { code: 'HUMAN_ROUTING_EXCLUDED', providerFailure: 'HUMAN_ROUTING_EXCLUDED' },
+        );
+        break;
+      }
 
       // Exhaustion is a dispatch invariant, not a routing implementation
       // detail. A route-less controller has no selection to consult, so the
@@ -1144,7 +1157,11 @@ export function createReviewLoopController({
         // only operation-local: exclude this family for the remainder of the
         // current dispatch, but let a future independent review try it again.
         if (selection && recordProviderFailure && !transientNetwork) {
-          recordProviderFailure(selection, { code });
+          recordProviderFailure(selection, {
+            code,
+            ...(Number.isFinite(err?.retryAfter) ? { retryAfter: err.retryAfter } : {}),
+            ...(typeof err?.resetAt === 'string' ? { resetAt: err.resetAt } : {}),
+          });
         }
 
         // Routed calls may now fail over to a different family. Route-less

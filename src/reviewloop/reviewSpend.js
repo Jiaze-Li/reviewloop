@@ -22,7 +22,7 @@
 // LOCAL and PR targets is metered here.
 
 import { ModelSpendAuthority } from '../orchestrator/modelSpendAuthority.js';
-import { ReservationLedger, ReservationStore } from '../orchestrator/modelSpendReservation.js';
+import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../orchestrator/modelSpendReservation.js';
 import { AuthorizationError, AUTHORIZATION_ERROR_CODES, isAuthorizationFailure } from '../orchestrator/errors.js';
 import {
   NewInformationLedger,
@@ -106,7 +106,7 @@ const METERED_ROLES = new Set(['reviewer', 'supervisor']);
 export const PRE_SEND_ZERO_CODES = new Set([
   'PROVIDER_UNAVAILABLE', 'PROVIDER_NOT_STARTED', 'PROVIDER_AUTH_FAILED',
   'ENOENT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED', 'AGY_BAD_INPUT',
-  'AGY_NETWORK_UNAVAILABLE',
+  'AGY_NETWORK_UNAVAILABLE', 'PROVIDER_QUOTA_EXHAUSTED',
 ]);
 
 export function isMechanicallyZeroPreSend(err) {
@@ -118,6 +118,12 @@ export function isMechanicallyZeroPreSend(err) {
   // failover eligibility without that provenance.
   if (code === 'AGY_NETWORK_UNAVAILABLE') {
     return err?.preSendZeroProven === true || err?.details?.preSendZeroProven === true;
+  }
+  // A quota rejection is zero-consumption ONLY with the AGY classifier's
+  // explicit provenance. Generic CLI PROVIDER_QUOTA_EXHAUSTED (no proof) stays
+  // UNKNOWN and fails closed.
+  if (code === 'PROVIDER_QUOTA_EXHAUSTED') {
+    return err?.details?.preSendZeroProven === true && err?.details?.zeroProof === 'AGY_QUOTA_REJECTION';
   }
   return true;
 }
@@ -1217,6 +1223,8 @@ export function createReviewLoopSpend({
             // PROVIDER_AUTH_FAILED failures remain distinguishable.
             transientAuth: err?.transientAuth === true,
             transientNetwork: err?.transientNetwork === true,
+            // Mechanical zero-consumption provenance (e.g. AGY_QUOTA_REJECTION), if any.
+            zeroProof: err?.details?.zeroProof ?? null,
             // Durable physical-call-audit identity (see auditContext above).
             operationId: operationId ?? null,
             attempt,
@@ -1316,10 +1324,19 @@ export function createReviewLoopSpend({
     };
   }
 
+  // Families a human excluded during unresolved-spend recovery (durable,
+  // loop-wide). Read fresh from the ledger on every call so an acknowledgement
+  // written between two reviewloop_review calls takes effect immediately.
+  async function excludedFamilies() {
+    await ensureReconciled();
+    return humanExcludedFamilies(await reservationLedger.list(loopId));
+  }
+
   return {
     limits,
     authority,
     reservationLedger,
+    excludedFamilies,
     informationLedger,
     registerEvidence,
     meteredCall,
