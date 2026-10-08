@@ -108,6 +108,17 @@ const DEFAULT_BACKOFF_MS = 15 * 60 * 1000;
 function copy(value) { return JSON.parse(JSON.stringify(value)); }
 function nowIso(now) { return new Date(now).toISOString(); }
 
+// Short synchronous pause. Atomics.wait is allowed on Node's main thread; fall
+// back to a bounded spin if a host ever refuses it.
+function sleepSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* spin */ }
+  }
+}
+
 export class QuotaPoolRegistry {
   constructor({ filePath = path.join(os.homedir(), '.reviewloop', 'quota-pools.json'), topology = DEFAULT_QUOTA_TOPOLOGY, now = () => Date.now(), baseBackoffMs = DEFAULT_BACKOFF_MS } = {}) {
     this.filePath = filePath; this.topology = { ...topology }; this.now = now; this.baseBackoffMs = baseBackoffMs;
@@ -157,16 +168,26 @@ export class QuotaPoolRegistry {
         // Break a lock only when its owner process is provably gone (crashed);
         // a live-but-slow holder is never evicted by elapsed time alone.
         try {
-          const ownerPid = Number(String(readFileSync(ownerFile, 'utf8')).split(':')[0]);
+          const observed = String(readFileSync(ownerFile, 'utf8'));
+          const ownerPid = Number(observed.split(':')[0]);
           let alive = true;
           try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
-          if (!alive) rmSync(lockDir, { recursive: true, force: true });
+          if (!alive) {
+            // Reclaim by atomic rename, then confirm we moved the DEAD owner's
+            // lock (not a successor's fresh one) before discarding it.
+            const grave = `${lockDir}.reclaim.${token.replace(':', '-')}`;
+            renameSync(lockDir, grave);
+            let moved = null;
+            try { moved = String(readFileSync(path.join(grave, 'owner'), 'utf8')); } catch { /* ignore */ }
+            if (moved === observed) rmSync(grave, { recursive: true, force: true });
+            else { try { renameSync(grave, lockDir); } catch { rmSync(grave, { recursive: true, force: true }); } }
+          }
         } catch {
           // No readable owner (holder between mkdir and write, or legacy lock):
           // only break a very old one.
           try { if (Date.now() - statSync(lockDir).mtimeMs > 60_000) rmSync(lockDir, { recursive: true, force: true }); } catch { /* raced */ }
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+        sleepSync(20);
       }
     }
     try {
@@ -180,7 +201,11 @@ export class QuotaPoolRegistry {
       this._loadedMtimeMs = null;
       this.refresh();
       mutate();
-      this.persist();
+      // Last ownership check before touching the shared file: if our lock was
+      // taken over meanwhile, keep the update in memory only.
+      let stillOwner = false;
+      try { stillOwner = readFileSync(ownerFile, 'utf8') === token; } catch { /* lost */ }
+      if (stillOwner) this.persist();
     } finally {
       if (locked) {
         try {
