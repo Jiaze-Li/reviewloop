@@ -187,6 +187,20 @@ test('a foreign-host lock owner is never judged dead from the local process tabl
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('an expired foreign-host lock lease is reclaimed', async () => {
+  const { utimesSync } = await import('node:fs');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
+  try {
+    const file = path.join(dir, 'quota-pools.json');
+    mkdirSync(`${file}.lock`);
+    writeFileSync(`${file}.lock/owner`, 'other-host|2147483646|x');
+    const old = new Date(Date.now() - 10 * 60_000);
+    utimesSync(`${file}.lock`, old, old);
+    new QuotaPoolRegistry({ filePath: file }).recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:opus'), false, 'persisted after reclaiming the expired lease');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('lock timeout never writes the shared file; the cooldown holds in-process and is flushed later', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
   try {

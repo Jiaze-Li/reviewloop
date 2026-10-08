@@ -188,6 +188,10 @@ export class QuotaPoolRegistry {
           let alive = true;
           if (ownerHost === host) {
             try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
+          } else {
+            // Foreign host: only a lease expiry can prove it dead. The critical
+            // section lasts milliseconds, so a lock older than 5 minutes is orphaned.
+            try { alive = Date.now() - statSync(lockDir).mtimeMs <= 300_000; } catch { alive = true; }
           }
           if (!alive) {
             // Reclaim by atomic rename, then confirm we moved the DEAD owner's
