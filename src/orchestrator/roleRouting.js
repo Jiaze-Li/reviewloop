@@ -140,8 +140,8 @@ export class QuotaPoolRegistry {
   // apply `mutate` to it, persist, release. Two MCP processes recording
   // different pools therefore merge instead of the later rename dropping the
   // other's cooldown. A stale lock (crashed holder) is broken after 10s; if the
-  // lock cannot be taken within ~5s we proceed unlocked rather than block a
-  // review (a lost cooldown only costs one extra zero-cost rejection).
+  // lock cannot be taken within ~5s the update stays in this process's memory and
+  // is NOT written (never write unlocked), so a review is never blocked.
   _update(mutate) {
     if (!this.filePath) { mutate(); return; }
     mkdirSync(path.dirname(this.filePath), { recursive: true });
@@ -154,6 +154,13 @@ export class QuotaPoolRegistry {
       }
     }
     try {
+      if (!locked) {
+        // Never write the shared file without the lock (a suspended holder could
+        // resume and clobber it). Keep the update in THIS process's memory only:
+        // it still routes correctly here; other processes just learn it later.
+        mutate();
+        return;
+      }
       this._loadedMtimeMs = null;
       this.refresh();
       mutate();

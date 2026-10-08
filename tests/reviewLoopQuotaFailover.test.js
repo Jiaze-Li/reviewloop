@@ -5,7 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -159,6 +159,22 @@ test('concurrent registries on one file merge cooldowns instead of dropping one'
     const fresh = new QuotaPoolRegistry({ filePath: file });
     assert.equal(fresh.usable('agy:opus'), false, 'a\'s cooldown survived b\'s write');
     assert.equal(fresh.usable('agy:gemini-reviewer'), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('lock timeout never writes the shared file; the cooldown still holds in-process', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'rl-quota-'));
+  try {
+    const file = path.join(dir, 'quota-pools.json');
+    new QuotaPoolRegistry({ filePath: file }).recordProviderFailure('agy:gemini-reviewer', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    // A live (fresh) foreign lock that we cannot take.
+    mkdirSync(`${file}.lock`);
+    const reg = new QuotaPoolRegistry({ filePath: file });
+    reg.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 3_600_000 });
+    assert.equal(reg.usable('agy:opus'), false, 'in-process view honours it');
+    rmSync(`${file}.lock`, { recursive: true });
+    assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:opus'), true, 'file untouched while unlocked');
+    assert.equal(new QuotaPoolRegistry({ filePath: file }).usable('agy:gemini-reviewer'), false, 'prior cooldown intact');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
