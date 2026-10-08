@@ -1193,7 +1193,10 @@ export function createReviewLoopSpend({
         // A mechanically-zero pre-send failure genuinely cost $0; any other
         // failure's cost is only known if the error carried it.
         const failCost = err?.details?.costUsd;
-        const costKnown = Number.isFinite(failCost) || isMechanicallyZeroPreSend(err);
+        const costKnown = Number.isFinite(failCost) || isMechanicallyZeroPreSend(err)
+          // isMechanicallyZeroPreSend() turns false once the zero usage was attached
+          // above; the explicit provenance flag keeps the proof.
+          || err?.details?.preSendZeroProven === true;
         const failMeta = payloadMetaOf(err?.details?.meta ?? null);
         const failBreakdown = usageBreakdownOf(usage);
         const failAccounting = usageAccountingOf({ usage, family, provider });

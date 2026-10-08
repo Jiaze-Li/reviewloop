@@ -139,25 +139,41 @@ export class QuotaPoolRegistry {
   // Cross-process read-modify-write: take a mkdir lock, re-read the LATEST file,
   // apply `mutate` to it, persist, release. Two MCP processes recording
   // different pools therefore merge instead of the later rename dropping the
-  // other's cooldown. A stale lock (crashed holder) is broken after 10s; if the
-  // lock cannot be taken within ~5s the update stays in this process's memory and
-  // is NOT written (never write unlocked), so a review is never blocked.
+  // other's cooldown. A lock owned by a dead process is broken; a live holder
+  // is never evicted.
   _update(mutate) {
     if (!this.filePath) { mutate(); return; }
     mkdirSync(path.dirname(this.filePath), { recursive: true });
     const lockDir = `${this.filePath}.lock`;
+    const ownerFile = path.join(lockDir, 'owner');
+    const token = `${process.pid}:${Math.random().toString(36).slice(2)}`;
     let locked = false;
-    for (let i = 0; i < 250 && !locked; i += 1) {
-      try { mkdirSync(lockDir); locked = true; } catch {
-        try { if (Date.now() - statSync(lockDir).mtimeMs > 10_000) rmSync(lockDir, { recursive: true, force: true }); } catch { /* raced */ }
+    for (let i = 0; i < 50 && !locked; i += 1) {
+      try {
+        mkdirSync(lockDir);
+        writeFileSync(ownerFile, token);
+        locked = true;
+      } catch {
+        // Break a lock only when its owner process is provably gone (crashed);
+        // a live-but-slow holder is never evicted by elapsed time alone.
+        try {
+          const ownerPid = Number(String(readFileSync(ownerFile, 'utf8')).split(':')[0]);
+          let alive = true;
+          try { process.kill(ownerPid, 0); } catch (e) { alive = e?.code === 'EPERM'; }
+          if (!alive) rmSync(lockDir, { recursive: true, force: true });
+        } catch {
+          // No readable owner (holder between mkdir and write, or legacy lock):
+          // only break a very old one.
+          try { if (Date.now() - statSync(lockDir).mtimeMs > 60_000) rmSync(lockDir, { recursive: true, force: true }); } catch { /* raced */ }
+        }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       }
     }
     try {
       if (!locked) {
-        // Never write the shared file without the lock (a suspended holder could
-        // resume and clobber it). Keep the update in THIS process's memory only:
-        // it still routes correctly here; other processes just learn it later.
+        // Never write the shared file without the lock. Keep the update in THIS
+        // process's memory only: it still routes correctly here; other processes
+        // just learn it later. A review is never blocked (wait is bounded ~1s).
         mutate();
         return;
       }
@@ -166,7 +182,11 @@ export class QuotaPoolRegistry {
       mutate();
       this.persist();
     } finally {
-      if (locked) { try { rmSync(lockDir, { recursive: true, force: true }); } catch { /* ignore */ } }
+      if (locked) {
+        try {
+          if (readFileSync(ownerFile, 'utf8') === token) rmSync(lockDir, { recursive: true, force: true });
+        } catch { /* ignore */ }
+      }
     }
   }
   poolsFor(family) { return [...(this.topology[family] ?? [])]; }
