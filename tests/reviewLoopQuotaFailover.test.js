@@ -88,6 +88,13 @@ test('classifier: millisecond hints are not misread as minutes', () => {
   assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, resets in 2h 30m' })).retryAfterMs, 9_000_000);
 });
 
+test('absurd retry hints are capped and can never break cooldown recording', () => {
+  assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: 'quota exhausted, retry after 999999999 days' })).retryAfterMs, 7 * 86_400_000);
+  const reg = new QuotaPoolRegistry({ filePath: null });
+  assert.doesNotThrow(() => reg.recordProviderFailure('agy:opus', { code: 'PROVIDER_QUOTA_EXHAUSTED', retryAfter: 8.64e16, resetAt: 'garbage' }));
+  assert.equal(reg.usable('agy:opus'), false);
+});
+
 // ---- automatic failover on proven zero-consumption quota rejection ---------
 
 test('proven quota rejection: settles zero, cools the shared pool, auto-switches to Gemini', async () => {

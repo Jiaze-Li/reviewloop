@@ -35,6 +35,8 @@ function envelopeText(envelope) {
   ].filter((v) => v !== undefined && v !== null).map(String).join(' ');
 }
 
+const MAX_RETRY_AFTER_MS = 7 * 86_400_000;
+
 // Units must end at a word boundary so "60ms" / "500 milliseconds" are never
 // misread as minutes. Millisecond hints are honoured explicitly.
 function parseDurationMs(text) {
@@ -47,7 +49,8 @@ function parseDurationMs(text) {
     const key = u.startsWith('ms') || u.startsWith('milli') ? 'ms' : u[0];
     total += Number(part[1]) * perUnit[key];
   }
-  return total > 0 ? Math.round(total) : null;
+  // Cap absurd hints: a cooldown is never allowed to exceed a week.
+  return total > 0 ? Math.min(Math.round(total), MAX_RETRY_AFTER_MS) : null;
 }
 
 /**

@@ -185,6 +185,10 @@ export class QuotaPoolRegistry {
     });
   }
   recordCooldown(poolId, { reason = 'quota_exhausted', resetAt = null, retryAfter = null, source = 'provider_error' } = {}) {
+    // Out-of-range hints must never throw (Date overflow) or pin a pool for years.
+    if (!(Number.isFinite(retryAfter) && retryAfter > 0)) retryAfter = null;
+    else retryAfter = Math.min(retryAfter, 30 * 86_400_000);
+    if (resetAt && !Number.isFinite(Date.parse(resetAt))) resetAt = null;
     this._update(() => {
       const failures = (this.pools[poolId]?.failures ?? 0) + 1;
       const resetMillis = resetAt ? Date.parse(resetAt) : (Number.isFinite(retryAfter) ? this.now() + retryAfter : this.now() + this.baseBackoffMs * (2 ** Math.min(failures - 1, 5)));
