@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-09T16:17:20.051Z",
+  "updatedAt": "2026-10-09T16:18:26.163Z",
   "task": {
     "id": "fix/mcp-output-schema",
     "branch": "fix/mcp-output-schema",
     "title": "fix/mcp-output-schema",
     "task": "Development branch: fix/mcp-output-schema",
     "started": "2026-10-09T18:59:15+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Declare all reviewloop_review result fields in the MCP output schema for strict clients",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 14,
-      "state": "open",
+      "state": "closed",
       "title": "Declare all reviewloop_review result fields in the MCP output schema",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/14",
-      "merged": false,
-      "updatedAt": "2026-10-09T16:17:09Z"
+      "merged": true,
+      "mergedAt": "2026-10-09T16:18:16Z",
+      "closedAt": "2026-10-09T16:18:16Z",
+      "updatedAt": "2026-10-09T16:18:16Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-09T16:18:16Z",
+    "outcome": "Merged"
   }
 }
