@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "activatedAt": "2026-10-09T10:54:43.497Z",
+  "branches": [
+    "docflow-state",
+    "main"
+  ],
+  "tips": {
+    "docflow-state": "208e974f1d26848ee8732dc9f355ff8386b38322",
+    "main": "f0f021b79a59b78a1e8e74cea26353ac90f620a0"
+  }
+}
