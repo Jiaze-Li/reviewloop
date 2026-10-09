@@ -1,0 +1,25 @@
+# DOCFLOW-WORKFLOW v1 (thin caller managed by DocFlow; logic lives in Jiaze-Li/DocFlow/action)
+name: DocFlow progress
+
+on:
+  push:
+    branches-ignore: [main, master, docflow-state]
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+# docflow-state is the only ref this job writes. GITHUB_TOKEN pushes never trigger workflows
+# and docflow-state is ignored above, so state updates cannot recurse into business progress.
+# No concurrency group on purpose: GitHub cancels queued runs in a group, and a cancelled run
+# would drop its event. Concurrent runs are safe (fast-forward-only state push + retry).
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: Jiaze-Li/DocFlow/action@main
