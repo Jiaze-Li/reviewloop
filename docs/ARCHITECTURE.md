@@ -50,6 +50,7 @@ src/reviewloop/
   providerFailover.js   bounded failover + same-family transient retry for one metered call
   finalDiffReducer.js   oversized final-gate diff reduction (cross-phase files only; D34)
   gateReopen.js         human reopen of a spent gate (CLI-only; D35)
+  resumeGuide.js        prompt for a fresh Worker to continue an unfinished loop (CLI-only; D36)
   runtimeDir.js         ~/.reviewloop
 
 src/mcp/reviewloopMcpServer.js   exactly 2 Worker-facing tools
@@ -567,6 +568,7 @@ Limits (`REVIEWLOOP_*`): `MAX_COST_USD`, `MAX_USAGE_VOLUME`,
 `MAX_REVIEW_ROUNDS`, `MAX_REVIEWER_CALLS`, `MAX_SUPERVISOR_CALLS`,
 `MAX_REVIEW_DIFF_CHARS`, `MAX_REVIEW_CHUNKS`, `MAX_SINGLE_CALL_USAGE`,
 `MAX_CONTEXT_OVERHEAD_TOKENS` (single-call Token Sentinel — see below).
+`REVIEWLOOP_MAX_GATE_REPAIRS` (deterministic Gate failures per gate, default 15; D36).
 
 The aggregate budget (call counts, `usageVolume`, `costUsd`) is **durable** and
 keyed by `loopId`: it accumulates across every `reviewloop_review` round, the
