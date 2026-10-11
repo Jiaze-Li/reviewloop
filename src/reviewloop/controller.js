@@ -1118,6 +1118,26 @@ export function createReviewLoopController({
     }
   }
 
+  // Deterministic Gate failures cost no Reviewer tokens, but a Worker can keep
+  // "repairing" a Gate that fails for a different reason every time (a flaky
+  // test, a wrong verification command) indefinitely. After this many Gate
+  // failures in one gate the loop stops for a human; reopen-gate resets it.
+  const DEFAULT_MAX_GATE_REPAIRS = 15;
+  async function stopIfGateRepairsExhausted(loopState) {
+    const configured = Number(env?.REVIEWLOOP_MAX_GATE_REPAIRS);
+    const limit = Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_GATE_REPAIRS;
+    if ((loopState.gateRepairCount ?? 0) <= limit) return null;
+    loopState.budgetExhausted = true;
+    recordTransition(
+      loopState,
+      REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+      `the deterministic Gate failed ${loopState.gateRepairCount} times in this gate (limit ${limit}); `
+      + 'check for a flaky test or a wrong verification command',
+    );
+    await saveLoop(loopState);
+    return humanRequiredResult(loopState, null, await durableTelemetry(loopState.loopId));
+  }
+
   // Snapshot of the just-certified tree, used as the diff start for the NEXT
   // LOCAL phase gate (and, after the last phase, to find what changed since).
   // Skipped (-> cumulative diff, never worse) when the snapshot cannot be trusted: untracked
@@ -1429,6 +1449,8 @@ export function createReviewLoopController({
         };
       }
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+      const gateStop = await stopIfGateRepairsExhausted(loopState);
+      if (gateStop) return gateStop;
       loopState.lastReviewedFingerprint = gateFp;
       loopState.lastGateFingerprint = gate.fingerprint;
       recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
@@ -2186,6 +2208,8 @@ export function createReviewLoopController({
           };
         }
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const gateStop = await stopIfGateRepairsExhausted(loopState);
+        if (gateStop) return { ...gateStop, head: observedHead };
         loopState.lastReviewedFingerprint = gateFp;
         loopState.lastGateFingerprint = gate.fingerprint;
         loopState.lastReviewedPrHead = observedHead;
