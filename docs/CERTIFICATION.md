@@ -1,5 +1,10 @@
 # ReviewLoop certification records
 
+Historical results for specific code snapshots. PR-target functionality was
+retired from ReviewLoop on 2026-10-11; the PR #5 certification below does not
+certify the current LOCAL-only implementation. GitHub PR review is owned by
+[claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).
+
 Moved from the README. Each entry covers one implementation snapshot; read them
 separately, not as a running total.
 

@@ -1,5 +1,10 @@
 # ReviewLoop roadmap
 
+**Current scope (2026-10-11): LOCAL-only.** GitHub PR review is delegated to
+[claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).
+The dated sections below are historical implementation and certification notes,
+not current PR functionality. Deleted code is preserved in Git history.
+
 ## Shipped (this migration)
 
 - Worker-owned execution architecture; Front Agent / Planner / Executor pool /
@@ -360,9 +365,8 @@ Corrected against this machine's durable reservation + spend ledgers under
 
 ## Later
 
-- A real-provider REWORK→PASS controller loop over real providers (both LOCAL
-  and PR-target one-round PASS are certified; a REWORK-then-PASS round is
-  not), and a real multi-provider failover chain (the per-candidate transports
+- A real-provider LOCAL REWORK→PASS controller loop and a multi-provider
+  failover chain (the per-candidate transports
   are each live-certified; the full chain is not).
 - Optional read-only ReviewLoop dashboard (removed in this migration; re-add
   only if it can stay zero-token and simple).

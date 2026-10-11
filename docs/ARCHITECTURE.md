@@ -1,18 +1,19 @@
 # ReviewLoop architecture
 
-ReviewLoop current source of truth.
+LOCAL-only architecture as of 2026-10-11. [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot)
+owns PR code review, while GitHub CI owns post-push tests.
 
-Worker owns execution.
-ReviewLoop owns independent verification and repair control.
+The Worker owns code changes, commits and PR creation. ReviewLoop owns local
+verification and bounded repair control.
 
 ## Ownership
 
 | concern | owner |
 |---|---|
 | implement / test / lint / build / debug / commit / push | **Worker** (external coding agent) |
-| immutable review objective + baseline / PR-HEAD identity | ReviewLoop |
+| immutable review objective + local baseline identity | ReviewLoop |
 | deterministic Gate (0 model tokens) | ReviewLoop |
-| independent Reviewer (same engine for LOCAL and PR targets) | ReviewLoop |
+| independent Reviewer for LOCAL task | ReviewLoop |
 | review normalization + finding signatures | ReviewLoop |
 | convergence / non-convergence policy | ReviewLoop |
 | Supervisor exception guidance | ReviewLoop |
@@ -34,11 +35,7 @@ src/reviewloop/
   diffChunker.js        deterministic diff chunking (no silent truncation)
   reviewPolicy.js       review normalization + convergence policy
   reviewSpend.js        DURABLE ReviewLoop-scoped Token Safety (Reviewer + Supervisor)
-  prEvidence.js         PR merge-base->HEAD delta via LOCAL git over explicit fetched SHAs (LOCAL-delta-shaped; fails closed; never a live API call)
-  prWorktree.js         isolated disposable `git worktree` at the exact PR HEAD — Gate + evidence identity both run inside it
-  prIdentity.js         cwd repository == PR repository, proven independently of `gh`/env, fail closed
-  githubBackend.js      slim PR-target transport via the `gh` CLI (repo id, base/HEAD SHA, optional result publication — never a reviewer, never PR diff evidence)
-  providerWiring.js     production Reviewer/Supervisor pool (RoleRouter) + PR backend
+  providerWiring.js     production Reviewer/Supervisor pool (RoleRouter)
   adapters/
     scratchCwd.js          shared isolated empty scratch cwd for every narrow transport
     boundedCli.js          bounded argv-only CLI runner (wall-clock timeout, process-group teardown)
@@ -105,14 +102,12 @@ global verification plan (mechanical Gate).
 A persisted `completedPhases` prefix is not trusted merely because its ids and
 index line up. Every completion carries a chained PHASE_PASS evidence hash bound
 to the immutable objective, exact review-scope fingerprint, deterministic Gate
-fingerprint and Reviewer fingerprint. In PR mode the completion must additionally
-match a durable PHASE_PASS audit record whose exact-HEAD checks succeeded
-(`headStillCurrent` and `gateRanOnReviewedHead`). Missing, fabricated or
-corrupted progression therefore fails closed before the next gate can run.
+fingerprint and Reviewer fingerprint. Missing, fabricated or corrupted
+progression fails closed before the next gate can run.
 
 In LOCAL mode a phase gate diffs from the previous PHASE_PASS snapshot
 (`completedPhases[i].phaseBaseline`, part of the chained proof), not from the
-begin baseline; the final gate and PR mode stay cumulative. See D33.
+begin baseline; the final gate stays cumulative. See D33.
 
 Reviewer/Supervisor prompts receive an explicit current review scope. During a
 phase they judge only that phase's exit criteria plus global constraints and
@@ -120,46 +115,16 @@ already-established invariants; unfinished later-phase work is not a blocker.
 The final gate judges the cumulative diff against the complete task and all
 phase contracts.
 
-## One review engine, two targets
+## One local review engine
 
-There is a single review path. `reviewloop_review` attributes evidence, runs
-the deterministic Gate, routes an independent Reviewer over the full evidence
-(bounded or chunked), applies the convergence policy, and — only on
-non-convergence — the Supervisor.
+`reviewloop_review` attributes the Worker's changes relative to the frozen
+pre-edit Git baseline, runs the deterministic Gate, dispatches independent
+Reviewer calls over all bounded/chunked evidence, applies convergence, and
+escalates to Supervisor only when justified.
 
-| target | evidence | Gate cwd | HEAD binding |
-|--------|----------|----------|--------------|
-| LOCAL  | `reviewloop_begin` baseline → current Worker delta | the user's own worktree | n/a |
-| PR     | `merge-base(prBaseSha, observedHead) .. observedHead` via LOCAL `git diff` | an isolated disposable `git worktree` checked out DETACHED at `observedHead` (prWorktree.js) | live PR HEAD re-read every round; a pre-`PASS` recheck refuses to certify a stale review if the HEAD moved |
-
-For a PR target, the Reviewer's diff identity, the deterministic Gate, and the
-verification-manifest drift check ALL run inside the SAME isolated worktree —
-never the user's ambient cwd (which may be on another branch, dirty, or
-unrelated to the PR). The worktree is built fresh each round at the round's
-`observedHead`, torn down (success or failure) before the round's Reviewer
-call, and never commits, pushes, or mutates the user's own branches. Before a
-PR loop is even registered, `reviewloop_begin` PROVES cwd's own repository
-(from its literal `origin` remote, independent of any `gh`/env override) is
-the exact repository the PR belongs to (prIdentity.js) — never best-effort
-metadata; an unresolvable or mismatched identity refuses the begin.
-
-A PR round writes a durable, tamper-evident audit record to loop state
-(`loopState.audit[]`): the frozen target identity (repository, prNumber,
-baseSha, reviewedHeadSha, mergeBase) + a `targetFingerprint` over it, the
-objective fingerprint, the Gate verdict/fingerprint (plus a structural
-`gateRanOnReviewedHead` flag proving the Gate ran in the exact-HEAD
-worktree), the Reviewer verdict/findings, and — for every PHYSICAL Reviewer
-and Supervisor call this round made (including every failover retry and every
-chunk) — its role, family, provider, quota pool, resolved model, attempt,
-round, chunk index/total, outcome, and raw usage. A failover or chunked round
-never collapses to one abstract "internal" entry. The record also carries the
-Supervisor state, the spend telemetry, and the round result. The objective
-fingerprint itself folds in `prBaseSha` and `reviewedHeadSha`, so editing
-persisted PR identity fails the integrity check. `reviewloop_review` never
-PASSes a PR round unless it can positively prove: repository identity is
-known, the Reviewer's evidence is bound to the exact reviewed HEAD, the Gate
-ran inside that exact HEAD's worktree, AND the live PR HEAD re-read just
-before certifying still matches — any one of those being unknown refuses PASS.
+A local Gate that changes the worktree must stabilize and reverify the
+post-Gate code. GitHub PR HEAD binding, detached PR worktrees, remote
+publication and PR audit sessions are intentionally absent.
 
 ## Active model roles
 
@@ -485,26 +450,8 @@ READY_FOR_WORK → REVIEWING → PASS
 ```
 
 `WAITING_FOR_REVIEW` is a normal durable state, not an error. It is reached
-only transiently — another process holds the loop lease, or (PR target) the PR
-HEAD kept moving faster than one review round could complete. Re-call
-`reviewloop_review` once state settles.
-
-### PR HEAD binding
-
-Each PR round re-reads the live PR HEAD (`gh pr view … headRefOid`), fails
-closed if it cannot be resolved, and builds an isolated `git worktree`
-checked out DETACHED at that exact SHA (prWorktree.js) to compute
-`merge-base(objective.prBaseSha, observedHead) .. observedHead` via LOCAL git
-diff and to run the deterministic Gate — never a live `gh pr diff` call and
-never the user's own ambient cwd. Before a `PASS` the live HEAD is read once
-more: only `finalObservedHeadSha === reviewedHeadSha` lets the round PASS,
-and an explicit invariant check additionally requires repository identity to
-be known, the Reviewer evidence to be bound to `observedHead`, and the Gate
-to have run inside that exact HEAD's worktree — any one UNKNOWN refuses PASS.
-A HEAD that moved during the review is never certified by the stale review —
-the round rebinds and re-reviews the new HEAD (bounded; a HEAD that never
-settles → `WAITING_FOR_REVIEW`). `PUSH_REQUIRED` is returned when the HEAD is
-unchanged since a prior actionable review (fix not pushed yet).
+only transiently when another process holds the loop lease. Re-call
+`reviewloop_review` after the owning review finishes.
 
 ## Convergence
 
@@ -561,7 +508,7 @@ Supervisor exactly once → REWORK), in addition to CLI transport narrowness.
 
 `UNKNOWN != ZERO`. `CallIntent → authorize → PhysicalCallPermit → dispatch →
 SETTLED_KNOWN | UNRESOLVED`. Scoped to ReviewLoop-owned spend (Reviewer,
-Supervisor) for every target — LOCAL and PR alike. Worker usage is reported as
+Supervisor) for LOCAL sessions. Worker usage is reported as
 `external / not observable by ReviewLoop` — never as zero.
 
 Limits (`REVIEWLOOP_*`): `MAX_COST_USD`, `MAX_USAGE_VOLUME`,
@@ -713,40 +660,6 @@ tracked state without touching the tree; the review diff is `baseline..current`
 never attributed to the Worker. Unattributable state → `HUMAN_REQUIRED`. No
 Worker change since `begin` → deterministic `NO_PROGRESS`, zero Reviewer calls.
 
-**PR evidence** (`prEvidence.js` + `prWorktree.js`): the primary Reviewer
-evidence for a PR target is `merge-base(prBaseSha, reviewedHeadSha) ..
-reviewedHeadSha`, computed with LOCAL `git diff`/`git diff --name-only`
-inside an isolated disposable worktree — never a live `gh pr diff` API call,
-and never "what the Worker changed since `begin`". `prWorktree.js` first
-proves both SHAs are real, fetched commit objects (fetching them by exact SHA
-when the reviewer's own checkout does not already have them, falling back to
-`refs/pull/<n>/head` for the HEAD SHA only), computes their merge-base, then
-checks out a throwaway `git worktree --detach` at the exact HEAD SHA — torn
-down again (success or failure) before the round's Reviewer call, never
-committing, pushing, or touching the user's own branches. A base/HEAD that
-cannot be fetched, a merge-base that cannot be resolved, a diff that fails, or
-a binary/submodule hunk in the diff all mark the evidence incomplete →
-`HUMAN_REQUIRED`. GitHub is a target adapter only: it resolves the repository
-identity (cross-checked against cwd's own git remote — see **PR repository
-identity** below), the base SHA, the current HEAD SHA, and (opt-in,
-`REVIEWLOOP_PUBLISH_PR_RESULT=1`) publishes a one-comment result summary. It
-is never a reviewer, never serves the PR diff as Reviewer evidence, never
-posts a review-trigger comment, and a publication failure never changes the
-verdict.
-
-**PR repository identity** (`prIdentity.js`): `reviewloop_begin({ cwd,
-prNumber })` refuses to register a PR loop unless cwd's own repository is
-PROVEN identical to the PR's repository — never best-effort metadata. cwd's
-identity is derived from the LITERAL configured `git config
-remote.origin.url` (never `git remote get-url`, which silently applies any
-local `insteadOf` rewrite, and never the MCP process's own working
-directory), canonicalized to `owner/name`; the PR's identity comes from
-`prBackend.resolveRepo({ cwd, prNumber })`, itself scoped to `cwd` rather than
-an ambient process cwd. cwd not being a git repository, having no `origin`
-remote, an unparseable/non-GitHub remote, GitHub reporting no identity, or the
-two identities disagreeing are ALL refused — never treated as an implicit
-match.
-
 **Complete physical-attempt accounting**: every settled metered attempt —
 success, known-usage failure, OR mechanically-zero pre-send failure
 (`PROVIDER_UNAVAILABLE` / `AGY_ENOENT` / `AGY_SPAWN_FAILED` /
@@ -805,5 +718,5 @@ baseline / diff / HEAD / untracked attribution fails closed on a non-zero exit
 **Per-invocation isolation**: `safetyEvents` in a result are scoped to that one
 `reviewloop_review` call (a long-lived controller shared by many `loopId`s
 never leaks one loop's events into another's). `NO_PROGRESS` /
-`WAITING_FOR_REVIEW` / `PUSH_REQUIRED` / terminal results report the durable
+`WAITING_FOR_REVIEW` / terminal results report the durable
 cumulative spend, never zeros.
