@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:15:58.651Z",
+  "updatedAt": "2026-10-11T13:16:28.210Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -70,7 +70,14 @@
         "message": "test: assert LOCAL-only Reviewer and Supervisor dispatch"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 18,
+      "state": "open",
+      "title": "refactor: retire ReviewLoop PR engine and keep LOCAL review only",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/18",
+      "merged": false,
+      "updatedAt": "2026-10-11T13:16:17Z"
+    },
     "completed": null,
     "outcome": null
   }
