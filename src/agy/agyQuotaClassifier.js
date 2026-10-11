@@ -2,14 +2,13 @@ import { agyObjectCarriesUsageEvidence, agyStderrCarriesUsageEvidence } from './
 
 // Classifier for AGY quota/credit exhaustion rejections.
 //
-// A quota rejection is the provider refusing to ADMIT a request, so it is
-// zero-consumption — but only when we can tell it apart from a mid-stream
-// failure. A non-zero exit, a short duration, or a bare "RESOURCE_EXHAUSTED"
-// (which gRPC also uses for oversized messages) is NOT proof. We require ALL of:
-//   - AGY_NONZERO_EXIT with EMPTY stdout (no response bytes were produced),
-//   - usage evidence explicitly ABSENT (never 'present' / 'unknown'),
-//   - explicit quota/credit wording in stderr or the structured envelope.
-// Anything else stays UNKNOWN and keeps failing closed (UNRESOLVED reservation).
+// A quota rejection is zero-consumption only with sufficient evidence that
+// the provider denied admission before generation. Accept either:
+//  A) empty stdout, absent usage, explicit quota wording; OR
+//  B) structured ERROR stdout with zero model turns, no response/session,
+//     a complete all-zero usage envelope, and explicit quota wording.
+// A bare RESOURCE_EXHAUSTED or zero token counters by themselves are NOT proof.
+// All other errors remain UNRESOLVED; UNKNOWN != ZERO.
 // Duration is deliberately never consulted.
 
 export const AGY_QUOTA_ZERO_PROOF = 'AGY_QUOTA_REJECTION';
@@ -40,11 +39,11 @@ const MAX_RETRY_AFTER_MS = 7 * 86_400_000;
 // Units must end at a word boundary so "60ms" / "500 milliseconds" are never
 // misread as minutes. Millisecond hints are honoured explicitly.
 function parseDurationMs(text) {
-  const m = /(?:resets?|retry|try again)\s*(?:in|after)?\s*[:=]?\s*((?:\d+(?:\.\d+)?\s*(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s|milliseconds?|ms)\b\s*)+)/i.exec(text);
+  const m = /(?:resets?|retry|try again)\s*(?:in|after)?\s*[:=]?\s*((?:\d+(?:\.\d+)?\s*(?:milliseconds?|ms|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])\s*)+)/i.exec(text);
   if (!m) return null;
   const perUnit = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000, ms: 1 };
   let total = 0;
-  for (const part of m[1].matchAll(/(\d+(?:\.\d+)?)\s*(milliseconds?|ms|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi)) {
+  for (const part of m[1].matchAll(/(\d+(?:\.\d+)?)\s*(milliseconds?|ms|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi)) {
     const u = part[2].toLowerCase();
     const key = u.startsWith('ms') || u.startsWith('milli') ? 'ms' : u[0];
     total += Number(part[1]) * perUnit[key];
@@ -57,10 +56,22 @@ function parseDurationMs(text) {
  * @param {object} err  an AgyExitError-shaped error
  * @returns {{ proven: boolean, reason: string, retryAfterMs: number|null }}
  */
+function isExplicitZeroTurnQuotaError(err) {
+  const envelope = err?.envelope;
+  return err?.stdoutWasEmpty === false
+    && err?.usageEvidenceState === 'present'
+    && envelope?.status === 'ERROR'
+    && envelope?.responseWasEmpty === true
+    && envelope?.numTurns === 0
+    && envelope?.hasConversationId === false
+    && envelope?.explicitZeroUsage === true;
+}
+
 export function classifyAgyQuotaRejection(err) {
   const none = (reason) => ({ proven: false, reason, retryAfterMs: null });
   if (!err || typeof err !== 'object' || err.code !== 'AGY_NONZERO_EXIT') return none('not a non-zero AGY exit');
-  if (err.stdoutWasEmpty !== true) return none('stdout was not empty');
+  const structuredZero = isExplicitZeroTurnQuotaError(err);
+  if (err.stdoutWasEmpty !== true && !structuredZero) return none('stdout contains unproven model activity');
 
   const envelope = err.envelope && typeof err.envelope === 'object' ? err.envelope : {};
   const state = err.usageEvidenceState;
@@ -68,10 +79,10 @@ export function classifyAgyQuotaRejection(err) {
   // state (synthetic/test errors, older transports).
   const usageAbsent = state === 'absent'
     || (state == null && !agyObjectCarriesUsageEvidence(envelope) && !agyStderrCarriesUsageEvidence(err.stderr));
-  if (!usageAbsent) return none('usage evidence is not explicitly absent');
+  if (!usageAbsent && !structuredZero) return none('usage cannot be proven zero');
 
-  const diagnostic = `${String(err.stderr ?? '')}\n${envelopeText(envelope)}`;
+  const diagnostic = `${String(err.stderr ?? '')}\n${envelopeText(envelope)}${structuredZero && envelope.quotaError === true ? '\nquota exhausted' : ''}`;
   if (!QUOTA_WORDING.some((re) => re.test(diagnostic))) return none('no canonical quota wording');
   if (MID_STREAM_WORDING.test(diagnostic)) return none('diagnostic suggests a mid-stream failure');
-  return { proven: true, reason: 'canonical quota rejection with empty stdout and absent usage evidence', retryAfterMs: parseDurationMs(diagnostic) };
+  return { proven: true, reason: structuredZero ? 'canonical quota rejection with zero-turn ERROR envelope' : 'canonical quota rejection with empty stdout and absent usage evidence', retryAfterMs: parseDurationMs(diagnostic) };
 }
