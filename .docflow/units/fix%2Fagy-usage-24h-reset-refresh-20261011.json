@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T03:03:07.241Z",
+  "updatedAt": "2026-10-11T03:04:19.515Z",
   "task": {
     "id": "fix/agy-usage-24h-reset-refresh-20261011",
     "branch": "fix/agy-usage-24h-reset-refresh-20261011",
@@ -8,12 +8,16 @@
     "task": "Development branch: fix/agy-usage-24h-reset-refresh-20261011",
     "started": "2026-10-11T11:02:32+08:00",
     "status": "In progress",
-    "current": "Refresh successful AGY quota snapshots after 24h or predicted reset",
+    "current": "Test cross-restart 24h/reset quota checks and conservative recovery",
     "next": "",
     "history": [
       {
         "at": "2026-10-11T11:02:59+08:00",
         "text": "Persist last successful AGY quota snapshot and guard cooldown recovery"
+      },
+      {
+        "at": "2026-10-11T11:04:05+08:00",
+        "text": "Refresh successful AGY quota snapshots after 24h or predicted reset"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "fix/agy-usage-24h-reset-refresh-20261011",
         "timestamp": "2026-10-11T11:02:59+08:00",
         "message": "Refresh successful AGY quota snapshots after 24h or predicted reset"
+      },
+      {
+        "sha": "54c12e0766882061f437816b01f0c57e3b40104d",
+        "branch": "fix/agy-usage-24h-reset-refresh-20261011",
+        "timestamp": "2026-10-11T11:04:05+08:00",
+        "message": "Test cross-restart 24h/reset quota checks and conservative recovery"
       }
     ],
     "pr": null,
