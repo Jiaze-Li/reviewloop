@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:15:42.313Z",
+  "updatedAt": "2026-10-11T08:29:05.659Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Warn at begin about untracked files that would make review unattributable",
+    "current": "Warn at begin when phases are registered without the contract text",
     "next": "",
     "history": [
       {
@@ -46,6 +46,10 @@
       {
         "at": "2026-10-11T08:15:28Z",
         "text": "Move bounded provider failover out of controller.js into providerFailover.js"
+      },
+      {
+        "at": "2026-10-11T08:28:56Z",
+        "text": "Warn at begin about untracked files that would make review unattributable"
       }
     ],
     "commits": [
@@ -108,6 +112,12 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T08:15:28Z",
         "message": "Warn at begin about untracked files that would make review unattributable"
+      },
+      {
+        "sha": "f073dfbedf88df8a578f9337f8befc93ed4a20a8",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:28:56Z",
+        "message": "Warn at begin when phases are registered without the contract text"
       }
     ],
     "pr": null,
