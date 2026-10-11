@@ -1607,6 +1607,70 @@ export function createReviewLoopController({
     };
   }
 
+  // Gate commands for one review gate, shared by LOCAL and PR. Uses exactly the
+  // plan frozen at begin (never the possibly Worker-edited on-disk config) plus
+  // the current scope's own commands. `drift` means the verification manifest
+  // under `cwd` no longer matches the frozen plan, so the Gate cannot be trusted.
+  function resolveGateCommands({ cwd, loopState, objective, reviewScope }) {
+    const frozenPlan = objective.verificationPlan;
+    let gateCommands;
+    let commandSource;
+    if (frozenPlan?.commands?.length) {
+      gateCommands = frozenPlan.commands;
+      commandSource = `${frozenPlan.source} (frozen at begin)`;
+      let current = null;
+      try {
+        current = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
+      } catch { /* discovery is best-effort here */ }
+      if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
+        && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
+        return { drift: true };
+      }
+    } else {
+      const discovered = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
+      gateCommands = discovered.commands;
+      commandSource = discovered.source;
+    }
+    const baseGateCommandCount = gateCommands?.length ?? 0;
+    gateCommands = mergeScopedGateCommands(gateCommands, reviewScope);
+    if (gateCommands.length > baseGateCommandCount) {
+      commandSource = `${commandSource} + frozen ${reviewScope.id} verification`;
+    }
+    return { drift: false, gateCommands, commandSource };
+  }
+
+  // Fingerprints that decide "is this new information?" for one review round.
+  function reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck }) {
+    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+    const canonicalFp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
+    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(loopState, evidenceCheck.proofFingerprint);
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: effectiveEvidenceFingerprint,
+    });
+    return { reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp };
+  }
+
+  function recordFindingSignatures(loopState, review) {
+    loopState.findingSignatureHistory = [
+      ...(loopState.findingSignatureHistory ?? []),
+      {
+        round: loopState.round,
+        gateRound: loopState.gateRound,
+        epoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+        signatures: review.findingSignatures,
+      },
+    ];
+  }
+
   // Snapshot of the just-certified tree, used as the diff start for the NEXT
   // LOCAL phase gate. Skipped (-> cumulative diff, never worse) when the next
   // gate is the final one, or when the snapshot cannot be trusted: untracked
@@ -1692,62 +1756,37 @@ export function createReviewLoopController({
       };
     }
 
-    // The verification plan was FROZEN at reviewloop_begin. Use exactly those
-    // commands — never re-derive from the (possibly Worker-edited) on-disk
-    // config. Only fall back to fresh discovery for a legacy loop persisted
-    // before the plan was frozen.
-    const frozenPlan = objective.verificationPlan;
-    let gateCommands;
-    let commandSource;
-    if (frozenPlan?.commands?.length) {
-      gateCommands = frozenPlan.commands;
-      commandSource = `${frozenPlan.source} (frozen at begin)`;
-      // A Worker that rewrote `.reviewloop.json` / the `package.json` test
-      // script after begin cannot weaken the Gate. Running the frozen command
-      // array already defeats a `.reviewloop.json` edit; but a `package.json`
-      // plan is the indirection `npm test`, so a rewritten test script would
-      // still run. Any manifest drift therefore fails the review closed rather
-      // than trusting the Gate: the Worker must revert the config or start a
-      // fresh reviewloop_begin.
-      try {
-        const current = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
-        if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
-          && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
-          collectSafetyEvent({
-            code: 'VERIFICATION_PLAN_DRIFT',
-            severity: 'BLOCKING',
-            role: 'gate',
-            taskId: loopState.loopId,
-            reason: `the verification config (${frozenPlan.source}) was modified after reviewloop_begin`,
-            actionTaken: 'review blocked; frozen Gate cannot be trusted',
-          });
-          loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-          recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
-          await saveLoop(loopState);
-          return {
-            ...compactReworkPayload({
-              loopState,
-              review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
-              gate: { verdict: 'FAIL', failureIdentities: ['verification-plan-drift'] },
-            }),
-            reason: 'the verification configuration was changed after reviewloop_begin; revert '
-              + '.reviewloop.json / the package.json test script to what it was, or start a new '
-              + 'reviewloop_begin — ReviewLoop will not run a Gate the Worker can edit mid-loop',
-            telemetry: await durableTelemetry(loopState.loopId),
-            safetyEvents,
-          };
-        }
-      } catch { /* discovery is best-effort here */ }
-    } else {
-      const discovered = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
-      gateCommands = discovered.commands;
-      commandSource = discovered.source;
+    // The verification plan was FROZEN at reviewloop_begin; resolveGateCommands
+    // never re-derives it from the (possibly Worker-edited) on-disk config. Any
+    // manifest drift fails the review closed rather than trusting the Gate: the
+    // Worker must revert the config or start a fresh reviewloop_begin.
+    const resolved = resolveGateCommands({ cwd, loopState, objective, reviewScope });
+    if (resolved.drift) {
+      collectSafetyEvent({
+        code: 'VERIFICATION_PLAN_DRIFT',
+        severity: 'BLOCKING',
+        role: 'gate',
+        taskId: loopState.loopId,
+        reason: `the verification config (${objective.verificationPlan.source}) was modified after reviewloop_begin`,
+        actionTaken: 'review blocked; frozen Gate cannot be trusted',
+      });
+      loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
+      await saveLoop(loopState);
+      return {
+        ...compactReworkPayload({
+          loopState,
+          review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
+          gate: { verdict: 'FAIL', failureIdentities: ['verification-plan-drift'] },
+        }),
+        reason: 'the verification configuration was changed after reviewloop_begin; revert '
+          + '.reviewloop.json / the package.json test script to what it was, or start a new '
+          + 'reviewloop_begin — ReviewLoop will not run a Gate the Worker can edit mid-loop',
+        telemetry: await durableTelemetry(loopState.loopId),
+        safetyEvents,
+      };
     }
-    const baseGateCommandCount = gateCommands?.length ?? 0;
-    gateCommands = mergeScopedGateCommands(gateCommands, reviewScope);
-    if (gateCommands.length > baseGateCommandCount) {
-      commandSource = `${commandSource} + frozen ${reviewScope.id} verification`;
-    }
+    const { gateCommands, commandSource } = resolved;
     // The baseline Gate evidence can downgrade a review-time FAIL to WARN by
     // treating shared failures as pre-existing. It lives in workflow.json,
     // OUTSIDE the tamper-checked objective — so a state editor could inject the
@@ -1979,23 +2018,9 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
-    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
-    const canonicalFp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-      evidenceFingerprint: evidenceCheck.proofFingerprint,
-    });
-    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
-      loopState,
-      evidenceCheck.proofFingerprint,
-    );
-    const fp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-      evidenceFingerprint: effectiveEvidenceFingerprint,
-    });
+    const {
+      reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp,
+    } = reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck });
     if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
       await saveLoop(loopState);
       return {
@@ -2057,16 +2082,7 @@ export function createReviewLoopController({
     // Failed/cancelled reviews above leave it pending for safe retry.
     loopState.pendingReviewerReconsideration = null;
     const decision = decideConvergence({ loopState, review });
-    loopState.findingSignatureHistory = [
-      ...(loopState.findingSignatureHistory ?? []),
-      {
-        round: loopState.round,
-        gateRound: loopState.gateRound,
-        epoch: loopState.convergenceEpoch ?? 0,
-        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
-        signatures: review.findingSignatures,
-      },
-    ];
+    recordFindingSignatures(loopState, review);
 
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
@@ -2515,30 +2531,11 @@ export function createReviewLoopController({
       // drift check compares against THIS worktree, the exact snapshot being
       // reviewed, never the user's ambient cwd (which may be on another
       // branch, dirty, or simply irrelevant to this PR).
-      const frozenPlan = objective.verificationPlan;
-      let gateCommands;
-      let commandSource;
-      if (frozenPlan?.commands?.length) {
-        gateCommands = frozenPlan.commands;
-        commandSource = `${frozenPlan.source} (frozen at begin)`;
-        try {
-          const current = discoverVerificationCommandsFn({ cwd: worktreeDir, configured: loopState.verificationCommands });
-          if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
-            && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
-            return { kind: 'DRIFT' };
-          }
-        } catch { /* discovery is best-effort here */ }
-      } else {
-        const discovered = discoverVerificationCommandsFn({ cwd: worktreeDir, configured: loopState.verificationCommands });
-        gateCommands = discovered.commands;
-        commandSource = discovered.source;
-      }
-      const prReviewScope = currentReviewScope(loopState, objective);
-      const baseGateCommandCount = gateCommands?.length ?? 0;
-      gateCommands = mergeScopedGateCommands(gateCommands, prReviewScope);
-      if (gateCommands.length > baseGateCommandCount) {
-        commandSource = `${commandSource} + frozen ${prReviewScope.id} verification`;
-      }
+      const resolved = resolveGateCommands({
+        cwd: worktreeDir, loopState, objective, reviewScope: currentReviewScope(loopState, objective),
+      });
+      if (resolved.drift) return { kind: 'DRIFT' };
+      const { gateCommands, commandSource } = resolved;
 
       // Capture the exact worktree state BEFORE the Gate runs. PR evidence
       // must correspond to the exact commit already pushed — unlike LOCAL,
@@ -2764,23 +2761,9 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
-      const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
-      const canonicalFp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-        evidenceFingerprint: evidenceCheck.proofFingerprint,
-      });
-      const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
-        loopState,
-        evidenceCheck.proofFingerprint,
-      );
-      const fp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-        evidenceFingerprint: effectiveEvidenceFingerprint,
-      });
+      const {
+        reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp,
+      } = reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck });
       if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
         await saveLoop(loopState);
         return {
@@ -2826,16 +2809,7 @@ export function createReviewLoopController({
 
       loopState.pendingReviewerReconsideration = null;
       const decision = decideConvergence({ loopState, review });
-      loopState.findingSignatureHistory = [
-        ...(loopState.findingSignatureHistory ?? []),
-        {
-          round: loopState.round,
-          gateRound: loopState.gateRound,
-          epoch: loopState.convergenceEpoch ?? 0,
-          epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
-          signatures: review.findingSignatures,
-        },
-      ];
+      recordFindingSignatures(loopState, review);
 
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];
