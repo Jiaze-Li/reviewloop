@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:41:57.274Z",
+  "updatedAt": "2026-10-11T08:47:15.622Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Match non-rename diff headers exactly in the final-diff reducer",
+    "current": "Address Codex review: keep real code in the reduced final diff, never truncate the resume contract, list reopen-required loops, bound every Gate repair branch",
     "next": "",
     "history": [
       {
@@ -62,6 +62,10 @@
       {
         "at": "2026-10-11T08:41:45Z",
         "text": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)"
+      },
+      {
+        "at": "2026-10-11T08:46:49Z",
+        "text": "Match non-rename diff headers exactly in the final-diff reducer"
       }
     ],
     "commits": [
@@ -148,6 +152,12 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T08:41:45Z",
         "message": "Match non-rename diff headers exactly in the final-diff reducer"
+      },
+      {
+        "sha": "3e0f0a6bd0809bcbd048d3ffcae5cb99980de340",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:46:49Z",
+        "message": "Address Codex review: keep real code in the reduced final diff, never truncate the resume contract, list reopen-required loops, bound every Gate repair branch"
       }
     ],
     "pr": {
