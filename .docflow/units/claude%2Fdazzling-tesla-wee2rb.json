@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:18:54.435Z",
+  "updatedAt": "2026-10-11T13:21:05.955Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "test: remove remaining PR fixtures from mixed LOCAL test files",
+    "current": "fix: prevent archived PR sessions from CLI resume and human recovery",
     "next": "",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-10-11T21:18:40+08:00",
         "text": "test: assert LOCAL-only Reviewer and Supervisor dispatch"
+      },
+      {
+        "at": "2026-10-11T21:20:55+08:00",
+        "text": "test: remove remaining PR fixtures from mixed LOCAL test files"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:18:40+08:00",
         "message": "test: remove remaining PR fixtures from mixed LOCAL test files"
+      },
+      {
+        "sha": "884460879901aee456130ae38eed7015bfbe9b6f",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-11T21:20:55+08:00",
+        "message": "fix: prevent archived PR sessions from CLI resume and human recovery"
       }
     ],
     "pr": {
