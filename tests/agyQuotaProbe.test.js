@@ -52,6 +52,29 @@ test('structured /usage: a depleted Claude/GPT window cools that pool, not Gemin
   assert.equal(calls.length, 2, '90-second TTL avoids hammering /usage');
 });
 
+test('async AGY quota CLI responses keep the same cooldown without repeated ledger writes', async () => {
+  let current = NOW;
+  let calls = 0;
+  const registry = new QuotaPoolRegistry({ filePath: null, now: () => current });
+  const preflight = createAgyQuotaPreflight({
+    quotaRegistry: registry, now: () => current, ttlMs: 90_000,
+    exec: async (_cmd, args) => {
+      calls += 1;
+      return { stdout: args.includes('--version') ? 'agy version 1.2.6' : usage([
+        group('Claude and GPT models', [{ remaining_fraction: 0, reset_time: reset(72) }]),
+      ]) };
+    },
+  });
+  assert.equal((await preflight()).checked, true);
+  const original = registry.get('agy-claude-gpt');
+  assert.equal(original.failures, 1);
+  current += 90_001;
+  assert.equal((await preflight()).checked, true);
+  assert.equal(registry.get('agy-claude-gpt').failures, 1);
+  assert.equal(registry.get('agy-claude-gpt').resetAt, reset(72));
+  assert.equal(calls, 4, 'two version checks and two quota reads; no model calls');
+});
+
 test('all exhausted windows must recover before a shared quota pool becomes eligible', () => {
   const entries = parseAgyQuotaUsage(usage([
     group('Gemini Models', [
