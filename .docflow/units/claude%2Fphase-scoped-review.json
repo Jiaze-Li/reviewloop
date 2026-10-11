@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T09:21:55.522Z",
+  "updatedAt": "2026-10-11T09:21:59.920Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -176,7 +176,7 @@
       "title": "Phase-scoped review for long tasks, plus recovery and begin-time warnings",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/17",
       "merged": false,
-      "updatedAt": "2026-10-11T08:47:07Z"
+      "updatedAt": "2026-10-11T09:21:49Z"
     },
     "completed": null,
     "outcome": null
