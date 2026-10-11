@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-11T03:02:42.263Z",
+  "task": {
+    "id": "fix/agy-usage-24h-reset-refresh-20261011",
+    "branch": "fix/agy-usage-24h-reset-refresh-20261011",
+    "title": "fix/agy-usage-24h-reset-refresh-20261011",
+    "task": "Development branch: fix/agy-usage-24h-reset-refresh-20261011",
+    "started": "2026-10-11T11:02:32+08:00",
+    "status": "In progress",
+    "current": "Persist last successful AGY quota snapshot and guard cooldown recovery",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "360110f8e4f2a7304bbaeb5807fb9cb6c9cc7be9",
+        "branch": "fix/agy-usage-24h-reset-refresh-20261011",
+        "timestamp": "2026-10-11T11:02:32+08:00",
+        "message": "Persist last successful AGY quota snapshot and guard cooldown recovery"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
