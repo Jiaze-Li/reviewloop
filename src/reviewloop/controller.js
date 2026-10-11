@@ -53,6 +53,7 @@ import {
   REVIEW_VERDICTS,
 } from './reviewPolicy.js';
 import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.js';
+import { reduceFinalDiff } from './finalDiffReducer.js';
 import { chunkDiffForReview } from './diffChunker.js';
 import {
   assertContractHandoff,
@@ -225,26 +226,32 @@ function phaseCompletionEvidenceHash(entry) {
     ...(entry.phaseBaseline
       ? { phaseBaseline: { head: entry.phaseBaseline.head, baselineRef: entry.phaseBaseline.baselineRef } }
       : {}),
+    ...(Array.isArray(entry.reviewedFiles) ? { reviewedFiles: entry.reviewedFiles } : {}),
   }));
 }
 
 // LOCAL phase gates review only what changed since the previous phase passed.
 // The boundary is the snapshot recorded (and hash-chained) at that PHASE_PASS;
 // anything else falls back to the original begin baseline (cumulative diff).
-function phaseScopedBaseline(loopState, objective, reviewScope) {
-  if (objective?.mode !== REVIEW_MODES.LOCAL || reviewScope?.type !== 'phase') return null;
-  const prev = (loopState?.completedPhases ?? [])[reviewScope.phaseIndex - 1];
-  const b = prev?.phaseBaseline;
-  if (!b?.head || !b?.baselineRef || prev.phaseIndex !== reviewScope.phaseIndex - 1) return null;
+function baselineFromPhaseEntry(entry) {
+  const b = entry?.phaseBaseline;
+  if (!b?.head || !b?.baselineRef) return null;
   return {
     head: b.head,
     baselineRef: b.baselineRef,
-    capturedAt: prev.completedAt,
+    capturedAt: entry.completedAt,
     dirtyFiles: [],
     untrackedHashes: {},
     evidenceComplete: true,
     incompleteReasons: [],
   };
+}
+
+function phaseScopedBaseline(loopState, objective, reviewScope) {
+  if (objective?.mode !== REVIEW_MODES.LOCAL || reviewScope?.type !== 'phase') return null;
+  const prev = (loopState?.completedPhases ?? [])[reviewScope.phaseIndex - 1];
+  if (!prev || prev.phaseIndex !== reviewScope.phaseIndex - 1) return null;
+  return baselineFromPhaseEntry(prev);
 }
 
 function phaseCompletionRoot(objective) {
@@ -292,6 +299,8 @@ function assertPhaseProgressionValid(loopState, objective = loopState?.objective
       && (entry.phaseBaseline == null
         || (typeof entry.phaseBaseline.head === 'string' && Boolean(entry.phaseBaseline.head)
           && typeof entry.phaseBaseline.baselineRef === 'string' && Boolean(entry.phaseBaseline.baselineRef)))
+      && (entry.reviewedFiles == null
+        || (Array.isArray(entry.reviewedFiles) && entry.reviewedFiles.every((f) => typeof f === 'string')))
       && typeof entry?.proof === 'string' && entry.proof === phaseCompletionEvidenceHash(entry);
     if (!structurallyValid) {
       throw new Error(
@@ -833,7 +842,7 @@ export function createReviewLoopController({
     telemetry,
     {
       head = null, gate = null, reviewScope = null, auditRecord = null, evidenceFingerprint = null,
-      phaseBaseline = null,
+      phaseBaseline = null, reviewedFiles = null,
     } = {},
   ) {
     const scope = reviewScope ?? currentReviewScope(loopState);
@@ -853,6 +862,7 @@ export function createReviewLoopController({
       previousProof: previous?.proof ?? phaseCompletionRoot(loopState.objective),
       auditTargetFingerprint: auditRecord?.targetFingerprint ?? null,
       ...(phaseBaseline ? { phaseBaseline: { head: phaseBaseline.head, baselineRef: phaseBaseline.baselineRef } } : {}),
+      ...(Array.isArray(reviewedFiles) ? { reviewedFiles } : {}),
     };
     completion.proof = phaseCompletionEvidenceHash(completion);
 
@@ -1668,13 +1678,39 @@ export function createReviewLoopController({
     ];
   }
 
+  // A cumulative diff that no longer fits one final review would stop the loop
+  // outright. When every phase recorded what it reviewed and the tree since the
+  // last boundary is attributable, review the cross-phase and post-boundary
+  // files instead (see finalDiffReducer.js). Any doubt returns null and the old
+  // behaviour stands.
+  async function reduceOversizedFinalDiff({ loopState, cwd, delta }) {
+    try {
+      if (!chunkDiffForReview(delta.diff, { env }).oversized) return null;
+      const completed = loopState.completedPhases ?? [];
+      const lastBoundary = baselineFromPhaseEntry(completed[completed.length - 1]);
+      if (!lastBoundary) return null;
+      const post = await collectWorkerDeltaFn({ cwd, baseline: lastBoundary });
+      if (!post || post.evidenceComplete === false) return null;
+      const reduced = reduceFinalDiff({
+        diff: delta.diff,
+        changedFiles: delta.changedFiles,
+        completedPhases: completed,
+        postBoundaryFiles: post.changedFiles ?? [],
+      });
+      if (!reduced || chunkDiffForReview(reduced.diff, { env }).oversized) return null;
+      return reduced;
+    } catch {
+      return null;
+    }
+  }
+
   // Snapshot of the just-certified tree, used as the diff start for the NEXT
-  // LOCAL phase gate. Skipped (-> cumulative diff, never worse) when the next
-  // gate is the final one, or when the snapshot cannot be trusted: untracked
+  // LOCAL phase gate (and, after the last phase, to find what changed since).
+  // Skipped (-> cumulative diff, never worse) when the snapshot cannot be trusted: untracked
   // files at the boundary would make every new Worker file unattributable
   // (D25), so the Worker must stage or commit new files before the phase ends.
   async function captureNextPhaseBoundary(loopState, objective, reviewScope, cwd) {
-    if (reviewScope?.type !== 'phase' || reviewScope.phaseIndex + 1 >= phasesOf(objective).length) return null;
+    if (reviewScope?.type !== 'phase') return null;
     try {
       const b = await captureBaselineFn({ cwd });
       if (!b?.head || b.evidenceComplete === false) return null;
@@ -2032,6 +2068,13 @@ export function createReviewLoopController({
     }
 
     delta.diffScope = diffScope;
+    if (reviewScope.type === 'final') {
+      const reduced = await reduceOversizedFinalDiff({ loopState, cwd, delta });
+      if (reduced) {
+        delta.diff = reduced.diff;
+        delta.diffScope = 'final-cross-phase';
+      }
+    }
     const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
@@ -2102,6 +2145,8 @@ export function createReviewLoopController({
         reviewScope,
         evidenceFingerprint: delta.fingerprint,
         phaseBaseline: await captureNextPhaseBoundary(loopState, objective, reviewScope, cwd),
+        // Bounded: beyond this the final gate simply keeps reviewing the full diff.
+        reviewedFiles: (delta.changedFiles ?? []).length <= 2000 ? [...(delta.changedFiles ?? [])] : null,
       });
       if (phaseResult) {
         await saveLoop(loopState);
