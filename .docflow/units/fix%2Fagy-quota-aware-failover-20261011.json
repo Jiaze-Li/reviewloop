@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:09:46.265Z",
+  "updatedAt": "2026-10-11T02:15:36.657Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
     "title": "fix/agy-quota-aware-failover-20261011",
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Document quota preflight and strict unknown-spend boundaries",
     "next": "",
     "history": [
@@ -152,13 +152,15 @@
     ],
     "pr": {
       "number": 15,
-      "state": "open",
+      "state": "closed",
       "title": "Recognize exhausted AGY quota before model dispatch and safely fail over",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/15",
-      "merged": false,
-      "updatedAt": "2026-10-11T02:09:34Z"
+      "merged": true,
+      "mergedAt": "2026-10-11T02:15:27Z",
+      "closedAt": "2026-10-11T02:15:27Z",
+      "updatedAt": "2026-10-11T02:15:28Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-11T02:15:27Z",
+    "outcome": "Merged"
   }
 }
