@@ -96,6 +96,11 @@ export function createAgyQuotaPreflight({
       const exhausted = parseAgyQuotaUsage(output, t);
       if (!exhausted) return { checked: false, reason: 'unknown_response' };
       for (const { poolId, resetAt } of exhausted) {
+        const current = quotaRegistry.get(poolId);
+        // Avoid a durable state rewrite and incrementing the failure counter
+        // for an unchanged /usage quota window on every periodic refresh.
+        if (current.status === 'COOLDOWN' && current.source === 'agy_usage_preflight'
+          && (resetAt === null || current.resetAt === resetAt)) continue;
         quotaRegistry.recordCooldown(poolId, { reason: 'quota_exhausted', resetAt, source: 'agy_usage_preflight' });
       }
       return { checked: true, exhaustedPools: exhausted.map((entry) => entry.poolId) };
