@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:14:51.541Z",
+  "updatedAt": "2026-10-11T13:15:30.931Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "docs: define ReviewLoop as LOCAL-only and reject retired PR MCP argument",
+    "current": "docs: remove active PR architecture and preserve historical certification provenance",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-10-11T21:14:40+08:00",
         "text": "test: retire PR-only fixtures, preserve LOCAL regression coverage"
+      },
+      {
+        "at": "2026-10-11T21:15:20+08:00",
+        "text": "docs: define ReviewLoop as LOCAL-only and reject retired PR MCP argument"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:14:40+08:00",
         "message": "docs: define ReviewLoop as LOCAL-only and reject retired PR MCP argument"
+      },
+      {
+        "sha": "3b0ff1ff7163b28013f3e686b06801d1bd04d037",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-11T21:15:20+08:00",
+        "message": "docs: remove active PR architecture and preserve historical certification provenance"
       }
     ],
     "pr": null,
