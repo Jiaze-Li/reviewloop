@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:23:04.981Z",
+  "updatedAt": "2026-10-11T16:04:40.852Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "chore: remove orphaned PR provider review fixtures",
+    "current": "fix: complete PR bot handoff and remove retired GitHub diagnostic",
     "next": "",
     "history": [
       {
@@ -42,6 +42,14 @@
       {
         "at": "2026-10-11T21:22:51+08:00",
         "text": "fix: prevent archived PR sessions from CLI resume and human recovery"
+      },
+      {
+        "at": "2026-10-12T00:04:28+08:00",
+        "text": "chore: remove orphaned PR provider review fixtures"
+      },
+      {
+        "at": "2026-10-12T00:04:29+08:00",
+        "text": "fix: restore executable ReviewLoop CLI"
       }
     ],
     "commits": [
@@ -98,6 +106,18 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:22:51+08:00",
         "message": "chore: remove orphaned PR provider review fixtures"
+      },
+      {
+        "sha": "2ffe4046d08612e31fa3e0e570a2d2a9628f3207",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-12T00:04:28+08:00",
+        "message": "fix: restore executable ReviewLoop CLI"
+      },
+      {
+        "sha": "8e27a2a3cc66899f5feedddb93d2349298cb2b27",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-12T00:04:29+08:00",
+        "message": "fix: complete PR bot handoff and remove retired GitHub diagnostic"
       }
     ],
     "pr": {
