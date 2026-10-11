@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:06:26.913Z",
+  "updatedAt": "2026-10-11T02:06:32.911Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -30,6 +30,10 @@
       {
         "at": "2026-10-11T10:06:19+08:00",
         "text": "Classify structured zero-turn AGY quota rejection and compact reset durations"
+      },
+      {
+        "at": "2026-10-11T10:06:21+08:00",
+        "text": "Wire optional AGY quota preflight before first model selection"
       }
     ],
     "commits": [
@@ -67,6 +71,12 @@
         "sha": "34c800035af38142f1ba5341262a51d70a3ad0f1",
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:06:19+08:00",
+        "message": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "sha": "0c57b189bada47ae9dc0429629bf5d3c8c99aa77",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:06:21+08:00",
         "message": "Wire optional AGY quota preflight before first model selection"
       }
     ],
