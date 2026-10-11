@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-11T07:14:21.918Z",
+  "task": {
+    "id": "claude/phase-scoped-review",
+    "branch": "claude/phase-scoped-review",
+    "title": "claude/phase-scoped-review",
+    "task": "Development branch: claude/phase-scoped-review",
+    "started": "2026-10-11T07:11:07Z",
+    "status": "In progress",
+    "current": "Document phase-scoped diffs; allow nextDiffScope in the MCP output schema",
+    "next": "",
+    "history": [
+      {
+        "at": "2026-10-11T07:12:33Z",
+        "text": "Review each LOCAL phase gate against the previous phase boundary"
+      },
+      {
+        "at": "2026-10-11T07:13:08Z",
+        "text": "Share gate-command resolution, round fingerprints and finding history between LOCAL and PR"
+      },
+      {
+        "at": "2026-10-11T07:14:12Z",
+        "text": "Make same-family transient retry provider-neutral"
+      }
+    ],
+    "commits": [
+      {
+        "sha": "55c977e3470985989dc57840e7e1bd7c91cd0b3d",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:11:07Z",
+        "message": "Review each LOCAL phase gate against the previous phase boundary"
+      },
+      {
+        "sha": "a5a1676433c27ee60219b815fb278c4c21beaaa1",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:12:33Z",
+        "message": "Share gate-command resolution, round fingerprints and finding history between LOCAL and PR"
+      },
+      {
+        "sha": "7ac68d05e0ba2287c13e7527f0c8123167b61bc3",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:13:08Z",
+        "message": "Make same-family transient retry provider-neutral"
+      },
+      {
+        "sha": "5c4cc86feb603fa24934dc715c511bcde7f08289",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:14:12Z",
+        "message": "Document phase-scoped diffs; allow nextDiffScope in the MCP output schema"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
