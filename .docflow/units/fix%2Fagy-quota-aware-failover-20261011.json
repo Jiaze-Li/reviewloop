@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:07:02.995Z",
+  "updatedAt": "2026-10-11T02:07:22.322Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Test non-billing AGY quota probe, TTL, and conservative routing hints",
+    "current": "Reproduce real Opus zero-turn quota error and assert Gemini failover",
     "next": "",
     "history": [
       {
@@ -42,6 +42,10 @@
       {
         "at": "2026-10-11T10:06:48+08:00",
         "text": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "at": "2026-10-11T10:07:10+08:00",
+        "text": "Test non-billing AGY quota probe, TTL, and conservative routing hints"
       }
     ],
     "commits": [
@@ -98,6 +102,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:06:48+08:00",
         "message": "Test non-billing AGY quota probe, TTL, and conservative routing hints"
+      },
+      {
+        "sha": "b506bc02da3aef83570fee5bf90c2e66567ce0e2",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:07:10+08:00",
+        "message": "Reproduce real Opus zero-turn quota error and assert Gemini failover"
       }
     ],
     "pr": null,
