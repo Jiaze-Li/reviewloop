@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-11T02:04:41.471Z",
+  "task": {
+    "id": "fix/agy-quota-aware-failover-20261011",
+    "branch": "fix/agy-quota-aware-failover-20261011",
+    "title": "fix/agy-quota-aware-failover-20261011",
+    "task": "Development branch: fix/agy-quota-aware-failover-20261011",
+    "started": "2026-10-11T10:04:33+08:00",
+    "status": "In progress",
+    "current": "Add guarded zero-model-turn AGY quota preflight before routing",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "8b22c9a1216eec8f3ac9d33a1d60343ab5b5c1e9",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:04:33+08:00",
+        "message": "Add guarded zero-model-turn AGY quota preflight before routing"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
