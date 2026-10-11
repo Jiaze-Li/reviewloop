@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-11T13:06:09.605Z",
+  "task": {
+    "id": "refactor/local-only-retire-pr-20261011",
+    "branch": "refactor/local-only-retire-pr-20261011",
+    "title": "refactor/local-only-retire-pr-20261011",
+    "task": "Development branch: refactor/local-only-retire-pr-20261011",
+    "started": "2026-10-11T21:05:54+08:00",
+    "status": "In progress",
+    "current": "refactor: remove ReviewLoop PR controller path",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "41143dbc492d054b985362535851f4ee582d6688",
+        "branch": "refactor/local-only-retire-pr-20261011",
+        "timestamp": "2026-10-11T21:05:54+08:00",
+        "message": "refactor: remove ReviewLoop PR controller path"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
