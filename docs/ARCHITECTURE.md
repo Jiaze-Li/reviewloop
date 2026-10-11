@@ -317,9 +317,14 @@ shared-pool health stay independent.
 AGY quota-aware routing: before the first paid Reviewer/Supervisor dispatch,
 the MCP controller reads `agy --print=/usage --output-format json` (read-only,
 zero model turns, supported CLI >= 1.1.11) through an isolated, bounded
-90-second-cached probe. Any quota window explicitly at zero cools its shared
-pool until the latest exhausted window's reset time; an unsupported or
-unavailable probe leaves existing routing unchanged. A structured zero-turn,
+probe. The last **successful** /usage snapshot is stored in the shared quota
+registry: read it again after **24 hours** or when a known exhausted pool
+reaches its predicted reset time, whichever comes first. Failed probes keep a
+short 90-second retry throttle, without inventing a successful snapshot.
+Any quota window explicitly at zero cools its shared pool until the latest
+exhausted window's reset time. An early promotional reset can release only a
+cooldown previously established by /usage (not a model-specific provider
+error). An unsupported or unavailable probe leaves existing routing unchanged. A structured zero-turn,
 empty-response, complete all-zero AGY quota ERROR also qualifies as a proven
 pre-admission rejection. Other ambiguous errors still leave spend UNRESOLVED
 and require explicit human acknowledgement; no retry ever assumes unknown

@@ -123,8 +123,10 @@ export class QuotaPoolRegistry {
   constructor({ filePath = path.join(os.homedir(), '.reviewloop', 'quota-pools.json'), topology = DEFAULT_QUOTA_TOPOLOGY, now = () => Date.now(), baseBackoffMs = DEFAULT_BACKOFF_MS } = {}) {
     this.filePath = filePath; this.topology = { ...topology }; this.now = now; this.baseBackoffMs = baseBackoffMs;
     this.pools = {};
+    this.usageCheck = null; // Last successful, read-only AGY /usage snapshot (shared across MCP restarts).
     this._loadedMtimeMs = null;
     this._pending = {};
+    this._pendingUsageCheck = null;
     this.refresh();
   }
   // Disk-backed registries re-read the file when another process (or a
@@ -136,7 +138,9 @@ export class QuotaPoolRegistry {
     try {
       const mtimeMs = statSync(this.filePath).mtimeMs;
       if (mtimeMs === this._loadedMtimeMs) return;
-      this.pools = JSON.parse(readFileSync(this.filePath, 'utf8')).pools ?? {};
+      const saved = JSON.parse(readFileSync(this.filePath, 'utf8'));
+      this.pools = saved.pools ?? {};
+      this.usageCheck = saved.usageCheck ?? null;
       this._loadedMtimeMs = mtimeMs;
       this._overlayPending();
     } catch { /* keep current view */ }
@@ -149,12 +153,19 @@ export class QuotaPoolRegistry {
       const onDisk = this.pools[poolId];
       if (!onDisk || Date.parse(entry.checkedAt ?? 0) >= Date.parse(onDisk.checkedAt ?? 0)) this.pools[poolId] = entry;
     }
+    if (this._pendingUsageCheck && (!this.usageCheck
+      || Date.parse(this._pendingUsageCheck.checkedAt) >= Date.parse(this.usageCheck.checkedAt))) {
+      this.usageCheck = this._pendingUsageCheck;
+    }
   }
   persist() {
     if (!this.filePath) return;
     mkdirSync(path.dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ schema: 'reviewloop.quota-pools/v1', pools: this.pools }, null, 2)}\n`);
+    writeFileSync(tmp, `${JSON.stringify({
+      schema: 'reviewloop.quota-pools/v1', pools: this.pools,
+      ...(this.usageCheck ? { usageCheck: this.usageCheck } : {}),
+    }, null, 2)}\n`);
     renameSync(tmp, this.filePath);
     try { this._loadedMtimeMs = statSync(this.filePath).mtimeMs; } catch { /* ignore */ }
   }
@@ -217,7 +228,9 @@ export class QuotaPoolRegistry {
         // process's memory only: it still routes correctly here; other processes
         // just learn it later. A review is never blocked (wait is bounded ~1s).
         const before = JSON.stringify(this.pools);
+        const beforeUsageCheck = JSON.stringify(this.usageCheck);
         mutate();
+        if (JSON.stringify(this.usageCheck) !== beforeUsageCheck) this._pendingUsageCheck = this.usageCheck;
         const prior = JSON.parse(before);
         for (const [id, entry] of Object.entries(this.pools)) {
           if (JSON.stringify(prior[id]) !== JSON.stringify(entry)) this._pending[id] = entry;
@@ -231,7 +244,7 @@ export class QuotaPoolRegistry {
       // taken over meanwhile, keep the update in memory only.
       let stillOwner = false;
       try { stillOwner = readFileSync(ownerFile, 'utf8') === token; } catch { /* lost */ }
-      if (stillOwner) { this.persist(); this._pending = {}; }
+      if (stillOwner) { this.persist(); this._pending = {}; this._pendingUsageCheck = null; }
     } finally {
       if (locked) {
         try {
@@ -256,9 +269,25 @@ export class QuotaPoolRegistry {
     }
     return copy(pool);
   }
-  usable(family) { return this.poolsFor(family).every((poolId) => this.get(poolId).status !== POOL_STATUS.COOLDOWN); }
-  recordReady(poolId, { source = 'runtime_probe' } = {}) {
+  // A successful AGY /usage check is not the same as a model's health check.
+  // Store its timestamp separately from pool.checkedAt (which tracks routing
+  // transitions), so unchanged cooldowns still get a durable 24-hour schedule.
+  lastUsageCheck() { this.refresh(); return this.usageCheck ? copy(this.usageCheck) : null; }
+  recordUsageCheck({ checkedAt = nowIso(this.now()), nextResetAt = null } = {}) {
+    if (!Number.isFinite(Date.parse(checkedAt))) throw new Error('Invalid /usage check timestamp');
+    const reset = Number.isFinite(Date.parse(nextResetAt)) && Date.parse(nextResetAt) > Date.parse(checkedAt)
+      ? nextResetAt : null;
     this._update(() => {
+      if (this.usageCheck && Date.parse(this.usageCheck.checkedAt) > Date.parse(checkedAt)) return;
+      this.usageCheck = { checkedAt, nextResetAt: reset };
+    });
+  }
+  usable(family) { return this.poolsFor(family).every((poolId) => this.get(poolId).status !== POOL_STATUS.COOLDOWN); }
+  recordReady(poolId, { source = 'runtime_probe', onlyIfSource = null } = {}) {
+    this._update(() => {
+      // A successful /usage snapshot must not clear an intervening provider's
+      // model-specific error or cooldown that it did not establish itself.
+      if (onlyIfSource && this.pools[poolId]?.source !== onlyIfSource) return;
       this.pools[poolId] = { ...(this.pools[poolId] ?? { poolId }), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 };
     });
   }
