@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:07:22.322Z",
+  "updatedAt": "2026-10-11T02:07:50.206Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -110,7 +110,14 @@
         "message": "Reproduce real Opus zero-turn quota error and assert Gemini failover"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 15,
+      "state": "open",
+      "title": "Recognize exhausted AGY quota before model dispatch and safely fail over",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/15",
+      "merged": false,
+      "updatedAt": "2026-10-11T02:07:41Z"
+    },
     "completed": null,
     "outcome": null
   }
