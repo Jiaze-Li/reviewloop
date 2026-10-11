@@ -51,21 +51,14 @@ export class Persistence {
   }
 
   // Shallow read-modify-write merge of the workflow-scoped snapshot. Used to
-  // persist PR Closeout reviewer selection / fallback progress / repair-round
-  // budget without clobbering unrelated workflow state. On process restart the
-  // merged snapshot is what prevents re-triggering a pending reviewer/head or
-  // switching an already-locked reviewer.
+  // persist partial workflow progress without clobbering unrelated workflow
+  // state.
   async updateWorkflowState(workflowId, patch) {
     if (typeof workflowId !== 'string' || workflowId === '') {
       throw new Error('updateWorkflowState requires a non-empty workflowId');
     }
     const current = (await this.readWorkflowState(workflowId)) ?? {};
     const next = { ...current, ...(patch ?? {}) };
-    // Closeout contains durable finding/thread evidence. Partial transition
-    // updates must not discard evidence needed after a checkpoint resume.
-    if (current.prCloseout && patch?.prCloseout) {
-      next.prCloseout = { ...current.prCloseout, ...patch.prCloseout };
-    }
     await this.writeWorkflowState(workflowId, next);
     return next;
   }

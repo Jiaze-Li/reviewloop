@@ -46,29 +46,6 @@ export function isCancellation(error, signal) {
   return codes.has(code);
 }
 
-// V2-C trusted PR-closeout trust-boundary failures. Every one of these is a
-// fail-closed condition: the deterministic closeout loop must stop and surface
-// the reason rather than guess when reviewer identity, PR head, write
-// capability, or repair safety cannot be established.
-export class PrCloseoutError extends Error {
-  constructor(code, message, details) {
-    super(message ?? code);
-    this.name = 'PrCloseoutError';
-    this.code = code;
-    if (details && typeof details === 'object') this.details = details;
-  }
-}
-
-export const PR_CLOSEOUT_ERROR_CODES = Object.freeze({
-  UNTRUSTED_REVIEWER: 'UNTRUSTED_REVIEWER',
-  STALE_REVIEW_HEAD: 'STALE_REVIEW_HEAD',
-  MALFORMED_REVIEW: 'MALFORMED_REVIEW',
-  UNSAFE_REPAIR_ACTION: 'UNSAFE_REPAIR_ACTION',
-  FORK_WRITE_FORBIDDEN: 'FORK_WRITE_FORBIDDEN',
-  REPAIR_GATE_NOT_PASSED: 'REPAIR_GATE_NOT_PASSED',
-  THREAD_RESOLUTION_UNAVAILABLE: 'THREAD_RESOLUTION_UNAVAILABLE',
-});
-
 // Token-Safety authorization boundary. A permit / spend-authorization failure
 // is an ORCHESTRATOR decision, never evidence that a provider is unavailable:
 // the role runtime must propagate it immediately, perform ZERO failover, and

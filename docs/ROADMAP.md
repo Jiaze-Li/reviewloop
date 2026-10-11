@@ -30,16 +30,16 @@
 - Malformed Reviewer/Supervisor output fails closed (never CLEAN, never valid
   REWORK guidance).
 - Aggregate Token Safety is durable across rounds and restarts.
-- Production PR backend wired via the `gh` CLI (read + one trigger comment).
+- Production PR backend wired via the `gh` CLI (read + one trigger comment). **Superseded by D28** — the backend is now a read-only target adapter with no trigger comment.
 - Strict PR trust boundary (reviewer identity + explicit reviewed HEAD ==
-  current HEAD), reusing the V2 trusted-review primitives.
+  current HEAD), reusing the V2 trusted-review primitives. **Superseded by D28** — removed with the external-review engine; exact-HEAD binding is now enforced by the PR snapshot worktree.
 - No silent diff truncation — bounded or deterministically chunked review.
 - Reviewer/Supervisor pool routed through RoleRouter; the CallIntent binds the
   actually-selected family; bounded failover re-authorizes.
 - Full baseline attribution via `git stash create`; unattributable state and
   "no Worker change yet" both fail safely.
 - Baseline Gate evidence captured at `begin` (0 model tokens).
-- PR reviewer default = `codex`; `internal` can never be a PR trigger identity.
+- PR reviewer default = `codex`; `internal` can never be a PR trigger identity. **Superseded by D28** — there is no PR reviewer identity; the internal Reviewer reviews every target.
 
 ## V2 pre-freeze token-safety pass (this change)
 
