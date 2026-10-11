@@ -791,6 +791,20 @@ export function createReviewLoopController({
       baselineGateEvidence: baselineGate,
     });
 
+    // Zero-model plan check. Advisory only: a docs-only task legitimately has
+    // nothing to run, but a phase that only a model can judge is costly and weak.
+    const planWarnings = [];
+    if (!(verificationPlan?.commands?.length)) {
+      for (const phase of preflightPhases) {
+        if (!phase.verificationCommands?.length && !phase.verificationEvidence?.length) {
+          planWarnings.push(`phase ${phase.id} has no verification commands or evidence and no global verification commands are frozen; only the Reviewer can judge it`);
+        }
+      }
+    }
+    if (preflightPhases.length > 8) {
+      planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
+    }
+
     const loopState = initialLoopState(objective);
     loopState.verificationCommands = verificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
@@ -810,6 +824,7 @@ export function createReviewLoopController({
       phaseCount: phasesOf(objective).length,
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
+      ...(planWarnings.length ? { planWarnings } : {}),
     };
   }
 

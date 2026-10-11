@@ -113,6 +113,7 @@ export function createReviewLoopMcpServer({
         reviewer: z.string(),
         phaseCount: z.number().int().optional(),
         currentPhase: z.string().optional(),
+        planWarnings: z.array(z.string()).optional(),
       },
     },
     async ({
@@ -151,6 +152,7 @@ export function createReviewLoopMcpServer({
         reviewer: res.reviewer,
         phaseCount: res.phaseCount ?? 0,
         currentPhase: res.currentPhase ?? 'task',
+        ...(res.planWarnings?.length ? { planWarnings: res.planWarnings } : {}),
       };
       return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
     },
