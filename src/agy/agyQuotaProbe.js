@@ -5,7 +5,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { narrowReviewTransportCwd, narrowAgyGeminiDir } from '../reviewloop/adapters/scratchCwd.js';
 
-const DEFAULT_TTL_MS = 90_000;
+const DEFAULT_TTL_MS = 90_000; // Short retry throttle for unavailable/unsupported probes.
+const SUCCESS_REFRESH_MS = 24 * 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 12_000;
 const PROBE_MAX_BYTES = 256 * 1024;
 const execFileAsync = promisify(execFile);
@@ -24,8 +25,8 @@ function poolForGroup(value) {
   return null;
 }
 
-/** Recognize ONLY the supported structured CLI command reply, never free text. */
-export function parseAgyQuotaUsage(stdout, nowMs = Date.now()) {
+/** Recognize ONLY the supported zero-turn structured command envelope. */
+function parseAgyQuotaSnapshot(stdout, nowMs = Date.now()) {
   let payload;
   try { payload = JSON.parse(String(stdout)); } catch { return null; }
   if (!payload || payload.status !== 'SUCCESS' || payload.num_turns !== 0
@@ -33,22 +34,38 @@ export function parseAgyQuotaUsage(stdout, nowMs = Date.now()) {
     || !/^(?:\/)?(?:usage|quota)$/.test(String(payload.command?.name ?? '').toLowerCase())
     || !Array.isArray(payload.command?.data?.groups)) return null;
 
-  const records = [];
+  const exhausted = [];
+  const availablePools = new Set();
+  const exhaustedPoolIds = new Set();
+  let recognized = false;
   for (const group of payload.command.data.groups) {
     const poolId = poolForGroup(group?.name ?? group?.label ?? group?.title);
-    if (!poolId || !Array.isArray(group.buckets)) continue;
-    const exhausted = group.buckets.filter((bucket) => (
-      bucket && typeof bucket.remaining_fraction === 'number'
-      && Number.isFinite(bucket.remaining_fraction) && bucket.remaining_fraction === 0
-    ));
-    if (exhausted.length === 0) continue;
-    const resets = exhausted.map((bucket) => Date.parse(bucket.reset_time ?? ''))
+    if (!poolId || !Array.isArray(group.buckets) || group.buckets.length === 0
+      || !group.buckets.every((bucket) => (
+        bucket && typeof bucket.remaining_fraction === 'number'
+        && Number.isFinite(bucket.remaining_fraction)
+        && bucket.remaining_fraction >= 0 && bucket.remaining_fraction <= 1
+      ))) continue;
+    recognized = true;
+    const empty = group.buckets.filter((bucket) => bucket.remaining_fraction === 0);
+    if (empty.length === 0) {
+      availablePools.add(poolId);
+      continue;
+    }
+    exhaustedPoolIds.add(poolId);
+    const resets = empty.map((bucket) => Date.parse(bucket.reset_time ?? ''))
       .filter((value) => Number.isFinite(value) && value > nowMs && value <= nowMs + 8 * 86_400_000);
-    // Every exhausted window must reset before the group becomes usable.
-    const resetAt = resets.length === exhausted.length ? new Date(Math.max(...resets)).toISOString() : null;
-    records.push({ poolId, resetAt });
+    // Every exhausted window must reset before this group becomes usable.
+    const resetAt = resets.length === empty.length ? new Date(Math.max(...resets)).toISOString() : null;
+    exhausted.push({ poolId, resetAt });
   }
-  return records;
+  if (!recognized) return null;
+  return { exhausted, availablePools: [...availablePools].filter((id) => !exhaustedPoolIds.has(id)) };
+}
+
+/** The historic parser interface returns only depleted pools. */
+export function parseAgyQuotaUsage(stdout, nowMs = Date.now()) {
+  return parseAgyQuotaSnapshot(stdout, nowMs)?.exhausted ?? null;
 }
 
 /**
@@ -70,7 +87,17 @@ export function createAgyQuotaPreflight({
   return async function preflightQuota() {
     const t = now();
     if (t < nextCheckAt) return { checked: false, reason: 'cached' };
-    // Throttle both successful and failed queries; never hammer the auth service.
+    const last = quotaRegistry.lastUsageCheck();
+    const lastAt = Date.parse(last?.checkedAt ?? '');
+    const resetAt = Date.parse(last?.nextResetAt ?? '');
+    // The read-only snapshot is shared across MCP restarts. Check at least
+    // every 24h, or as soon as a previously reported quota reset is due.
+    const recent = Number.isFinite(lastAt) && t >= lastAt && t - lastAt < SUCCESS_REFRESH_MS;
+    const resetDue = Number.isFinite(resetAt) && t >= resetAt
+      && (!Number.isFinite(lastAt) || lastAt < resetAt);
+    if (recent && !resetDue) return { checked: false, reason: 'cached' };
+    // Failed queries are retried after a short throttle, without fabricating
+    // a successful snapshot or interfering with the existing routing ledger.
     nextCheckAt = t + ttlMs;
     const options = {
       cwd,
@@ -93,8 +120,19 @@ export function createAgyQuotaPreflight({
         '--print=/usage', '--output-format', 'json', `--gemini_dir=${geminiDir}`,
       ], options);
       const output = typeof queryResult === 'string' ? queryResult : queryResult?.stdout;
-      const exhausted = parseAgyQuotaUsage(output, t);
-      if (!exhausted) return { checked: false, reason: 'unknown_response' };
+      const snapshot = parseAgyQuotaSnapshot(output, t);
+      if (!snapshot) return { checked: false, reason: 'unknown_response' };
+      const exhausted = snapshot.exhausted;
+      // If a promotional quota reset occurred early, release ONLY a cooldown
+      // previously established by /usage itself. A provider's model-specific
+      // quota rejection remains authoritative and must not be cleared here.
+      for (const poolId of snapshot.availablePools) {
+        const current = quotaRegistry.get(poolId);
+        if (current.source === 'agy_usage_preflight'
+          && (current.status === 'COOLDOWN' || current.status === 'UNKNOWN')) {
+          quotaRegistry.recordReady(poolId, { source: 'agy_usage_preflight', onlyIfSource: 'agy_usage_preflight' });
+        }
+      }
       for (const { poolId, resetAt } of exhausted) {
         const current = quotaRegistry.get(poolId);
         // Avoid a durable state rewrite and incrementing the failure counter
@@ -103,6 +141,12 @@ export function createAgyQuotaPreflight({
           && (resetAt === null || current.resetAt === resetAt)) continue;
         quotaRegistry.recordCooldown(poolId, { reason: 'quota_exhausted', resetAt, source: 'agy_usage_preflight' });
       }
+      const upcoming = exhausted.map(({ resetAt }) => Date.parse(resetAt ?? ''))
+        .filter((value) => Number.isFinite(value) && value > t);
+      quotaRegistry.recordUsageCheck({
+        checkedAt: new Date(t).toISOString(),
+        nextResetAt: upcoming.length ? new Date(Math.min(...upcoming)).toISOString() : null,
+      });
       return { checked: true, exhaustedPools: exhausted.map((entry) => entry.poolId) };
     } catch {
       // A failed read is NOT permission to bypass unresolved-spend protection.
