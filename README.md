@@ -101,6 +101,19 @@ that cannot be trusted (untracked files, incomplete attribution, an empty phase
 delta) review the cumulative diff from `reviewloop_begin` instead. Stage or
 commit new files before ending a phase to keep the phase-delta path.
 
+If the cumulative diff is too large for one final review, the final gate
+reviews every file changed in more than one phase plus everything changed since
+the last `PHASE_PASS`; each remaining file was changed in exactly one phase and
+fully reviewed at that gate (`diffScope: final-cross-phase`). Any doubt keeps the
+old behaviour. `reviewloop_begin` also returns advisory `planWarnings` for
+phases that only a model can judge.
+
+A gate that exhausts its automatic convergence budget stops the Worker
+(`HUMAN_REQUIRED`, `budgetExhausted`). A human can run
+`reviewloop reopen-gate --loop <id> --reason "..."` to give that one gate a fresh
+budget (max 3 times per loop) without losing completed phases or model-spend
+accounting; the Token Sentinel stop cannot be reopened this way.
+
 After `PHASE_PASS`, ReviewLoop returns a durable `resumePacket` containing the
 next phase, inherited invariants, repository identity and evidence summary. A
 Worker may use that packet as a safe context-compaction/refresh boundary while
@@ -145,6 +158,7 @@ pushes, merges, force-pushes, or posts a third-party review trigger.
 ```
 reviewloop doctor        zero-token prerequisite + repo-invariant check
 reviewloop status        list local ReviewLoop sessions
+reviewloop reopen-gate    human override: fresh convergence budget for ONE stuck gate (--loop, --reason)
 npm run install-global   install/refresh the global policy + MCP for present agents
 npm run doctor
 ```
