@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:09:42.167Z",
+  "updatedAt": "2026-10-11T02:09:46.265Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -156,7 +156,7 @@
       "title": "Recognize exhausted AGY quota before model dispatch and safely fail over",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/15",
       "merged": false,
-      "updatedAt": "2026-10-11T02:09:13Z"
+      "updatedAt": "2026-10-11T02:09:34Z"
     },
     "completed": null,
     "outcome": null
