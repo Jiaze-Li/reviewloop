@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:08:45.046Z",
+  "updatedAt": "2026-10-11T02:09:09.478Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive",
+    "current": "Avoid rewriting unchanged depleted pool state on repeated quota checks",
     "next": "",
     "history": [
       {
@@ -50,6 +50,10 @@
       {
         "at": "2026-10-11T10:08:33+08:00",
         "text": "Reproduce real Opus zero-turn quota error and assert Gemini failover"
+      },
+      {
+        "at": "2026-10-11T10:09:01+08:00",
+        "text": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive"
       }
     ],
     "commits": [
@@ -118,6 +122,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:08:33+08:00",
         "message": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive"
+      },
+      {
+        "sha": "2001a3a48ce6cb21f47e2618647c7486ae7de22a",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:09:01+08:00",
+        "message": "Avoid rewriting unchanged depleted pool state on repeated quota checks"
       }
     ],
     "pr": {
