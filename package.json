@@ -2,7 +2,7 @@
   "name": "reviewloop",
   "version": "2.0.0",
   "private": true,
-  "description": "ReviewLoop: a post-execution review and repair controller for coding agents. The Worker (your current coding agent) owns execution; ReviewLoop owns one deterministic Gate + independent Reviewer review engine (LOCAL and PR are both just review targets), non-convergence detection, and exception guidance.",
+  "description": "ReviewLoop: a post-execution review and repair controller for coding agents. The Worker (your current coding agent) owns execution; ReviewLoop owns the LOCAL Git-delta evidence, deterministic Gate, independent Reviewer, non-convergence detection, and Supervisor guidance. GitHub PR review is handled by claude-review-bot.",
   "type": "module",
   "bin": {
     "reviewloop": "bin/reviewloop.js",

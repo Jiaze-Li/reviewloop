@@ -17,8 +17,8 @@ reorder, or collapse phases into prose. A declared phased task with empty
 `phases` must not proceed.
 
 Pass global constraints and any required non-command proof
-(runtime/artifact/manual) as `evidenceRequirements`. For PR review also pass
-`prNumber`. One user task = one `loopId`.
+(runtime/artifact/manual) as `evidenceRequirements`. One LOCAL task = one
+`loopId`; claude-review-bot owns GitHub PR review.
 If `reviewloop_begin` returns `planWarnings`, fix them and re-begin before any edit.
 
 ## Work / review
@@ -38,7 +38,7 @@ actually performing the check.
 - `HUMAN_REQUIRED`: STOP and report the blocker. Never open a fresh loop to
   bypass a spent convergence/safety budget.
 - `WAITING_FOR_REVIEW`: wait, then retry.
-- `PUSH_REQUIRED` / `NO_PROGRESS`: change or push real state first.
+- `NO_PROGRESS`: change real local code or submitted evidence before retrying.
 
 Do not re-review identical evidence without a real state/scope change.
 

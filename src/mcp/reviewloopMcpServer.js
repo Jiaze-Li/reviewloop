@@ -1,21 +1,7 @@
-// ReviewLoop MCP Server.
-//
-// Deliberately TINY agent-facing surface — every exposed tool/schema is
-// always-loaded Worker context. Exactly two normal Worker-facing tools:
-//
-//   reviewloop_begin(goal, cwd, prNumber?, phases?)
-//       Register the immutable task objective + optional phase plan and capture the baseline
-//       pre-edit LOCAL baseline and verification contract. Zero model calls.
-//
-//   reviewloop_review(loopId)
-//       The one re-entrant operation: deterministic Gate -> Reviewer (if
-//       justified) -> convergence policy -> Supervisor (only on non-
-//       convergence). For a PR target the same engine runs over the PR
-//       base -> exact HEAD diff, with a pre-PASS live-HEAD recheck. Returns
-//       PHASE_PASS | PASS | REWORK | HUMAN_REQUIRED | WAITING_FOR_REVIEW |
-//       NO_PROGRESS. PHASE_PASS is non-terminal; PASS is final.
-//
-// Status / dashboard / stop live on the human `reviewloop` CLI, not here.
+// ReviewLoop LOCAL MCP server. Exactly two Worker-facing tools:
+// reviewloop_begin freezes the pre-edit local task / Git baseline;
+// reviewloop_review runs Gate / independent Reviewer / Supervisor.
+// GitHub PR review belongs to claude-review-bot.
 
 import path from 'node:path';
 import os from 'node:os';
@@ -77,6 +63,9 @@ export function createReviewLoopMcpServer({
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
+        // Explicit compatibility tripwire. Without it Zod could silently drop
+        // unknown prNumber and accidentally start a LOCAL review.
+        prNumber: z.number().int().optional().describe('RETIRED: PR review is handled by claude-review-bot; supplying this errors'),
         constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
         contractText: z.string().min(1).optional().describe('complete self-contained frozen task contract, at most 65536 UTF-8 bytes; never truncate acceptance criteria or replace them with a reference to earlier conversation'),
         evidenceRequirements: z.array(z.object({
@@ -114,6 +103,7 @@ export function createReviewLoopMcpServer({
     async ({
       goal,
       cwd: reqCwd,
+      prNumber,
       constraints,
       contractText,
       evidenceRequirements,
@@ -125,6 +115,7 @@ export function createReviewLoopMcpServer({
       const res = await ctl.begin({
         goal,
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
+        prNumber: prNumber ?? null,
         constraints: constraints ?? [],
         contractText: contractText ?? '',
         evidenceRequirements: evidenceRequirements ?? [],

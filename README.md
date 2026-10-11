@@ -1,15 +1,13 @@
-# ReviewLoop (gpt-dev-loop)
+# ReviewLoop
 
-ReviewLoop adds an autonomous review/fix loop around the coding agent you are
-already using. It does not replace or spawn that coding agent.
+ReviewLoop verifies **LOCAL coding-agent work**. The Worker writes code;
+ReviewLoop freezes the task contract and pre-edit baseline, runs the
+mechanical Gate, and controls independent Reviewer/Supervisor and bounded repair.
 
-> ReviewLoop is a post-execution review and repair controller for coding
-> agents. The user's current coding agent (the **Worker**) owns execution;
-> ReviewLoop owns independent verification, review, non-convergence detection,
-> and exception guidance. It has ONE review engine — the same deterministic
-> Gate, internal Reviewer routing, Supervisor and epoch-based convergence policy
-> judge a LOCAL target (baseline → Worker delta) and a PR target (PR base →
-> exact PR HEAD).
+**GitHub PR review is owned by [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).**
+ReviewLoop's PR mode was retired on 2026-10-11. Saved PR sessions remain on
+disk but cannot be resumed as LOCAL; start a new PR review through the bot.
+GitHub CI remains responsible for tests on pushed code.
 
 ## Model
 
@@ -34,14 +32,14 @@ The Worker calls two MCP tools:
 
 | tool | when | cost |
 |---|---|---|
-| `reviewloop_begin({ goal, cwd, prNumber?, constraints?, contractText?, phases?, evidenceRequirements?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
+| `reviewloop_begin({ goal, cwd, constraints?, contractText?, phases?, evidenceRequirements?, verificationCommands?, blockingSeverities?, maxReviewRounds? })` | before the first edit | 0 model calls |
 | `reviewloop_review({ loopId, evidence? })` | when the current gate is ready | Gate (0) + Reviewer if justified |
 
 `reviewloop_review` returns one of: `PHASE_PASS` (non-terminal; continue the
 next frozen phase in the same loop), `PASS` (final whole-task certification),
 `REWORK` (fix the findings in the same session, call again), `HUMAN_REQUIRED`,
 `WAITING_FOR_REVIEW` (transient — call again once state settles),
-`NO_PROGRESS`, `PUSH_REQUIRED`.
+`NO_PROGRESS`.
 
 Full Worker contract: [`agent-policy/COMMON.md`](agent-policy/COMMON.md).
 
@@ -83,8 +81,8 @@ the Reviewer judges whether the proof is actually sufficient.
 
 `contractText` is limited to 64 KiB of UTF-8 input and is rejected, never
 silently truncated. Keep the contract self-contained with every acceptance
-criterion intact. PR evidence input is validated before worktree/Gate execution;
-invalid input returns `REWORK` with `gate.verdict: NOT_RUN` and no model spend.
+criterion intact. Invalid submitted evidence is rejected with `gate.verdict:
+NOT_RUN` and no model spend.
 A Gate FAIL (including repeated-failure `NO_PROGRESS`) returns an explicit
 `evidenceSubmission.status: NOT_ACCEPTED` receipt with reason `GATE_FAILED`:
 proof was not saved and must be re-submitted after repairing the Gate.
@@ -92,11 +90,11 @@ When LOCAL Gate stabilization changes the tree, current-scope proof is invalidat
 and pre-Gate submissions return `REWORK`/`CODE_CHANGED`; re-collect proof on the
 stabilized code. Only the latest record per frozen requirement is retained
 (including on reload), with its original code/scope binding. Completed phase
-proof hashes, audits and task-wide budgets are not pruned or reset.
+proof hashes and task-wide budgets are not pruned or reset.
 
 A LOCAL phase gate reviews only what changed since the previous `PHASE_PASS`
 (`nextDiffScope: "phase-delta"`), so Reviewer cost stays flat as a long task
-grows. The first phase, the final whole-task gate, PR mode, and any boundary
+grows. The first phase, the final whole-task gate, and any boundary
 that cannot be trusted (untracked files, incomplete attribution, an empty phase
 delta) review the cumulative diff from `reviewloop_begin` instead. Stage or
 commit new files before ending a phase to keep the phase-delta path.
@@ -155,16 +153,16 @@ npm run setup
 This installs/refreshes the global MCP + Worker policy and then runs the
 zero-model `doctor` checks.
 
-## PR target
+## GitHub PR handoff
 
-Pass `prNumber` to review an open PR. `reviewloop_begin` freezes the exact PR
-snapshot — repository, `prNumber`, base SHA, HEAD SHA — and every review round
-runs the **same** engine as a LOCAL target over the PR's `base → HEAD` diff:
-deterministic Gate → internal Reviewer routing (`agy:opus` first) → convergence
-policy → Supervisor only on non-convergence. Before a PR `PASS`, ReviewLoop
-re-reads the live PR HEAD and refuses to certify a stale review if it moved.
-Each round writes a durable, tamper-evident audit record. ReviewLoop never
-pushes, merges, force-pushes, or posts a third-party review trigger.
+The Worker pushes code and creates the PR using ordinary GitHub operations.
+The independent [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot)
+then owns PR discovery, finding validation, post-push verification, final audit
+and GitHub review state. ReviewLoop has no GH PR transport or merge operation.
+
+Supplying the retired `prNumber` input deliberately errors instead of
+accidentally starting a LOCAL session. Older PR-mode loop state is retained
+for inspection; it is neither deleted nor reinterpreted.
 
 ## CLI
 
