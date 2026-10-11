@@ -46,6 +46,10 @@ src/reviewloop/
     minimalAgyAgent.js      deterministic provisioning of the `reviewloop-minimal` AGY custom agent (inheritCustomizations:false) into the isolated gemini dir
     agyCustomAgentCapability.js  startup capability probe + per-call effective-loading verification (agy must actually LOAD reviewloop-minimal, not silently fall back)
   controller.js         reviewloop_begin + reviewloop_review
+  phaseState.js         pure phase / convergence-state helpers (scope, proof chain, resume boundaries)
+  providerFailover.js   bounded failover + same-family transient retry for one metered call
+  finalDiffReducer.js   oversized final-gate diff reduction (cross-phase files only; D34)
+  gateReopen.js         human reopen of a spent gate (CLI-only; D35)
   runtimeDir.js         ~/.reviewloop
 
 src/mcp/reviewloopMcpServer.js   exactly 2 Worker-facing tools
