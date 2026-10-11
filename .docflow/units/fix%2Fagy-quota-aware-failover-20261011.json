@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:06:32.911Z",
+  "updatedAt": "2026-10-11T02:06:33.187Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -33,6 +33,10 @@
       },
       {
         "at": "2026-10-11T10:06:21+08:00",
+        "text": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "at": "2026-10-11T10:06:24+08:00",
         "text": "Wire optional AGY quota preflight before first model selection"
       }
     ],
@@ -77,6 +81,12 @@
         "sha": "0c57b189bada47ae9dc0429629bf5d3c8c99aa77",
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:06:21+08:00",
+        "message": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "sha": "3970d8dda9ce80538ffb188815fc78463ec42b1c",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:06:24+08:00",
         "message": "Wire optional AGY quota preflight before first model selection"
       }
     ],
