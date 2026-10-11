@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-11T06:58:32.607Z",
+  "task": {
+    "id": "claude/trusting-noether-33z8yq",
+    "branch": "claude/trusting-noether-33z8yq",
+    "title": "claude/trusting-noether-33z8yq",
+    "task": "Development branch: claude/trusting-noether-33z8yq",
+    "started": "2026-10-11T06:58:21Z",
+    "status": "In progress",
+    "current": "Add long-task workflow playbook, plan linter and example plan",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "1e995a92efaa4d567ada50ee0cb4968e1bbcdd53",
+        "branch": "claude/trusting-noether-33z8yq",
+        "timestamp": "2026-10-11T06:58:21Z",
+        "message": "Add long-task workflow playbook, plan linter and example plan"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
