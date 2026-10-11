@@ -475,6 +475,15 @@ export function createReviewLoopController({
         }
       }
     }
+    // Phases registered without the user's contract: the Reviewer would judge
+    // from the goal and phase bullets only, never seeing the acceptance criteria,
+    // allowed/forbidden changes or evidence rules that live in the contract.
+    if (preflightPhases.length && !frozenContractText) {
+      planWarnings.push(
+        'phases were registered without contractText: the Reviewer will not see the full acceptance criteria and constraints. '
+        + 'Pass the user\'s contract verbatim as contractText and call reviewloop_begin again BEFORE editing.',
+      );
+    }
     // LOCAL attribution check, while it is still free to fix: files untracked at
     // begin make every brand-new Worker file unattributable (D25), so the first
     // review would stop at HUMAN_REQUIRED and the loop could not be recovered.
