@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:05:04.233Z",
+  "updatedAt": "2026-10-11T02:05:18.817Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,12 +8,16 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Retain only content-free zero-turn quota envelope evidence",
+    "current": "Correct quota wording regex boundaries",
     "next": "",
     "history": [
       {
         "at": "2026-10-11T10:04:54+08:00",
         "text": "Add guarded zero-model-turn AGY quota preflight before routing"
+      },
+      {
+        "at": "2026-10-11T10:05:08+08:00",
+        "text": "Retain only content-free zero-turn quota envelope evidence"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:04:54+08:00",
         "message": "Retain only content-free zero-turn quota envelope evidence"
+      },
+      {
+        "sha": "ccddf2b9cd63aa355657dc41fbbeb129a38fc687",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:05:08+08:00",
+        "message": "Correct quota wording regex boundaries"
       }
     ],
     "pr": null,
