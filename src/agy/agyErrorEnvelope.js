@@ -110,6 +110,14 @@ export function extractSafeAgyEnvelopeMetadata(stdout) {
   }
 
   const fields = pickSafeScalars(json);
+  // Only content-free proof about the CLI error envelope is retained. Never
+  // persist the (possibly prompt-bearing) response or raw error message.
+  if (typeof json.response === 'string') fields.responseWasEmpty = json.response.length === 0;
+  if (Number.isInteger(json.num_turns) && json.num_turns >= 0) fields.numTurns = json.num_turns;
+  if (typeof json.conversation_id === 'string') fields.hasConversationId = json.conversation_id.trim() !== '';
+  if (typeof json.error === 'string') {
+    fields.quotaError = /(?:quota|credits?)\\b[^\\n]{0,100}\\b(?:reached|exceeded|exhausted|depleted|insufficient)|\\b(?:reached|exceeded|exhausted|depleted)\\b[^\\n]{0,100}\\b(?:quota|credits?)/i.test(json.error);
+  }
 
   // A nested "error" object is common; take safe scalars from it too.
   if (json.error && typeof json.error === 'object' && !Array.isArray(json.error)) {
