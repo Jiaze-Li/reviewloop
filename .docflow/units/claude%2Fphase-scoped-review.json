@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:38:40.348Z",
+  "updatedAt": "2026-10-11T08:41:57.274Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)",
+    "current": "Match non-rename diff headers exactly in the final-diff reducer",
     "next": "",
     "history": [
       {
@@ -58,6 +58,10 @@
       {
         "at": "2026-10-11T08:38:08Z",
         "text": "Stop for a human after too many deterministic Gate failures in one gate"
+      },
+      {
+        "at": "2026-10-11T08:41:45Z",
+        "text": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)"
       }
     ],
     "commits": [
@@ -138,6 +142,12 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T08:38:08Z",
         "message": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)"
+      },
+      {
+        "sha": "7a555ffb0940bc4bfb540b69f6991a60ede02508",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:41:45Z",
+        "message": "Match non-rename diff headers exactly in the final-diff reducer"
       }
     ],
     "pr": {
