@@ -105,6 +105,10 @@ match a durable PHASE_PASS audit record whose exact-HEAD checks succeeded
 (`headStillCurrent` and `gateRanOnReviewedHead`). Missing, fabricated or
 corrupted progression therefore fails closed before the next gate can run.
 
+In LOCAL mode a phase gate diffs from the previous PHASE_PASS snapshot
+(`completedPhases[i].phaseBaseline`, part of the chained proof), not from the
+begin baseline; the final gate and PR mode stay cumulative. See D33.
+
 Reviewer/Supervisor prompts receive an explicit current review scope. During a
 phase they judge only that phase's exit criteria plus global constraints and
 already-established invariants; unfinished later-phase work is not a blocker.

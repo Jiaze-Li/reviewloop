@@ -94,6 +94,13 @@ stabilized code. Only the latest record per frozen requirement is retained
 (including on reload), with its original code/scope binding. Completed phase
 proof hashes, audits and task-wide budgets are not pruned or reset.
 
+A LOCAL phase gate reviews only what changed since the previous `PHASE_PASS`
+(`nextDiffScope: "phase-delta"`), so Reviewer cost stays flat as a long task
+grows. The first phase, the final whole-task gate, PR mode, and any boundary
+that cannot be trusted (untracked files, incomplete attribution, an empty phase
+delta) review the cumulative diff from `reviewloop_begin` instead. Stage or
+commit new files before ending a phase to keep the phase-delta path.
+
 After `PHASE_PASS`, ReviewLoop returns a durable `resumePacket` containing the
 next phase, inherited invariants, repository identity and evidence summary. A
 Worker may use that packet as a safe context-compaction/refresh boundary while

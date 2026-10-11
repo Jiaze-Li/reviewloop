@@ -199,6 +199,7 @@ export function createReviewLoopMcpServer({
         completedPhase: z.record(z.string(), z.any()).optional(),
         nextPhase: z.record(z.string(), z.any()).nullable().optional(),
         finalGatePending: z.boolean().optional(),
+        nextDiffScope: z.enum(['phase-delta', 'cumulative']).optional(),
         blockingFindings: z.array(z.record(z.string(), z.any())).optional(),
         nonBlockingFindings: z.array(z.record(z.string(), z.any())).optional(),
         supervisorGuidance: z.string().nullable().optional(),

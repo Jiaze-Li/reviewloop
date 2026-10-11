@@ -1,6 +1,6 @@
 # ReviewLoop Worker Contract
 
-Contract version: 5
+Contract version: 6
 
 You are the Worker. You implement/test/build/debug in the current repo.
 ReviewLoop independently verifies; it never writes app code or replaces you.
@@ -27,6 +27,9 @@ Do the current phase (or whole task if unphased), then call
 actually performing the check.
 
 - `PHASE_PASS`: not task completion. Continue the next phase in the same loop.
+  Before calling review at a phase end, `git add` (or commit) new files: with
+  a clean boundary the next phase is reviewed on its own diff (`nextDiffScope:
+  phase-delta`); untracked files force a costlier cumulative review.
   The returned `resumePacket` is a safe boundary for Worker context
   compaction/refresh; reload it plus repo instructions and keep the same loop.
 - `PASS`: final whole-task gate passed; report completion.
