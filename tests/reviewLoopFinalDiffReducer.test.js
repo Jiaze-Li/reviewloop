@@ -53,6 +53,39 @@ test('fails closed (null) when the split cannot be trusted', () => {
   assert.equal(reduceFinalDiff({ ...base, diff: section('a.js'), changedFiles: ['a.js'], completedPhases: [{ reviewedFiles: [] }] }), null);
 });
 
+test('a path that is a suffix of another changed path is attributed correctly', () => {
+  const r = reduceFinalDiff({
+    diff: section('bar.js') + section('foo/bar.js'),
+    changedFiles: ['bar.js', 'foo/bar.js'],
+    completedPhases: [{ reviewedFiles: ['bar.js'] }, { reviewedFiles: ['bar.js', 'foo/bar.js'] }],
+    postBoundaryFiles: [],
+  });
+  assert.deepEqual(r.omittedFiles, ['foo/bar.js']);
+  assert.match(r.diff, /diff --git a\/bar\.js b\/bar\.js/);
+  assert.doesNotMatch(r.diff, /diff --git a\/foo\/bar\.js/);
+});
+
+test('a path that itself contains " b/" is attributed correctly', () => {
+  const r = reduceFinalDiff({
+    diff: section('y.js') + section('x b/y.js'),
+    changedFiles: ['y.js', 'x b/y.js'],
+    completedPhases: [{ reviewedFiles: ['y.js'] }, { reviewedFiles: ['y.js', 'x b/y.js'] }],
+    postBoundaryFiles: [],
+  });
+  assert.deepEqual(r.omittedFiles, ['x b/y.js']);
+});
+
+test('a rename header is still attributed to its new path', () => {
+  const diff = 'diff --git a/old.js b/new.js\nsimilarity index 90%\nrename from old.js\nrename to new.js\n'
+    + section('keep.js');
+  const r = reduceFinalDiff({
+    diff, changedFiles: ['keep.js', 'new.js'],
+    completedPhases: [{ reviewedFiles: ['keep.js'] }, { reviewedFiles: ['keep.js', 'new.js'] }],
+    postBoundaryFiles: [],
+  });
+  assert.deepEqual(r.omittedFiles, ['new.js']);
+});
+
 test('untracked blocks are attributed by their header', () => {
   const diff = section('t.js') + '--- Worker untracked file new.js (10 bytes) ---\nconst a = 1;\n';
   const r = reduceFinalDiff({

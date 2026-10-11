@@ -24,6 +24,11 @@ function unitFile(unit, changedFiles) {
   const untracked = UNTRACKED.exec(first) ?? DELETED.exec(first);
   if (untracked) return changedFiles.has(untracked[1]) ? untracked[1] : null;
   if (!first.startsWith('diff --git ')) return null;
+  // A non-rename header names the same path twice: match it exactly, so a path
+  // that is a suffix of another (bar.js vs foo/bar.js) or itself contains " b/"
+  // is never ambiguous. Only a rename (a/<old> b/<new>) needs the suffix match.
+  const exact = [...changedFiles].filter((f) => first === `diff --git a/${f} b/${f}`);
+  if (exact.length) return exact.length === 1 ? exact[0] : null;
   const matches = [...changedFiles].filter((f) => first.endsWith(` b/${f}`));
   return matches.length === 1 ? matches[0] : null;
 }
