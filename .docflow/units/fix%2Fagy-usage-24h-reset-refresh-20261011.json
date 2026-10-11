@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T03:04:36.318Z",
+  "updatedAt": "2026-10-11T03:05:45.842Z",
   "task": {
     "id": "fix/agy-usage-24h-reset-refresh-20261011",
     "branch": "fix/agy-usage-24h-reset-refresh-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-usage-24h-reset-refresh-20261011",
     "started": "2026-10-11T11:02:32+08:00",
     "status": "In progress",
-    "current": "Document 24-hour and expected-reset quota refresh policy",
+    "current": "Preserve zero-bucket detection while requiring complete evidence to release quota cooldown",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-10-11T11:04:14+08:00",
         "text": "Test cross-restart 24h/reset quota checks and conservative recovery"
+      },
+      {
+        "at": "2026-10-11T11:05:36+08:00",
+        "text": "Document 24-hour and expected-reset quota refresh policy"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "fix/agy-usage-24h-reset-refresh-20261011",
         "timestamp": "2026-10-11T11:04:14+08:00",
         "message": "Document 24-hour and expected-reset quota refresh policy"
+      },
+      {
+        "sha": "a239567fcd1d31338952902d4cde6b5389fa8999",
+        "branch": "fix/agy-usage-24h-reset-refresh-20261011",
+        "timestamp": "2026-10-11T11:05:36+08:00",
+        "message": "Preserve zero-bucket detection while requiring complete evidence to release quota cooldown"
       }
     ],
     "pr": {
