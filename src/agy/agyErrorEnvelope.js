@@ -116,7 +116,7 @@ export function extractSafeAgyEnvelopeMetadata(stdout) {
   if (Number.isInteger(json.num_turns) && json.num_turns >= 0) fields.numTurns = json.num_turns;
   if (typeof json.conversation_id === 'string') fields.hasConversationId = json.conversation_id.trim() !== '';
   if (typeof json.error === 'string') {
-    fields.quotaError = /(?:quota|credits?)\\b[^\\n]{0,100}\\b(?:reached|exceeded|exhausted|depleted|insufficient)|\\b(?:reached|exceeded|exhausted|depleted)\\b[^\\n]{0,100}\\b(?:quota|credits?)/i.test(json.error);
+    fields.quotaError = /(?:quota|credits?)\b[^\n]{0,100}\b(?:reached|exceeded|exhausted|depleted|insufficient)|\b(?:reached|exceeded|exhausted|depleted)\b[^\n]{0,100}\b(?:quota|credits?)/i.test(json.error);
   }
 
   // A nested "error" object is common; take safe scalars from it too.
