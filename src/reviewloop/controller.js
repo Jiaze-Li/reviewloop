@@ -15,10 +15,9 @@
 // The SAME Worker handles REWORK and calls reviewloop_review again. ReviewLoop
 // never writes application code, never commits, pushes, merges, or force-pushes.
 
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Persistence } from '../orchestrator/persistence.js';
 import { isAuthorizationFailure } from '../orchestrator/errors.js';
-import { DEFAULT_ROLE_POLICY } from '../orchestrator/roleRouting.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
 import {
   createReviewObjective,
@@ -53,7 +52,31 @@ import {
   REVIEW_VERDICTS,
 } from './reviewPolicy.js';
 import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.js';
-import { chunkDiffForReview } from './diffChunker.js';
+import { reduceFinalDiff } from './finalDiffReducer.js';
+import {
+  DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
+  normalizeTransientAuthRetryDelays,
+  defaultRetrySleep,
+  createMeteredWithFailover,
+} from './providerFailover.js';
+export { DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS };
+import {
+  sha256Hex,
+  logicalEvidenceFingerprint,
+  normalizeSupervisorStrategyText,
+  migrateConvergenceState,
+  phasesOf,
+  currentReviewScope,
+  scopeBoundFingerprint,
+  phaseCompletionEvidenceHash,
+  baselineFromPhaseEntry,
+  phaseScopedBaseline,
+  phaseCompletionRoot,
+  assertPhaseProgressionValid,
+  reviewGateCount,
+  mergeScopedGateCommands,
+} from './phaseState.js';
+import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 import {
   assertContractHandoff,
   EvidenceValidationError,
@@ -71,15 +94,6 @@ import {
 
 const RUNTIME_ROOT = REVIEWLOOP_RUNTIME_ROOT;
 
-// Absolute ceiling on physical provider attempts for one metered operation —
-// purely a runaway guard. The EFFECTIVE bound is the role's own candidate count
-// (see providerAttemptBudget): every DEFAULT_ROLE_POLICY candidate must be
-// mechanically reachable when each earlier candidate fails safely, so a role
-// with N candidates gets up to N attempts. The `tried` set already stops a
-// family being re-attempted and `!selection` stops the loop when the pool is
-// exhausted; this ceiling only exists so a pathological policy can never spin.
-const PROVIDER_ATTEMPT_HARD_CEILING = 16;
-
 // Thrown when this process resumes a review after its cross-host lease was
 // reclaimed by another owner. Caught in review() and converted to a read-only
 // "wait and re-call" result — never surfaced as a failure that writes state.
@@ -89,231 +103,6 @@ class LeaseLostError extends Error {
     this.name = 'LeaseLostError';
     this.code = 'REVIEWLOOP_LEASE_LOST';
   }
-}
-
-function providerAttemptBudget(role) {
-  const n = DEFAULT_ROLE_POLICY[role]?.length ?? 0;
-  return Math.min(Math.max(n, 1), PROVIDER_ATTEMPT_HARD_CEILING);
-}
-
-function sha256Hex(value) {
-  return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
-}
-
-function logicalEvidenceFingerprint(loopState, proofFingerprint = '') {
-  const reconsider = loopState?.pendingReviewerReconsideration?.fingerprint;
-  if (!reconsider) return proofFingerprint;
-  return sha256Hex(`${proofFingerprint || 'none'}::supervisor-reconsideration::${reconsider}`);
-}
-
-function normalizeSupervisorStrategyText(value) {
-  return String(value ?? '').trim().replace(/\s+/g, ' ');
-}
-
-function migrateConvergenceState(loopState) {
-  const gateRound = Number.isInteger(loopState.gateRound)
-    ? loopState.gateRound
-    : (Number.isInteger(loopState.round) ? loopState.round : 0);
-  const legacySupervisorUsed = loopState.supervisorInvoked === true;
-
-  if (!Number.isInteger(loopState.supervisorEscalationCount)) {
-    loopState.supervisorEscalationCount = legacySupervisorUsed ? 1 : 0;
-  }
-  if (!Number.isInteger(loopState.convergenceEpoch)) {
-    loopState.convergenceEpoch = loopState.supervisorEscalationCount > 0 ? 1 : 0;
-  }
-  if (!Number.isInteger(loopState.epochReviewRound)) {
-    // Before epoch convergence existed, a valid Supervisor could only have
-    // been invoked when the same blocker survived round 1 and round 2.
-    // Preserve that prior escalation as epoch 1 without charging its old
-    // pre-guidance Reviewer rounds against the new epoch.
-    loopState.epochReviewRound = legacySupervisorUsed
-      ? Math.max(0, gateRound - 2)
-      : gateRound;
-  }
-  if (!('pendingReviewerReconsideration' in loopState)) {
-    loopState.pendingReviewerReconsideration = null;
-  }
-  if (!('lastSupervisorRecommendation' in loopState)) {
-    loopState.lastSupervisorRecommendation = loopState.lastSupervisorGuidance ? 'REWORK' : null;
-  }
-  return loopState;
-}
-
-function phasesOf(objective) {
-  return Array.isArray(objective?.phases) ? objective.phases : [];
-}
-
-function currentReviewScope(loopState, objective = loopState?.objective) {
-  const phases = phasesOf(objective);
-  if (!phases.length) {
-    // Empty fingerprint preserves pre-phase no-new-information/checkpoint
-    // identities for ordinary tasks across an upgrade.
-    return { type: 'task', id: 'task', title: 'Full task', fingerprint: '' };
-  }
-
-  const rawIndex = Number.isInteger(loopState?.currentPhaseIndex) ? loopState.currentPhaseIndex : 0;
-  const index = Math.max(0, Math.min(rawIndex, phases.length));
-  if (index < phases.length) {
-    const phase = phases[index];
-    const preserveInvariants = phases
-      .slice(0, index)
-      .flatMap((p) => p.carryForwardInvariants ?? []);
-    const scope = {
-      type: 'phase',
-      id: phase.id,
-      title: phase.title,
-      objective: phase.objective,
-      exitCriteria: phase.exitCriteria ?? [],
-      carryForwardInvariants: phase.carryForwardInvariants ?? [],
-      preserveInvariants,
-      verificationCommands: phase.verificationCommands ?? [],
-      ...(Object.prototype.hasOwnProperty.call(phase, 'verificationEvidence')
-        ? { verificationEvidence: phase.verificationEvidence ?? [] }
-        : {}),
-      phaseIndex: index,
-      phaseCount: phases.length,
-    };
-    return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
-  }
-
-  const scope = {
-    type: 'final',
-    id: 'final',
-    title: 'Final whole-task gate',
-    completedPhaseSummaries: phases.map((p) => ({
-      id: p.id,
-      title: p.title,
-      objective: p.objective,
-      exitCriteria: p.exitCriteria ?? [],
-      carryForwardInvariants: p.carryForwardInvariants ?? [],
-      verificationCommands: p.verificationCommands ?? [],
-      ...(Object.prototype.hasOwnProperty.call(p, 'verificationEvidence')
-        ? { verificationEvidence: p.verificationEvidence ?? [] }
-        : {}),
-    })),
-    phaseCount: phases.length,
-    // Phase-local verification may certify an intermediate implementation
-    // that a later phase intentionally replaces. The final Gate therefore runs
-    // the frozen whole-task/global verification plan only. Lasting semantics
-    // belong in carry-forward invariants or global verification.
-    verificationCommands: [],
-  };
-  return { ...scope, fingerprint: sha256Hex(JSON.stringify(scope)) };
-}
-
-function scopeBoundFingerprint(parts, reviewScope) {
-  const base = parts.map((v) => String(v ?? '')).join('::');
-  return sha256Hex(reviewScope?.fingerprint ? `${base}::${reviewScope.fingerprint}` : base);
-}
-
-function phaseCompletionEvidenceHash(entry) {
-  return sha256Hex(JSON.stringify({
-    id: entry.id,
-    title: entry.title,
-    phaseIndex: entry.phaseIndex,
-    completedAt: entry.completedAt,
-    round: entry.round,
-    head: entry.head ?? null,
-    reviewScopeFingerprint: entry.reviewScopeFingerprint,
-    gateFingerprint: entry.gateFingerprint,
-    reviewFingerprint: entry.reviewFingerprint,
-    previousProof: entry.previousProof,
-    auditTargetFingerprint: entry.auditTargetFingerprint ?? null,
-  }));
-}
-
-function phaseCompletionRoot(objective) {
-  return `objective:${objective?.fingerprint ?? 'missing'}`;
-}
-
-function assertPhaseProgressionValid(loopState, objective = loopState?.objective) {
-  const phases = phasesOf(objective);
-  const completed = Array.isArray(loopState?.completedPhases) ? loopState.completedPhases : [];
-
-  if (!phases.length) {
-    // Legacy/no-phase loops may predate these fields entirely.
-    if (completed.length) throw new Error('ReviewLoop phase progression invalid: no phase plan but completed phases are present');
-    return true;
-  }
-
-  const index = loopState?.currentPhaseIndex;
-  if (!Number.isInteger(index) || index < 0 || index > phases.length) {
-    throw new Error(`ReviewLoop phase progression invalid: currentPhaseIndex ${JSON.stringify(index)} is outside 0..${phases.length}`);
-  }
-  if (completed.length !== index) {
-    throw new Error(
-      `ReviewLoop phase progression invalid: completedPhases length ${completed.length} does not match currentPhaseIndex ${index}`,
-    );
-  }
-  let previousProof = phaseCompletionRoot(objective);
-  for (let i = 0; i < completed.length; i += 1) {
-    const entry = completed[i];
-    const phase = phases[i];
-    if (entry?.id !== phase?.id) {
-      throw new Error(
-        `ReviewLoop phase progression invalid: completed phase ${i} is ${JSON.stringify(entry?.id)}; expected ${JSON.stringify(phase?.id)}`,
-      );
-    }
-
-    const expectedScope = currentReviewScope({ currentPhaseIndex: i }, objective);
-    const structurallyValid = entry?.title === phase.title
-      && entry?.phaseIndex === i
-      && Number.isInteger(entry?.round) && entry.round > 0
-      && typeof entry?.completedAt === 'string' && Boolean(entry.completedAt)
-      && entry?.reviewScopeFingerprint === expectedScope.fingerprint
-      && typeof entry?.gateFingerprint === 'string' && Boolean(entry.gateFingerprint)
-      && typeof entry?.reviewFingerprint === 'string' && Boolean(entry.reviewFingerprint)
-      && entry?.previousProof === previousProof
-      && typeof entry?.proof === 'string' && entry.proof === phaseCompletionEvidenceHash(entry);
-    if (!structurallyValid) {
-      throw new Error(
-        `ReviewLoop phase progression invalid: completed phase ${JSON.stringify(phase.id)} has no valid PHASE_PASS completion evidence`,
-      );
-    }
-
-    if (objective?.mode === REVIEW_MODES.PR) {
-      const matchingAudit = (loopState?.audit ?? []).find((record) =>
-        record?.result === 'PHASE_PASS'
-        && record?.round === entry.round
-        && record?.reviewScope?.id === phase.id
-        && record?.reviewScope?.fingerprint === entry.reviewScopeFingerprint
-        && record?.gate?.fingerprint === entry.gateFingerprint
-        && record?.review?.reviewedFingerprint === entry.reviewFingerprint
-        && record?.targetFingerprint === entry.auditTargetFingerprint
-        && record?.target?.reviewedHeadSha === entry.head
-        && record?.target?.finalObservedHeadSha === entry.head
-        && record?.target?.headStillCurrent === true
-        && record?.target?.gateRanOnReviewedHead === true
-        && record?.convergence?.verdict === REVIEW_VERDICTS.PASS
-      );
-      if (!matchingAudit) {
-        throw new Error(
-          `ReviewLoop phase progression invalid: completed PR phase ${JSON.stringify(phase.id)} is not bound to a successful exact-HEAD PHASE_PASS audit record`,
-        );
-      }
-    }
-
-    previousProof = entry.proof;
-  }
-  if (loopState?.state === REVIEW_LOOP_STATES.PASS && index !== phases.length) {
-    throw new Error('ReviewLoop phase progression invalid: terminal PASS recorded before every frozen phase completed');
-  }
-  return true;
-}
-
-function reviewGateCount(objective) {
-  const n = phasesOf(objective).length;
-  return n ? n + 1 : 1; // one gate per phase + one final whole-task gate
-}
-
-function mergeScopedGateCommands(commands, reviewScope) {
-  const base = Array.isArray(commands) ? commands : [];
-  const scoped = (reviewScope?.type === 'phase' || reviewScope?.type === 'final')
-    && Array.isArray(reviewScope.verificationCommands)
-    ? reviewScope.verificationCommands
-    : [];
-  return [...new Set([...base, ...scoped].map(String).filter(Boolean))];
 }
 
 function compactBaselineSummary(baseline) {
@@ -328,76 +117,6 @@ function requireProvider(name) {
   return async () => {
     throw new Error(`ReviewLoop: no ${name} provider wired (real provider calls are not made in this context)`);
   };
-}
-
-// Provider-failure codes that a bounded failover attempt may follow. All are
-// either "the call never reached the provider" (pre-send: unavailable, ENOENT,
-// spawn failure, CLI not authenticated) or "reached it but produced no usable
-// result and no unresolved spend" (rate limit, quota, protocol error, timeout
-// classified as mechanically bounded). A mid-flight failure with unknown usage
-// never lands here — dispatch() has already turned it into a spend-blocking
-// AuthorizationError.
-//
-// PROVIDER_AUTH_FAILED is retryable-via-failover on purpose: an unauthenticated
-// CLI transport (`codex` / `claude` not logged in) is a pre-send failure with
-// no spend, and RoleRouter.recordFailure already treats it as health-affecting
-// (family removed, AUTH_FAILED). Trying the next eligible family is exactly the
-// intended recovery; if every family is unauthenticated the loop still
-// exhausts and rethrows.
-const RETRYABLE = new Set([
-  'PROVIDER_UNAVAILABLE', 'PROVIDER_TIMEOUT', 'PROVIDER_RATE_LIMITED',
-  'PROVIDER_QUOTA_EXHAUSTED', 'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_AUTH_FAILED',
-  'EXECUTOR_TIMEOUT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED', 'AGY_NETWORK_UNAVAILABLE',
-]);
-
-// One logical review dispatch may absorb two mechanically-proven transient AGY
-// failures before the family is marked failed and normal pool failover takes
-// over. This covers the existing canonical 401/OAuth refresh race AND the
-// narrow pre-send network-path failures normalized as AGY_NETWORK_UNAVAILABLE.
-//
-// Each retry is a brand-new physical AGY process/connection, but it replays the
-// same logical review request. This mirrors the operator behavior of re-running
-// "continue" after a stuck terminal session without inventing a new prompt.
-//
-// These are PHYSICAL attempts: each still goes through a fresh
-// ModelSpendAuthority permit/reservation and is durably recorded. They do not
-// consume an extra review/fix round.
-export const DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS = Object.freeze([2_000, 5_000]);
-
-function normalizeTransientAuthRetryDelays(delays) {
-  if (!Array.isArray(delays)) return [...DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS];
-  return delays
-    .filter((v) => Number.isFinite(v) && v >= 0)
-    .slice(0, 4)
-    .map((v) => Math.floor(v));
-}
-
-function retryCancelledError() {
-  return Object.assign(new Error('ReviewLoop: cancelled during transient-auth retry backoff'), {
-    code: 'REVIEW_CANCELLED',
-    cancelled: true,
-  });
-}
-
-function defaultRetrySleep(ms, signal) {
-  if (!Number.isFinite(ms) || ms <= 0) {
-    if (signal?.aborted) return Promise.reject(retryCancelledError());
-    return Promise.resolve();
-  }
-  if (signal?.aborted) return Promise.reject(retryCancelledError());
-
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener?.('abort', onAbort);
-      reject(retryCancelledError());
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener?.('abort', onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener?.('abort', onAbort, { once: true });
-  });
 }
 
 export function createReviewLoopController({
@@ -461,6 +180,9 @@ export function createReviewLoopController({
     const probe = activeLeaseGuards.get(loopId);
     if (probe && !(await probe())) throw new LeaseLostError(loopId);
   }
+  const meteredWithFailover = createMeteredWithFailover({
+    transientAuthRetryDelays, sleepFn, recordProviderFailure, onEvent, preflightQuotaFn, assertLeaseHeld,
+  });
   async function saveLoop(loopState) {
     await assertLeaseHeld(loopState.loopId);
     return store.save(loopState.loopId, loopState);
@@ -743,6 +465,49 @@ export function createReviewLoopController({
       baselineGateEvidence: baselineGate,
     });
 
+    // Zero-model plan check. Advisory only: a docs-only task legitimately has
+    // nothing to run, but a phase that only a model can judge is costly and weak.
+    const planWarnings = [];
+    if (!(verificationPlan?.commands?.length)) {
+      for (const phase of preflightPhases) {
+        if (!phase.verificationCommands?.length && !phase.verificationEvidence?.length) {
+          planWarnings.push(`phase ${phase.id} has no verification commands or evidence and no global verification commands are frozen; only the Reviewer can judge it`);
+        }
+      }
+    }
+    // Phases registered without the user's contract: the Reviewer would judge
+    // from the goal and phase bullets only, never seeing the acceptance criteria,
+    // allowed/forbidden changes or evidence rules that live in the contract.
+    if (preflightPhases.length && !frozenContractText) {
+      planWarnings.push(
+        'phases were registered without contractText: the Reviewer will not see the full acceptance criteria and constraints. '
+        + 'Pass the user\'s contract verbatim as contractText and call reviewloop_begin again BEFORE editing.',
+      );
+    }
+    // LOCAL attribution check, while it is still free to fix: files untracked at
+    // begin make every brand-new Worker file unattributable (D25), so the first
+    // review would stop at HUMAN_REQUIRED and the loop could not be recovered.
+    if (mode === REVIEW_MODES.LOCAL && baseline) {
+      const untracked = Object.keys(baseline.untrackedHashes ?? {});
+      if (untracked.length) {
+        const shown = untracked.slice(0, 5).join(', ');
+        planWarnings.push(
+          `${untracked.length} untracked file(s) at begin (${shown}${untracked.length > 5 ? ', …' : ''}): `
+          + 'any new file you create will make review stop at HUMAN_REQUIRED. '
+          + 'Commit, delete or .gitignore them (or git stash -u), then call reviewloop_begin again BEFORE editing.',
+        );
+      }
+      if (baseline.evidenceComplete === false) {
+        planWarnings.push(
+          `baseline attribution is already incomplete (${(baseline.incompleteReasons ?? []).slice(0, 2).join('; ')}); `
+          + 'fix the working tree and call reviewloop_begin again BEFORE editing.',
+        );
+      }
+    }
+    if (preflightPhases.length > 8) {
+      planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
+    }
+
     const loopState = initialLoopState(objective);
     loopState.verificationCommands = verificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
@@ -762,6 +527,7 @@ export function createReviewLoopController({
       phaseCount: phasesOf(objective).length,
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
+      ...(planWarnings.length ? { planWarnings } : {}),
     };
   }
 
@@ -794,6 +560,7 @@ export function createReviewLoopController({
     telemetry,
     {
       head = null, gate = null, reviewScope = null, auditRecord = null, evidenceFingerprint = null,
+      phaseBaseline = null, reviewedFiles = null,
     } = {},
   ) {
     const scope = reviewScope ?? currentReviewScope(loopState);
@@ -812,6 +579,8 @@ export function createReviewLoopController({
       reviewFingerprint: review?.reviewedFingerprint ?? loopState.lastReviewedFingerprint ?? null,
       previousProof: previous?.proof ?? phaseCompletionRoot(loopState.objective),
       auditTargetFingerprint: auditRecord?.targetFingerprint ?? null,
+      ...(phaseBaseline ? { phaseBaseline: { head: phaseBaseline.head, baselineRef: phaseBaseline.baselineRef } } : {}),
+      ...(Array.isArray(reviewedFiles) ? { reviewedFiles } : {}),
     };
     completion.proof = phaseCompletionEvidenceHash(completion);
 
@@ -864,6 +633,9 @@ export function createReviewLoopController({
         ? { id: nextScope.id, title: nextScope.title, index: nextScope.phaseIndex }
         : null,
       finalGatePending: nextScope.type === 'final',
+      // 'phase-delta': the next phase gate reviews only changes made after this
+      // PHASE_PASS. 'cumulative': it reviews everything since reviewloop_begin.
+      nextDiffScope: nextScope.type === 'phase' && phaseBaseline ? 'phase-delta' : 'cumulative',
       resumePacket: loopState.resumePacket,
       contextRefreshSafe: true,
       reviewer: review?.reviewer ?? null,
@@ -875,325 +647,6 @@ export function createReviewLoopController({
       telemetry: telemetry ?? emptyTelemetry(),
       safetyEvents,
     };
-  }
-
-  // One metered provider call with bounded failover. Each physical attempt
-  // re-routes (excluding failed families), re-authorizes (fresh permit), and
-  // re-binds the CallIntent to the actually-selected family. A provider
-  // failure is not New Information: every attempt supplies the SAME single
-  // composite evidenceId, and attempt 1 durably CONSUMES it. Attempts 2..N
-  // (attempt > 1) are authorized by that same prior claim — one logical
-  // (diff + gate) state authorizes exactly one dispatch SEQUENCE, bounded by
-  // the role's candidate count — never a fresh consumption per attempt, and never
-  // a fresh dispatch on identical evidence for a first attempt (crash/resume
-  // re-call included).
-  async function meteredWithFailover({
-    spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null, signal = null,
-    // Durable physical-call-audit identity forwarded verbatim into the spend
-    // record (round / chunkIndex / chunkTotal; quotaPools is filled in below
-    // from the resolved routing selection) — see reviewSpend.js meteredCall.
-    auditContext = null,
-    // Fired once per PHYSICAL failover attempt that actually reached (or tried
-    // to reach) a provider — never for an authorization/spend denial, which
-    // never dispatches. Lets the caller build a durable audit trail of every
-    // physical attempt (family/provider/quotaPool/outcome), not just the last
-    // one that happened to succeed. Success itself is recorded by the caller
-    // (it alone sees the raw provider envelope's resolvedModel/usage before
-    // meteredCall reduces it to a bare business value).
-    onAttempt = null,
-  }) {
-    const tried = new Set();
-    // Effective attempt bound = role candidate count PLUS the bounded AGY
-    // same-family transient retry allowance. The two extra slots are shared by
-    // canonical auth-refresh races and mechanically-proven pre-send network
-    // failures. Ordinary provider failures still traverse each policy
-    // candidate at most once.
-    const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
-    let transientRetriesUsed = 0;
-    let lastErr = null;
-    let priorAttempts = [];
-    // Resume/continuation is derived from DURABLE physical-attempt records, not
-    // process-local counters. A crash during the 2s/5s backoff therefore cannot
-    // reset either the physical attempt number or the two-retry auth budget.
-    // The New Information ledger remains the authorization authority; these
-    // records only restore bounded sequencing state.
-    let startAttempt = 1;
-    // Durable human exclusions (fail closed: if the ledger cannot be read, no
-    // physical attempt is made — authorize() would reject anyway).
-    const humanExcluded = typeof spend.excludedFamilies === 'function'
-      ? await spend.excludedFamilies()
-      : new Set();
-    try {
-      priorAttempts = typeof spend.attemptRecords === 'function'
-        ? await spend.attemptRecords({ role, operationId })
-        : [];
-      const attemptNumbers = priorAttempts
-        .map((r) => Number(r.attempt))
-        .filter((n) => Number.isInteger(n) && n > 0);
-      if (attemptNumbers.length > 0) {
-        startAttempt = Math.max(...attemptNumbers) + 1;
-      }
-      // Family is the stable transport identity. Production AGY providers are
-      // quota-pool ids such as "agy-claude-gpt" / "agy-gemini", not the
-      // literal string "agy"; matching provider === "agy" would silently lose
-      // retry history after a real process restart.
-      transientRetriesUsed = priorAttempts.filter((r) => (
-        typeof r.family === 'string'
-        && r.family.startsWith('agy:')
-        && (
-          (r.failureCode === 'PROVIDER_AUTH_FAILED' && r.transientAuth === true)
-          || (r.failureCode === 'AGY_NETWORK_UNAVAILABLE' && r.transientNetwork === true)
-        )
-      )).length;
-
-      // Backward-compatible fallback for a consumed claim written by an older
-      // build that has no spend-attempt projection. Starting at 2 preserves the
-      // existing failover-reuse safety rule; authorize() still re-checks the
-      // durable reservation ledger before any physical call.
-      if (startAttempt === 1) {
-        const priorClaim = await spend.informationLedger?.findConsumedBy?.({
-          workflowId, role, operationId, evidenceIds,
-        });
-        if (priorClaim) startAttempt = 2;
-      }
-    } catch {
-      // Fail closed on the actual call path: authorize() independently checks
-      // durable information/reservations. We only lose resume convenience here,
-      // never bypass spend safety.
-    }
-
-    // Crash window hardening: the third same-family safe transient failure is
-    // durably appended BEFORE recordProviderFailure() runs. If the process dies
-    // in that tiny window, a fresh router would otherwise consider the family
-    // healthy and grant an unintended fourth AGY call. Reconstruct exhausted
-    // families from the durable spend log and restore the missing health
-    // transition BEFORE routing any new physical attempt.
-    const exhaustedTransientFamilies = new Map();
-    const exhaustedFamilies = new Set();
-    for (const record of priorAttempts) {
-      if (typeof record?.family !== 'string' || !record.family.startsWith('agy:')) continue;
-      const safeTransient =
-        (record?.failureCode === 'PROVIDER_AUTH_FAILED' && record?.transientAuth === true)
-        || (record?.failureCode === 'AGY_NETWORK_UNAVAILABLE' && record?.transientNetwork === true);
-      if (!safeTransient) continue;
-
-      const entry = exhaustedTransientFamilies.get(record.family) ?? {
-        family: record.family,
-        provider: record.provider,
-        failures: 0,
-        lastAttempt: -1,
-        lastFailureCode: null,
-        lastTransientAuth: false,
-        lastTransientNetwork: false,
-      };
-      entry.failures += 1;
-
-      // Mixed transient sequences share one retry budget, but the LAST
-      // physical failure is what exhausted that budget. Never let an earlier
-      // auth-refresh race poison provider health when a later network outage is
-      // the actual exhausting condition (or vice versa).
-      const physicalAttempt = Number(record?.attempt);
-      const ordering = Number.isInteger(physicalAttempt) && physicalAttempt > 0
-        ? physicalAttempt
-        : entry.lastAttempt + 1;
-      if (ordering >= entry.lastAttempt) {
-        entry.lastAttempt = ordering;
-        entry.provider = record.provider ?? entry.provider;
-        entry.lastFailureCode = record.failureCode ?? null;
-        entry.lastTransientAuth = record?.transientAuth === true;
-        entry.lastTransientNetwork = record?.transientNetwork === true;
-      }
-      exhaustedTransientFamilies.set(record.family, entry);
-    }
-    for (const entry of exhaustedTransientFamilies.values()) {
-      if (entry.failures <= transientAuthRetryDelays.length) continue;
-      // Keep exhaustion scoped to THIS logical operation. Network path loss is
-      // attempt-local and must not poison provider health for future reviews.
-      // Auth exhaustion still records AUTH_FAILED because credentials remain a
-      // durable operator concern until corrected.
-      exhaustedFamilies.add(entry.family);
-      tried.add(entry.family);
-      const exhaustedByAuth =
-        entry.lastFailureCode === 'PROVIDER_AUTH_FAILED'
-        && entry.lastTransientAuth === true;
-      if (exhaustedByAuth && recordProviderFailure) {
-        recordProviderFailure(
-          { role, family: entry.family, provider: entry.provider },
-          {
-            code: 'PROVIDER_AUTH_FAILED',
-            recoveredFromDurableTransientExhaustion: true,
-            recoveredFromDurableAuthExhaustion: true,
-          },
-        );
-      }
-      onEvent?.({
-        type: 'ROLE_PROVIDER_TRANSIENT_EXHAUSTION_RESTORED',
-        role,
-        family: entry.family,
-        provider: entry.provider,
-        failureCode: entry.lastFailureCode,
-        exhaustedBy: exhaustedByAuth
-          ? 'auth'
-          : (entry.lastTransientNetwork === true ? 'network' : 'unknown'),
-        failures: entry.failures,
-      });
-    }
-
-    // Refresh a bounded, zero-model-turn quota snapshot before selecting the
-    // first provider. A failed/unsupported probe is just UNKNOWN: ordinary
-    // routing and its strict unknown-spend safety invariants remain intact.
-    if (typeof preflightQuotaFn === 'function') {
-      await assertLeaseHeld(workflowId);
-      try {
-        const quota = await preflightQuotaFn({ role, workflowId });
-        if (quota?.checked && quota.exhaustedPools?.length) {
-          onEvent?.({
-            type: 'AGY_QUOTA_PREFLIGHT_EXHAUSTED',
-            role, workflowId, pools: quota.exhaustedPools,
-          });
-        }
-      } catch {
-        // Never let a read-only quota service failure masquerade as a
-        // provider failure, zero spend, or permission for another model call.
-      }
-    }
-
-    for (let attempt = startAttempt; attempt < startAttempt + maxAttempts; attempt += 1) {
-      let selection = null;
-      if (routeFn) {
-        // Per-call audit attribution — passed fresh on every call, never
-        // stored on the (long-lived, shared-across-loops) router. Built from
-        // whatever this specific physical attempt already carries.
-        const requestContext = {
-          loopId: workflowId ?? null,
-          operationId: operationId ?? null,
-          attempt,
-          round: auditContext?.round ?? null,
-          chunkIndex: auditContext?.chunkIndex ?? null,
-          chunkTotal: auditContext?.chunkTotal ?? null,
-        };
-        selection = routeFn({
-          reworkCycles: attempt - startAttempt,
-          excludeFamilies: [...new Set([...exhaustedFamilies, ...humanExcluded])],
-        }, requestContext);
-        if (!selection) break;
-        if (tried.has(selection.family)) break;
-        tried.add(selection.family);
-      }
-      const family = selection?.family ?? defaultFamily;
-      const provider = selection?.provider ?? defaultProvider;
-
-      if (humanExcluded.has(family)) {
-        lastErr ??= Object.assign(
-          new Error('ReviewLoop: ' + family + ' was excluded by a human recovery and no other candidate is eligible'),
-          { code: 'HUMAN_ROUTING_EXCLUDED', providerFailure: 'HUMAN_ROUTING_EXCLUDED' },
-        );
-        break;
-      }
-
-      // Exhaustion is a dispatch invariant, not a routing implementation
-      // detail. A route-less controller has no selection to consult, so the
-      // default family must be blocked here too once durable history proves
-      // that its initial safe transient failure + both same-family retries were
-      // spent.
-      if (exhaustedFamilies.has(family)) {
-        lastErr ??= Object.assign(
-          new Error('ReviewLoop: transient retry budget exhausted for ' + family),
-          {
-            code: 'AGY_TRANSIENT_RETRY_EXHAUSTED',
-            providerFailure: 'AGY_TRANSIENT_RETRY_EXHAUSTED',
-          },
-        );
-        break;
-      }
-
-      try {
-        // Fail closed if we no longer hold the loop lease: never start a new
-        // paid provider attempt on behalf of a review another owner has taken
-        // over. (LeaseLostError is not retryable — it propagates to review().)
-        // eslint-disable-next-line no-await-in-loop
-        await assertLeaseHeld(workflowId);
-        // eslint-disable-next-line no-await-in-loop
-        return await spend.meteredCall({
-          role, family, provider, model: selection?.model ?? null,
-          operationId, attempt, evidenceIds,
-          auditContext: auditContext ? { ...auditContext, quotaPools: selection?.quotaPools ?? null } : null,
-          call: () => invoke({
-            selection, attempt, family, provider,
-          }),
-        });
-      } catch (err) {
-        lastErr = err;
-        if (isAuthorizationFailure(err)) throw err; // spend/objective denial — never dispatched, never retried
-        const code = err?.code ?? err?.providerFailure ?? '';
-        const transientAuth =
-          code === 'PROVIDER_AUTH_FAILED'
-          && err?.transientAuth === true;
-        const transientNetwork =
-          code === 'AGY_NETWORK_UNAVAILABLE'
-          && err?.transientNetwork === true;
-        const transientSameFamily = transientAuth || transientNetwork;
-
-        onAttempt?.({
-          attempt, family, provider, quotaPools: selection?.quotaPools ?? null, outcome: 'FAILURE', code,
-        });
-        if (!RETRYABLE.has(code)) throw err;
-
-        if (transientSameFamily && transientRetriesUsed < transientAuthRetryDelays.length) {
-          const delayMs = transientAuthRetryDelays[transientRetriesUsed];
-          transientRetriesUsed += 1;
-
-          // Do NOT poison provider health for a one-off OAuth refresh race or
-          // transient VPN/socket path loss. Let the deterministic router select
-          // the same healthy family again. The next physical call is a fresh
-          // provider process/connection and still gets a fresh spend permit.
-          if (selection) tried.delete(selection.family);
-          onEvent?.({
-            type: transientAuth
-              ? 'ROLE_PROVIDER_TRANSIENT_AUTH_RETRY'
-              : 'ROLE_PROVIDER_TRANSIENT_NETWORK_RETRY',
-            role,
-            family,
-            provider,
-            attempt,
-            retry: transientRetriesUsed,
-            delayMs,
-          });
-
-          // eslint-disable-next-line no-await-in-loop
-          await sleepFn(delayMs, signal);
-          // loop -> same family is eligible again
-          continue;
-        }
-
-        // Either this was an ordinary retryable provider failure, or the AGY
-        // safe-transient retry budget was exhausted. Exhaustion is a dispatch
-        // invariant: record it immediately in THIS process too, not only on
-        // restart reconstruction from durable history.
-        if (transientSameFamily) {
-          exhaustedFamilies.add(family);
-        }
-
-        // Auth exhaustion is durable health. A transient network outage is
-        // only operation-local: exclude this family for the remainder of the
-        // current dispatch, but let a future independent review try it again.
-        if (selection && recordProviderFailure && !transientNetwork) {
-          recordProviderFailure(selection, {
-            code,
-            ...(Number.isFinite(err?.retryAfter) ? { retryAfter: err.retryAfter } : {}),
-            ...(typeof err?.resetAt === 'string' ? { resetAt: err.resetAt } : {}),
-          });
-        }
-
-        // Routed calls may now fail over to a different family. Route-less
-        // calls have no alternate selection, so once the default family is
-        // exhausted they must stop here instead of entering a fourth physical
-        // attempt in the same process.
-        if (transientSameFamily && !selection) break;
-        // loop -> next attempt re-routes (or ordinary retryable default failure)
-      }
-    }
-    throw lastErr ?? new Error(`ReviewLoop: no eligible ${role} provider`);
   }
 
   async function review({ loopId, evidence = [], signal, onHeartbeat } = {}) {
@@ -1508,6 +961,7 @@ export function createReviewLoopController({
           changedFiles: delta.changedFiles,
           gate,
           reviewScope,
+          diffScope: delta.diffScope ?? 'cumulative',
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
@@ -1574,14 +1028,155 @@ export function createReviewLoopController({
     };
   }
 
+  // Gate commands for one review gate, shared by LOCAL and PR. Uses exactly the
+  // plan frozen at begin (never the possibly Worker-edited on-disk config) plus
+  // the current scope's own commands. `drift` means the verification manifest
+  // under `cwd` no longer matches the frozen plan, so the Gate cannot be trusted.
+  function resolveGateCommands({ cwd, loopState, objective, reviewScope }) {
+    const frozenPlan = objective.verificationPlan;
+    let gateCommands;
+    let commandSource;
+    if (frozenPlan?.commands?.length) {
+      gateCommands = frozenPlan.commands;
+      commandSource = `${frozenPlan.source} (frozen at begin)`;
+      let current = null;
+      try {
+        current = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
+      } catch { /* discovery is best-effort here */ }
+      if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
+        && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
+        return { drift: true };
+      }
+    } else {
+      const discovered = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
+      gateCommands = discovered.commands;
+      commandSource = discovered.source;
+    }
+    const baseGateCommandCount = gateCommands?.length ?? 0;
+    gateCommands = mergeScopedGateCommands(gateCommands, reviewScope);
+    if (gateCommands.length > baseGateCommandCount) {
+      commandSource = `${commandSource} + frozen ${reviewScope.id} verification`;
+    }
+    return { drift: false, gateCommands, commandSource };
+  }
+
+  // Fingerprints that decide "is this new information?" for one review round.
+  function reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck }) {
+    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
+    const canonicalFp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: evidenceCheck.proofFingerprint,
+    });
+    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(loopState, evidenceCheck.proofFingerprint);
+    const fp = reviewFingerprint({
+      deltaFingerprint: delta.fingerprint,
+      gateFingerprint: gate.fingerprint,
+      reviewScopeFingerprint: reviewScope.fingerprint,
+      evidenceFingerprint: effectiveEvidenceFingerprint,
+    });
+    return { reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp };
+  }
+
+  function recordFindingSignatures(loopState, review) {
+    loopState.findingSignatureHistory = [
+      ...(loopState.findingSignatureHistory ?? []),
+      {
+        round: loopState.round,
+        gateRound: loopState.gateRound,
+        epoch: loopState.convergenceEpoch ?? 0,
+        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
+        signatures: review.findingSignatures,
+      },
+    ];
+  }
+
+  // A cumulative diff that no longer fits one final review would stop the loop
+  // outright. When every phase recorded what it reviewed and the tree since the
+  // last boundary is attributable, review the cross-phase and post-boundary
+  // files instead (see finalDiffReducer.js). Any doubt returns null and the old
+  // behaviour stands.
+  async function reduceOversizedFinalDiff({ loopState, cwd, delta }) {
+    try {
+      if (!chunkDiffForReview(delta.diff, { env }).oversized) return null;
+      const completed = loopState.completedPhases ?? [];
+      const lastBoundary = baselineFromPhaseEntry(completed[completed.length - 1]);
+      if (!lastBoundary) return null;
+      const post = await collectWorkerDeltaFn({ cwd, baseline: lastBoundary });
+      if (!post || post.evidenceComplete === false) return null;
+      const { limit, maxChunks } = reviewDiffBudget(env);
+      const reduced = reduceFinalDiff({
+        diff: delta.diff,
+        changedFiles: delta.changedFiles,
+        completedPhases: completed,
+        postBoundaryFiles: post.changedFiles ?? [],
+        // Never hand the final Reviewer an empty diff: keep real code in view
+        // (most recent phases first) up to one chunk, within the whole budget.
+        fillChars: limit,
+        maxChars: limit * maxChunks,
+      });
+      if (!reduced || chunkDiffForReview(reduced.diff, { env }).oversized) return null;
+      return reduced;
+    } catch {
+      return null;
+    }
+  }
+
+  // Deterministic Gate failures cost no Reviewer tokens, but a Worker can keep
+  // "repairing" a Gate that fails for a different reason every time (a flaky
+  // test, a wrong verification command) indefinitely. After this many Gate
+  // failures in one gate the loop stops for a human; reopen-gate resets it.
+  const DEFAULT_MAX_GATE_REPAIRS = 15;
+  async function stopIfGateRepairsExhausted(loopState) {
+    const configured = Number(env?.REVIEWLOOP_MAX_GATE_REPAIRS);
+    const limit = Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_GATE_REPAIRS;
+    if ((loopState.gateRepairCount ?? 0) <= limit) return null;
+    loopState.budgetExhausted = true;
+    recordTransition(
+      loopState,
+      REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+      `the deterministic Gate failed ${loopState.gateRepairCount} times in this gate (limit ${limit}); `
+      + 'check for a flaky test or a wrong verification command',
+    );
+    await saveLoop(loopState);
+    return humanRequiredResult(loopState, null, await durableTelemetry(loopState.loopId));
+  }
+
+  // Snapshot of the just-certified tree, used as the diff start for the NEXT
+  // LOCAL phase gate (and, after the last phase, to find what changed since).
+  // Skipped (-> cumulative diff, never worse) when the snapshot cannot be trusted: untracked
+  // files at the boundary would make every new Worker file unattributable
+  // (D25), so the Worker must stage or commit new files before the phase ends.
+  async function captureNextPhaseBoundary(loopState, objective, reviewScope, cwd) {
+    if (reviewScope?.type !== 'phase') return null;
+    try {
+      const b = await captureBaselineFn({ cwd });
+      if (!b?.head || b.evidenceComplete === false) return null;
+      if (Object.keys(b.untrackedHashes ?? {}).length) return null;
+      return { head: b.head, baselineRef: b.baselineRef ?? b.head };
+    } catch {
+      return null;
+    }
+  }
+
   // ---- LOCAL mode --------------------------------------------------------
   async function reviewLocal({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
-    const baseline = objective.baseline;
+    let baseline = phaseScopedBaseline(loopState, objective, reviewScope) ?? objective.baseline;
+    let diffScope = baseline === objective.baseline ? 'cumulative' : 'phase-delta';
 
     let delta = await collectWorkerDeltaFn({ cwd, baseline });
+    // A phase boundary that cannot be used (nothing changed this phase, or the
+    // delta cannot be attributed) falls back to the original baseline, so the
+    // result is never worse than a cumulative review.
+    if (diffScope === 'phase-delta' && (delta.noWorkerChangeYet || delta.evidenceComplete === false)) {
+      baseline = objective.baseline;
+      diffScope = 'cumulative';
+      delta = await collectWorkerDeltaFn({ cwd, baseline });
+    }
 
     // B7 — no Worker change since begin -> deterministic NO_PROGRESS, 0 Reviewer.
     if (delta.noWorkerChangeYet) {
@@ -1633,62 +1228,39 @@ export function createReviewLoopController({
       };
     }
 
-    // The verification plan was FROZEN at reviewloop_begin. Use exactly those
-    // commands — never re-derive from the (possibly Worker-edited) on-disk
-    // config. Only fall back to fresh discovery for a legacy loop persisted
-    // before the plan was frozen.
-    const frozenPlan = objective.verificationPlan;
-    let gateCommands;
-    let commandSource;
-    if (frozenPlan?.commands?.length) {
-      gateCommands = frozenPlan.commands;
-      commandSource = `${frozenPlan.source} (frozen at begin)`;
-      // A Worker that rewrote `.reviewloop.json` / the `package.json` test
-      // script after begin cannot weaken the Gate. Running the frozen command
-      // array already defeats a `.reviewloop.json` edit; but a `package.json`
-      // plan is the indirection `npm test`, so a rewritten test script would
-      // still run. Any manifest drift therefore fails the review closed rather
-      // than trusting the Gate: the Worker must revert the config or start a
-      // fresh reviewloop_begin.
-      try {
-        const current = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
-        if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
-          && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
-          collectSafetyEvent({
-            code: 'VERIFICATION_PLAN_DRIFT',
-            severity: 'BLOCKING',
-            role: 'gate',
-            taskId: loopState.loopId,
-            reason: `the verification config (${frozenPlan.source}) was modified after reviewloop_begin`,
-            actionTaken: 'review blocked; frozen Gate cannot be trusted',
-          });
-          loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-          recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
-          await saveLoop(loopState);
-          return {
-            ...compactReworkPayload({
-              loopState,
-              review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
-              gate: { verdict: 'FAIL', failureIdentities: ['verification-plan-drift'] },
-            }),
-            reason: 'the verification configuration was changed after reviewloop_begin; revert '
-              + '.reviewloop.json / the package.json test script to what it was, or start a new '
-              + 'reviewloop_begin — ReviewLoop will not run a Gate the Worker can edit mid-loop',
-            telemetry: await durableTelemetry(loopState.loopId),
-            safetyEvents,
-          };
-        }
-      } catch { /* discovery is best-effort here */ }
-    } else {
-      const discovered = discoverVerificationCommandsFn({ cwd, configured: loopState.verificationCommands });
-      gateCommands = discovered.commands;
-      commandSource = discovered.source;
+    // The verification plan was FROZEN at reviewloop_begin; resolveGateCommands
+    // never re-derives it from the (possibly Worker-edited) on-disk config. Any
+    // manifest drift fails the review closed rather than trusting the Gate: the
+    // Worker must revert the config or start a fresh reviewloop_begin.
+    const resolved = resolveGateCommands({ cwd, loopState, objective, reviewScope });
+    if (resolved.drift) {
+      collectSafetyEvent({
+        code: 'VERIFICATION_PLAN_DRIFT',
+        severity: 'BLOCKING',
+        role: 'gate',
+        taskId: loopState.loopId,
+        reason: `the verification config (${objective.verificationPlan.source}) was modified after reviewloop_begin`,
+        actionTaken: 'review blocked; frozen Gate cannot be trusted',
+      });
+      loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+      const driftStop = await stopIfGateRepairsExhausted(loopState);
+      if (driftStop) return driftStop;
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
+      await saveLoop(loopState);
+      return {
+        ...compactReworkPayload({
+          loopState,
+          review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
+          gate: { verdict: 'FAIL', failureIdentities: ['verification-plan-drift'] },
+        }),
+        reason: 'the verification configuration was changed after reviewloop_begin; revert '
+          + '.reviewloop.json / the package.json test script to what it was, or start a new '
+          + 'reviewloop_begin — ReviewLoop will not run a Gate the Worker can edit mid-loop',
+        telemetry: await durableTelemetry(loopState.loopId),
+        safetyEvents,
+      };
     }
-    const baseGateCommandCount = gateCommands?.length ?? 0;
-    gateCommands = mergeScopedGateCommands(gateCommands, reviewScope);
-    if (gateCommands.length > baseGateCommandCount) {
-      commandSource = `${commandSource} + frozen ${reviewScope.id} verification`;
-    }
+    const { gateCommands, commandSource } = resolved;
     // The baseline Gate evidence can downgrade a review-time FAIL to WARN by
     // treating shared failures as pre-existing. It lives in workflow.json,
     // OUTSIDE the tamper-checked objective — so a state editor could inject the
@@ -1884,6 +1456,8 @@ export function createReviewLoopController({
         };
       }
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+      const gateStop = await stopIfGateRepairsExhausted(loopState);
+      if (gateStop) return gateStop;
       loopState.lastReviewedFingerprint = gateFp;
       loopState.lastGateFingerprint = gate.fingerprint;
       recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
@@ -1920,23 +1494,9 @@ export function createReviewLoopController({
     });
     if (evidenceCheck.blocked) return evidenceCheck.result;
 
-    const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
-    const canonicalFp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-      evidenceFingerprint: evidenceCheck.proofFingerprint,
-    });
-    const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
-      loopState,
-      evidenceCheck.proofFingerprint,
-    );
-    const fp = reviewFingerprint({
-      deltaFingerprint: delta.fingerprint,
-      gateFingerprint: gate.fingerprint,
-      reviewScopeFingerprint: reviewScope.fingerprint,
-      evidenceFingerprint: effectiveEvidenceFingerprint,
-    });
+    const {
+      reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp,
+    } = reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck });
     if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
       await saveLoop(loopState);
       return {
@@ -1950,6 +1510,14 @@ export function createReviewLoopController({
       };
     }
 
+    delta.diffScope = diffScope;
+    if (reviewScope.type === 'final') {
+      const reduced = await reduceOversizedFinalDiff({ loopState, cwd, delta });
+      if (reduced) {
+        delta.diff = reduced.diff;
+        delta.diffScope = 'final-cross-phase';
+      }
+    }
     const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
@@ -1997,16 +1565,7 @@ export function createReviewLoopController({
     // Failed/cancelled reviews above leave it pending for safe retry.
     loopState.pendingReviewerReconsideration = null;
     const decision = decideConvergence({ loopState, review });
-    loopState.findingSignatureHistory = [
-      ...(loopState.findingSignatureHistory ?? []),
-      {
-        round: loopState.round,
-        gateRound: loopState.gateRound,
-        epoch: loopState.convergenceEpoch ?? 0,
-        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
-        signatures: review.findingSignatures,
-      },
-    ];
+    recordFindingSignatures(loopState, review);
 
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
@@ -2028,6 +1587,9 @@ export function createReviewLoopController({
         gate,
         reviewScope,
         evidenceFingerprint: delta.fingerprint,
+        phaseBaseline: await captureNextPhaseBoundary(loopState, objective, reviewScope, cwd),
+        // Bounded: beyond this the final gate simply keeps reviewing the full diff.
+        reviewedFiles: (delta.changedFiles ?? []).length <= 2000 ? [...(delta.changedFiles ?? [])] : null,
       });
       if (phaseResult) {
         await saveLoop(loopState);
@@ -2454,30 +2016,11 @@ export function createReviewLoopController({
       // drift check compares against THIS worktree, the exact snapshot being
       // reviewed, never the user's ambient cwd (which may be on another
       // branch, dirty, or simply irrelevant to this PR).
-      const frozenPlan = objective.verificationPlan;
-      let gateCommands;
-      let commandSource;
-      if (frozenPlan?.commands?.length) {
-        gateCommands = frozenPlan.commands;
-        commandSource = `${frozenPlan.source} (frozen at begin)`;
-        try {
-          const current = discoverVerificationCommandsFn({ cwd: worktreeDir, configured: loopState.verificationCommands });
-          if (current?.manifestFingerprint && frozenPlan.manifestFingerprint
-            && current.manifestFingerprint !== frozenPlan.manifestFingerprint) {
-            return { kind: 'DRIFT' };
-          }
-        } catch { /* discovery is best-effort here */ }
-      } else {
-        const discovered = discoverVerificationCommandsFn({ cwd: worktreeDir, configured: loopState.verificationCommands });
-        gateCommands = discovered.commands;
-        commandSource = discovered.source;
-      }
-      const prReviewScope = currentReviewScope(loopState, objective);
-      const baseGateCommandCount = gateCommands?.length ?? 0;
-      gateCommands = mergeScopedGateCommands(gateCommands, prReviewScope);
-      if (gateCommands.length > baseGateCommandCount) {
-        commandSource = `${commandSource} + frozen ${prReviewScope.id} verification`;
-      }
+      const resolved = resolveGateCommands({
+        cwd: worktreeDir, loopState, objective, reviewScope: currentReviewScope(loopState, objective),
+      });
+      if (resolved.drift) return { kind: 'DRIFT' };
+      const { gateCommands, commandSource } = resolved;
 
       // Capture the exact worktree state BEFORE the Gate runs. PR evidence
       // must correspond to the exact commit already pushed — unlike LOCAL,
@@ -2605,6 +2148,8 @@ export function createReviewLoopController({
           actionTaken: 'review blocked; frozen Gate cannot be trusted',
         });
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const driftStop = await stopIfGateRepairsExhausted(loopState);
+        if (driftStop) return { ...driftStop, head: observedHead };
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
         await saveLoop(loopState);
         return {
@@ -2627,6 +2172,8 @@ export function createReviewLoopController({
           actionTaken: 'review blocked; Reviewer not invoked; reviewedSnapshotHeadSha not asserted for this HEAD',
         });
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const mutationStop = await stopIfGateRepairsExhausted(loopState);
+        if (mutationStop) return { ...mutationStop, head: observedHead };
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate mutated pr snapshot');
         await saveLoop(loopState);
         return {
@@ -2672,6 +2219,8 @@ export function createReviewLoopController({
           };
         }
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const gateStop = await stopIfGateRepairsExhausted(loopState);
+        if (gateStop) return { ...gateStop, head: observedHead };
         loopState.lastReviewedFingerprint = gateFp;
         loopState.lastGateFingerprint = gate.fingerprint;
         loopState.lastReviewedPrHead = observedHead;
@@ -2703,23 +2252,9 @@ export function createReviewLoopController({
       });
       if (evidenceCheck.blocked) return evidenceCheck.result;
 
-      const reconsiderationPending = Boolean(loopState.pendingReviewerReconsideration);
-      const canonicalFp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-        evidenceFingerprint: evidenceCheck.proofFingerprint,
-      });
-      const effectiveEvidenceFingerprint = logicalEvidenceFingerprint(
-        loopState,
-        evidenceCheck.proofFingerprint,
-      );
-      const fp = reviewFingerprint({
-        deltaFingerprint: delta.fingerprint,
-        gateFingerprint: gate.fingerprint,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-        evidenceFingerprint: effectiveEvidenceFingerprint,
-      });
+      const {
+        reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp,
+      } = reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck });
       if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
         await saveLoop(loopState);
         return {
@@ -2765,16 +2300,7 @@ export function createReviewLoopController({
 
       loopState.pendingReviewerReconsideration = null;
       const decision = decideConvergence({ loopState, review });
-      loopState.findingSignatureHistory = [
-        ...(loopState.findingSignatureHistory ?? []),
-        {
-          round: loopState.round,
-          gateRound: loopState.gateRound,
-          epoch: loopState.convergenceEpoch ?? 0,
-          epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
-          signatures: review.findingSignatures,
-        },
-      ];
+      recordFindingSignatures(loopState, review);
 
       let supervisorGuidance = null;
       let supervisorPhysicalCalls = [];

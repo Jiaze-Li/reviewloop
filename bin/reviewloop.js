@@ -3,6 +3,8 @@
 //
 //   reviewloop doctor       zero-token prerequisite + repo-invariant check
 //   reviewloop status       list local ReviewLoop sessions and their state
+//   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
+//   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
 //   reviewloop uninstall    remove the global ReviewLoop integration
 //
@@ -17,6 +19,8 @@ import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plu
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
+import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
+import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 
 async function listSessions() {
@@ -92,6 +96,74 @@ async function acknowledgeSpend(rest) {
   }
 }
 
+async function reopenGate(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason) throw new Error('usage: reviewloop reopen-gate --loop <loopId> --reason "<why this gate should get another attempt>"');
+  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+  if (!lease.ok) {
+    throw new Error(`cannot reopen while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`);
+  }
+  try {
+    const result = await reopenExhaustedGate({ persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, reason });
+    console.log('Gate reopened with a fresh convergence budget.');
+    console.log(`  loop: ${result.loopId}  (human reopen ${result.reopens})`);
+    console.log('  kept: objective, baseline, completed phases, model spend, call ceilings');
+    console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; raise REVIEWLOOP_MAX_REVIEWER_CALLS / REVIEWLOOP_MAX_SUPERVISOR_CALLS if they are the limit');
+    console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function readLoops() {
+  const root = REVIEWLOOP_RUNTIME_ROOT;
+  if (!existsSync(root)) return [];
+  const loops = [];
+  for (const d of await readdir(root).catch(() => [])) {
+    try {
+      const state = JSON.parse(await readFile(path.join(root, d, 'workflow.json'), 'utf8'));
+      if (state.reviewLoop) loops.push(state.reviewLoop);
+    } catch { /* skip */ }
+  }
+  return loops;
+}
+
+async function resume(rest) {
+  const loops = await readLoops();
+  const wanted = flagValue(rest, '--loop');
+  let loop;
+  if (wanted) {
+    loop = loops.find((l) => l.loopId === wanted);
+    if (!loop) throw new Error(`unknown loopId ${wanted}`);
+  } else {
+    const candidates = unfinishedLoopsFor(loops, process.cwd());
+    if (!candidates.length) {
+      console.log(`No unfinished ReviewLoop task found for ${process.cwd()}.`);
+      console.log('Run this from the project directory, or pass --loop <loopId> (see: reviewloop status).');
+      return;
+    }
+    loop = candidates[0];
+    if (candidates.length > 1) {
+      console.error(`${candidates.length} unfinished loops here; showing the newest. Others: ${candidates.slice(1).map((l) => l.loopId).join(', ')}`);
+    }
+  }
+  if (needsReopen(loop)) {
+    console.log(`Loop ${loop.loopId} stopped with a spent budget; it needs a human decision first:`);
+    console.log(`  reviewloop reopen-gate --loop ${loop.loopId} --reason "<why it should get another attempt>"`);
+    console.log('then run this command again.');
+    return;
+  }
+  if (!isResumable(loop)) {
+    console.log(`Loop ${loop.loopId} is ${loop.state}; nothing to resume.`);
+    return;
+  }
+  console.log('Paste the following into a fresh Worker session (claude / agy):');
+  console.log('------------------------------------------------------------');
+  console.log(buildResumePrompt(loop));
+  console.log('------------------------------------------------------------');
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
@@ -106,6 +178,12 @@ async function main() {
     case 'acknowledge-spend':
       await acknowledgeSpend(rest);
       break;
+    case 'reopen-gate':
+      await reopenGate(rest);
+      break;
+    case 'resume':
+      await resume(rest);
+      break;
     case 'install': {
       const res = await installGlobal();
       console.log('ReviewLoop installed globally.');
@@ -119,7 +197,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|acknowledge-spend|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|resume|acknowledge-spend|reopen-gate|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);

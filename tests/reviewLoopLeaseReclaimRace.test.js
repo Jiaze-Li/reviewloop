@@ -43,7 +43,7 @@ test('N processes racing to reclaim ONE stale lock -> at most one wins', async (
 
     const N = 6;
     const runs = Array.from({ length: N }, (_, i) => runContender({
-      LEASE_ROOT: root, LEASE_LOOP: loopId, LEASE_BARRIER: barrier, LEASE_ID: `c${i}`,
+      LEASE_ROOT: root, LEASE_LOOP: loopId, LEASE_BARRIER: barrier, LEASE_ID: `c${i}`, LEASE_N: String(N),
     }));
 
     // Wait for every contender to reach the barrier, then release them together.

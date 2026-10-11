@@ -46,6 +46,11 @@ src/reviewloop/
     minimalAgyAgent.js      deterministic provisioning of the `reviewloop-minimal` AGY custom agent (inheritCustomizations:false) into the isolated gemini dir
     agyCustomAgentCapability.js  startup capability probe + per-call effective-loading verification (agy must actually LOAD reviewloop-minimal, not silently fall back)
   controller.js         reviewloop_begin + reviewloop_review
+  phaseState.js         pure phase / convergence-state helpers (scope, proof chain, resume boundaries)
+  providerFailover.js   bounded failover + same-family transient retry for one metered call
+  finalDiffReducer.js   oversized final-gate diff reduction (cross-phase files only; D34)
+  gateReopen.js         human reopen of a spent gate (CLI-only; D35)
+  resumeGuide.js        prompt for a fresh Worker to continue an unfinished loop (CLI-only; D36)
   runtimeDir.js         ~/.reviewloop
 
 src/mcp/reviewloopMcpServer.js   exactly 2 Worker-facing tools
@@ -104,6 +109,10 @@ fingerprint and Reviewer fingerprint. In PR mode the completion must additionall
 match a durable PHASE_PASS audit record whose exact-HEAD checks succeeded
 (`headStillCurrent` and `gateRanOnReviewedHead`). Missing, fabricated or
 corrupted progression therefore fails closed before the next gate can run.
+
+In LOCAL mode a phase gate diffs from the previous PHASE_PASS snapshot
+(`completedPhases[i].phaseBaseline`, part of the chained proof), not from the
+begin baseline; the final gate and PR mode stay cumulative. See D33.
 
 Reviewer/Supervisor prompts receive an explicit current review scope. During a
 phase they judge only that phase's exit criteria plus global constraints and
@@ -559,6 +568,7 @@ Limits (`REVIEWLOOP_*`): `MAX_COST_USD`, `MAX_USAGE_VOLUME`,
 `MAX_REVIEW_ROUNDS`, `MAX_REVIEWER_CALLS`, `MAX_SUPERVISOR_CALLS`,
 `MAX_REVIEW_DIFF_CHARS`, `MAX_REVIEW_CHUNKS`, `MAX_SINGLE_CALL_USAGE`,
 `MAX_CONTEXT_OVERHEAD_TOKENS` (single-call Token Sentinel — see below).
+`REVIEWLOOP_MAX_GATE_REPAIRS` (deterministic Gate failures per gate, default 15; D36).
 
 The aggregate budget (call counts, `usageVolume`, `costUsd`) is **durable** and
 keyed by `loopId`: it accumulates across every `reviewloop_review` round, the

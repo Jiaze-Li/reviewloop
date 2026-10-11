@@ -1,6 +1,6 @@
 # ReviewLoop Worker Contract
 
-Contract version: 5
+Contract version: 7
 
 You are the Worker. You implement/test/build/debug in the current repo.
 ReviewLoop independently verifies; it never writes app code or replaces you.
@@ -19,6 +19,7 @@ reorder, or collapse phases into prose. A declared phased task with empty
 Pass global constraints and any required non-command proof
 (runtime/artifact/manual) as `evidenceRequirements`. For PR review also pass
 `prNumber`. One user task = one `loopId`.
+If `reviewloop_begin` returns `planWarnings`, fix them and re-begin before any edit.
 
 ## Work / review
 
@@ -27,6 +28,9 @@ Do the current phase (or whole task if unphased), then call
 actually performing the check.
 
 - `PHASE_PASS`: not task completion. Continue the next phase in the same loop.
+  Before calling review at a phase end, `git add` (or commit) new files: with
+  a clean boundary the next phase is reviewed on its own diff (`nextDiffScope:
+  phase-delta`); untracked files force a costlier cumulative review.
   The returned `resumePacket` is a safe boundary for Worker context
   compaction/refresh; reload it plus repo instructions and keep the same loop.
 - `PASS`: final whole-task gate passed; report completion.

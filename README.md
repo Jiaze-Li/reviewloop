@@ -94,6 +94,39 @@ stabilized code. Only the latest record per frozen requirement is retained
 (including on reload), with its original code/scope binding. Completed phase
 proof hashes, audits and task-wide budgets are not pruned or reset.
 
+A LOCAL phase gate reviews only what changed since the previous `PHASE_PASS`
+(`nextDiffScope: "phase-delta"`), so Reviewer cost stays flat as a long task
+grows. The first phase, the final whole-task gate, PR mode, and any boundary
+that cannot be trusted (untracked files, incomplete attribution, an empty phase
+delta) review the cumulative diff from `reviewloop_begin` instead. Stage or
+commit new files before ending a phase to keep the phase-delta path.
+
+If the cumulative diff is too large for one final review, the final gate
+reviews every file changed in more than one phase plus everything changed since
+the last `PHASE_PASS`; each remaining file was changed in exactly one phase and
+fully reviewed at that gate (`diffScope: final-cross-phase`); some recent-phase
+files are kept in view so the Reviewer never gets an empty diff, and interactions
+between omitted files are covered by the Gate, not jointly reviewed. Any doubt keeps the
+old behaviour. `reviewloop_begin` also returns advisory `planWarnings`: phases
+that only a model can judge, phases registered without `contractText` (the Reviewer would never see the acceptance criteria), and (LOCAL) untracked files at begin that would make
+the first review stop at `HUMAN_REQUIRED` - fix those and re-begin before editing.
+
+If a Worker session dies or its context is lost, run `reviewloop resume` in the
+project directory and paste the printed prompt into a fresh `claude` / `agy`
+session: it names the loop, the current phase, its exit criteria and
+verification commands, any blocking findings and the frozen contract, and tells
+the new Worker to continue the SAME loop. ReviewLoop still never starts a Worker.
+
+A gate whose deterministic Gate fails more than `REVIEWLOOP_MAX_GATE_REPAIRS`
+times (default 15) also stops for a human, so a flaky test or a wrong
+verification command cannot loop forever.
+
+A gate that exhausts its automatic convergence budget stops the Worker
+(`HUMAN_REQUIRED`, `budgetExhausted`). A human can run
+`reviewloop reopen-gate --loop <id> --reason "..."` to give that one gate a fresh
+budget (max 3 times per loop) without losing completed phases or model-spend
+accounting; the Token Sentinel stop cannot be reopened this way.
+
 After `PHASE_PASS`, ReviewLoop returns a durable `resumePacket` containing the
 next phase, inherited invariants, repository identity and evidence summary. A
 Worker may use that packet as a safe context-compaction/refresh boundary while
@@ -138,6 +171,8 @@ pushes, merges, force-pushes, or posts a third-party review trigger.
 ```
 reviewloop doctor        zero-token prerequisite + repo-invariant check
 reviewloop status        list local ReviewLoop sessions
+reviewloop reopen-gate    human override: fresh convergence budget for ONE stuck gate (--loop, --reason)
+reviewloop resume         print a prompt that lets a FRESH Worker session continue the unfinished loop of this project directory (--loop to pick one)
 npm run install-global   install/refresh the global policy + MCP for present agents
 npm run doctor
 ```
@@ -148,65 +183,12 @@ npm run doctor
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — architectural decisions
 - [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - [`docs/GLOBAL_INSTALL.md`](docs/GLOBAL_INSTALL.md)
+- [`docs/CERTIFICATION.md`](docs/CERTIFICATION.md) — real-provider certification records
 - [`docs/history/SUPERGPT_V1_V2_LESSONS.md`](docs/history/SUPERGPT_V1_V2_LESSONS.md) — why ReviewLoop replaced SuperGPT V1/V2
 
 ## Certification status
 
-Three distinct certification events on `v2-routing`. They are **not**
-interchangeable — each covers a different implementation snapshot and a
-different part of the engine; read them separately, not as one running total.
-
-### 1. Historical LOCAL real-provider certification — `ce02f1e`
-
-Certified implementation snapshot: **`ce02f1e83276d7349ac6dfec332f75c7b972fd32`**
-— the frozen implementation head this certification was run against.
-
-- Deterministic bar at `ce02f1e`: **PASS** — `npm test` **573/573**,
-  `npm run doctor` PASS, `npm run benchmark:transports` PASS (0 real spawns),
-  `git diff --check` clean.
-- A full `reviewloop_begin` → Gate → Reviewer → verdict loop was carried to a
-  controller **PASS** over the `ce02f1e` snapshot against the byte-exact
-  frozen delta `bb0c36e → ce02f1e`: Reviewer **`agy:opus`** (first choice),
-  live-resolved model `claude-opus-4-6-thinking`, quota pool
-  `agy-claude-gpt`; Supervisor first choice `agy:gemini-supervisor` not
-  invoked (converged round 1); 1 physical Reviewer call, 0 Supervisor calls;
-  `usageVolume` **8960**; AGY isolation / effective-loading verification
-  **PASS**; no blocking P1/P2 findings.
-- Scope: **LOCAL mode only**, first-choice Reviewer only. Does not cover PR
-  mode or multi-provider failover.
-
-### 2. PR-target real-provider certification — PR #5
-
-Implementation freeze: **`787a4070336d9839590d437ce95ec8a898519d11`**.
-Certification PR: **#5**, reviewed head
-**`755c1e53cdcf113e2c85aa901e4e43ed21836d1d`**.
-
-- Physical Reviewer: **`codex:default`**. 1 Reviewer call, 0 Supervisor calls.
-- Controller verdict: **PASS**, round 1, "no P1/P2 findings".
-- `usageVolume` **16759**, `contextOverheadTokens` **16460** — Token Sentinel
-  **not tripped** (threshold 40000 single-call / 30000 context-overhead).
-- Exercises the real PR-target production path end to end: repository
-  identity, exact base/head SHA binding, Gate on the exact reviewed HEAD, one
-  real Reviewer call.
-
-### 3. Final routing-hardening implementation — `928f79f`
-
-Implementation head: **`928f79fdbc342ad1ca0f22f2357c4ed78dc88a6e`**.
-
-- Deterministic local suite / `npm run doctor` / `npm run benchmark:transports`:
-  **PASS**.
-- Independent manual GitHub code review: **PASS**.
-- **No extra real-provider certification was performed against this head.**
-  One real-provider certification attempt over the routing-hardening change
-  hit the post-settlement Token Sentinel (a `codex:default` Reviewer call,
-  `usageVolume` 79256 / `contextOverheadTokens` 69297, both over threshold) —
-  this is a **safety trip, not a code finding**: the anomalous call was fully
-  accounted, the loop latched to `HUMAN_REQUIRED`, and no further automatic
-  provider spend occurred. The Sentinel thresholds were **not** raised or
-  bypassed to get past it.
-
-`claude:opus` uses the stable provider alias `opus`; `codex:default` follows
-the provider default. No concrete release is pinned by default.
-
-Historical SuperGPT V1/V2 measured numbers are labelled historical in
-`docs/history/` and are not ReviewLoop certification.
+Real-provider certification records (which snapshot was certified, with which
+Reviewer, and what they do and do not cover) live in
+[`docs/CERTIFICATION.md`](docs/CERTIFICATION.md). They describe specific
+historical snapshots, not the current head.
