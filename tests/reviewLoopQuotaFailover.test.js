@@ -21,13 +21,29 @@ import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 const QUOTA_STDERR = 'RESOURCE_EXHAUSTED (code 429): You have exhausted your quota for this model. Quota resets in 4h 3m.';
 const quotaExit = (over = {}) => new AgyExitError(1, over.stderr ?? QUOTA_STDERR, { stdout: over.stdout ?? '', durationMs: over.durationMs ?? 3000 });
 const unknownExit = () => new AgyExitError(1, '', { stdout: '', durationMs: 4000 });
+const realQuotaShell = (overrides = {}) => {
+  const payload = {
+    conversation_id: '', status: 'ERROR', response: '',
+    num_turns: 0,
+    usage: {
+      input_tokens: 0, output_tokens: 0, thinking_tokens: 0,
+      cache_read_tokens: 0, total_tokens: 0,
+    },
+    error: 'Individual quota reached. Please upgrade your subscription.',
+    ...overrides,
+  };
+  return new AgyExitError(3, 'error: Individual quota reached. Resets in 72h6m38s. RESOURCE_EXHAUSTED (code 429), retryable: true', {
+    stdout: JSON.stringify(payload), durationMs: 3600,
+  });
+};
+
 
 const RUNTIME_DOWN = {
   'codex:default': { available: false, reason: 'test' },
   'claude:opus': { available: false, reason: 'test' },
 };
 
-function makeWorld({ agyBehavior, quotaRegistry = new QuotaPoolRegistry({ filePath: null }), persistence = new MemoryPersistence() }) {
+function makeWorld({ agyBehavior, quotaRegistry = new QuotaPoolRegistry({ filePath: null }), persistence = new MemoryPersistence(), preflightQuotaFn = null }) {
   const agyCalls = [];
   const callAgy = async (opts) => {
     // Family is recoverable from the model the pool bound; use call order + model.
@@ -47,6 +63,7 @@ function makeWorld({ agyBehavior, quotaRegistry = new QuotaPoolRegistry({ filePa
     persistence,
     routeReviewerFn: pool.route.bind(null, 'reviewer'),
     recordProviderFailure: pool.recordFailure,
+    preflightQuotaFn,
     sleepFn: async () => {},
     reviewerFn: async ({ selection }) => {
       families.push(selection.family);
@@ -79,6 +96,36 @@ test('classifier: non-zero exit, short duration, bare RESOURCE_EXHAUSTED, usage,
   assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: `stream interrupted: ${QUOTA_STDERR}` })).proven, false, 'mid-stream wording');
   assert.equal(classifyAgyQuotaRejection(quotaExit({ stderr: '429 rate limit, retry later' })).proven, false, 'plain rate limit is not quota');
   assert.equal(classifyAgyQuotaRejection(Object.assign(new Error('x'), { code: 'AGY_TIMEOUT' })).proven, false);
+});
+
+test('structured AGY quota ERROR with complete zero-turn usage is a proven admission rejection', () => {
+  const error = realQuotaShell();
+  assert.equal(error.code, 'AGY_NONZERO_EXIT');
+  assert.equal(error.stdoutWasEmpty, false);
+  assert.equal(error.usageEvidenceState, 'present');
+  assert.equal(error.envelope.explicitZeroUsage, true);
+  assert.equal(error.envelope.responseWasEmpty, true);
+  const verdict = classifyAgyQuotaRejection(error);
+  assert.equal(verdict.proven, true);
+  assert.equal(verdict.retryAfterMs, (72 * 3600 + 6 * 60 + 38) * 1000);
+});
+
+test('structured nonzero/missing/partial usage cannot manufacture zero-spend failover', () => {
+  const cases = [
+    { num_turns: 1 },
+    { response: 'partial reviewer output' },
+    { conversation_id: 'active-session-id' },
+    { usage: { input_tokens: 0, output_tokens: 1, total_tokens: 1 } },
+    { usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, unknown_usage_field: 'maybe' } },
+    { usage: { input_tokens: 0, output_tokens: 0 } },
+    { status: 'SUCCESS' },
+  ];
+  for (const input of cases) {
+    assert.equal(classifyAgyQuotaRejection(realQuotaShell(input)).proven, false, JSON.stringify(input));
+  }
+  const error = realQuotaShell({ usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    token_usage: { input_tokens: 8 } });
+  assert.equal(classifyAgyQuotaRejection(error).proven, false, 'other usage containers are not silently discarded');
 });
 
 test('classifier: millisecond hints are not misread as minutes', () => {
@@ -119,6 +166,43 @@ test('proven quota rejection: settles zero, cools the shared pool, auto-switches
   assert.equal(pool.status, 'COOLDOWN');
   assert.equal(pool.source, 'provider_error');
   assert.ok(Date.parse(pool.resetAt) - Date.now() > 4 * 3600 * 1000 - 60_000, 'parsed reset hint is honoured');
+});
+
+test('realistic structured zero-turn quota rejection switches from Opus to Gemini', async () => {
+  const w = makeWorld({
+    agyBehavior: async (n) => { if (n === 1) throw realQuotaShell(); return okReply; },
+  });
+  const { loopId } = await w.controller.begin({ goal: 'test AGY quota routing', cwd: '/r' });
+  const result = await w.controller.review({ loopId });
+  assert.equal(result.status, 'PASS');
+  assert.deepEqual(w.families, ['agy:opus', 'agy:gemini-reviewer']);
+  const state = await w.persistence.readWorkflowState(loopId);
+  const [reservation] = Object.values(state.modelSpendReservations).sort((a, b) => a.physicalAttempt - b.physicalAttempt);
+  assert.equal(reservation.status, 'SETTLED_KNOWN');
+  assert.equal(reservation.settlementReason, 'PROVEN_QUOTA_REJECTED_ZERO');
+  assert.equal(w.quotaRegistry.get('agy-claude-gpt').status, 'COOLDOWN');
+});
+
+test('quota preflight skips exhausted Claude/GPT before any Opus provider invocation', async () => {
+  const quotaRegistry = new QuotaPoolRegistry({ filePath: null });
+  let probes = 0;
+  const w = makeWorld({
+    quotaRegistry,
+    preflightQuotaFn: async () => {
+      probes += 1;
+      quotaRegistry.recordCooldown('agy-claude-gpt', {
+        reason: 'quota_exhausted', retryAfter: 72 * 3600_000, source: 'agy_usage_preflight',
+      });
+      return { checked: true, exhaustedPools: ['agy-claude-gpt'] };
+    },
+    agyBehavior: async () => okReply,
+  });
+  const { loopId } = await w.controller.begin({ goal: 'test quota preflight', cwd: '/r' });
+  const verdict = await w.controller.review({ loopId });
+  assert.equal(verdict.status, 'PASS');
+  assert.equal(probes, 1);
+  assert.deepEqual(w.families, ['agy:gemini-reviewer']);
+  assert.equal(w.agyCalls.length, 1, 'no wasted Opus call');
 });
 
 test('quota pool is shared: opus cooldown removes sonnet and gpt-oss from Reviewer routing', async () => {
