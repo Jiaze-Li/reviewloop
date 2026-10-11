@@ -1,12 +1,14 @@
 // Read AGY's zero-model-turn /usage command before Reviewer/Supervisor routing.
 // This is only an optional quota hint: unsupported CLI versions, malformed replies,
 // and unreachable quota services NEVER imply zero usage or available quota.
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { narrowReviewTransportCwd, narrowAgyGeminiDir } from '../reviewloop/adapters/scratchCwd.js';
 
 const DEFAULT_TTL_MS = 90_000;
 const PROBE_TIMEOUT_MS = 12_000;
 const PROBE_MAX_BYTES = 256 * 1024;
+const execFileAsync = promisify(execFile);
 
 function supportsHeadlessUsage(version) {
   const match = /(?:^|[^\d])(\d+)\.(\d+)\.(\d+)(?:[^\d]|$)/.exec(String(version));
@@ -56,7 +58,7 @@ export function parseAgyQuotaUsage(stdout, nowMs = Date.now()) {
  */
 export function createAgyQuotaPreflight({
   quotaRegistry,
-  exec = execFileSync,
+  exec = execFileAsync,
   executable = 'agy',
   env = process.env,
   geminiDir = narrowAgyGeminiDir(),
@@ -79,13 +81,18 @@ export function createAgyQuotaPreflight({
       stdio: ['ignore', 'pipe', 'pipe'],
     };
     try {
-      if (!supportsHeadlessUsage(exec(executable, ['--version'], options))) {
+      // Async process execution keeps the MCP event loop responsive during the
+      // quota API request; test fakes may return a plain string instead.
+      const versionResult = await exec(executable, ['--version'], options);
+      const version = typeof versionResult === 'string' ? versionResult : versionResult?.stdout;
+      if (!supportsHeadlessUsage(version)) {
         return { checked: false, reason: 'unsupported_version' };
       }
       // Attached --print form: do not pass --disable-slash-commands here.
-      const output = exec(executable, [
+      const queryResult = await exec(executable, [
         '--print=/usage', '--output-format', 'json', `--gemini_dir=${geminiDir}`,
       ], options);
+      const output = typeof queryResult === 'string' ? queryResult : queryResult?.stdout;
       const exhausted = parseAgyQuotaUsage(output, t);
       if (!exhausted) return { checked: false, reason: 'unknown_response' };
       for (const { poolId, resetAt } of exhausted) {
