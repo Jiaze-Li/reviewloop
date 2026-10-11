@@ -45,6 +45,7 @@ test('removed modules are gone from the tree', () => {
     'src/reviewloop/prWorktree.js',
     'src/reviewloop/prIdentity.js',
     'src/reviewloop/githubBackend.js',
+    'tests/fixtures/pr-review-fixtures.mjs',
   ]) {
     assert.equal(existsSync(new URL(f, new URL('..', import.meta.url))), false, f);
   }
