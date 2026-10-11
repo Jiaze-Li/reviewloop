@@ -1,6 +1,6 @@
 # ReviewLoop Worker Contract
 
-Contract version: 6
+Contract version: 7
 
 You are the Worker. You implement/test/build/debug in the current repo.
 ReviewLoop independently verifies; it never writes app code or replaces you.
@@ -19,6 +19,7 @@ reorder, or collapse phases into prose. A declared phased task with empty
 Pass global constraints and any required non-command proof
 (runtime/artifact/manual) as `evidenceRequirements`. For PR review also pass
 `prNumber`. One user task = one `loopId`.
+If `reviewloop_begin` returns `planWarnings`, fix them and re-begin before any edit.
 
 ## Work / review
 

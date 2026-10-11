@@ -475,6 +475,26 @@ export function createReviewLoopController({
         }
       }
     }
+    // LOCAL attribution check, while it is still free to fix: files untracked at
+    // begin make every brand-new Worker file unattributable (D25), so the first
+    // review would stop at HUMAN_REQUIRED and the loop could not be recovered.
+    if (mode === REVIEW_MODES.LOCAL && baseline) {
+      const untracked = Object.keys(baseline.untrackedHashes ?? {});
+      if (untracked.length) {
+        const shown = untracked.slice(0, 5).join(', ');
+        planWarnings.push(
+          `${untracked.length} untracked file(s) at begin (${shown}${untracked.length > 5 ? ', …' : ''}): `
+          + 'any new file you create will make review stop at HUMAN_REQUIRED. '
+          + 'Commit, delete or .gitignore them (or git stash -u), then call reviewloop_begin again BEFORE editing.',
+        );
+      }
+      if (baseline.evidenceComplete === false) {
+        planWarnings.push(
+          `baseline attribution is already incomplete (${(baseline.incompleteReasons ?? []).slice(0, 2).join('; ')}); `
+          + 'fix the working tree and call reviewloop_begin again BEFORE editing.',
+        );
+      }
+    }
     if (preflightPhases.length > 8) {
       planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
     }

@@ -105,8 +105,9 @@ If the cumulative diff is too large for one final review, the final gate
 reviews every file changed in more than one phase plus everything changed since
 the last `PHASE_PASS`; each remaining file was changed in exactly one phase and
 fully reviewed at that gate (`diffScope: final-cross-phase`). Any doubt keeps the
-old behaviour. `reviewloop_begin` also returns advisory `planWarnings` for
-phases that only a model can judge.
+old behaviour. `reviewloop_begin` also returns advisory `planWarnings`: phases
+that only a model can judge, and (LOCAL) untracked files at begin that would make
+the first review stop at `HUMAN_REQUIRED` - fix those and re-begin before editing.
 
 A gate that exhausts its automatic convergence budget stops the Worker
 (`HUMAN_REQUIRED`, `budgetExhausted`). A human can run

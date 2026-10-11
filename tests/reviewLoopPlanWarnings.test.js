@@ -30,3 +30,28 @@ test('begin warns when a plan has many phases', async () => {
   const r = await controllerWith(['npm test']).begin({ goal: 'g', cwd: '/r', phases });
   assert.match(r.planWarnings.join('\n'), /9 phases/);
 });
+
+test('begin warns, before any edit, about untracked files that would make review unattributable', async () => {
+  const controller = createReviewLoopController({
+    persistence: new MemoryPersistence(),
+    captureBaselineFn: async () => ({
+      head: 'H', dirtyFiles: [], untrackedHashes: { 'notes.txt': 'a', 'tmp/x.log': 'b' }, evidenceComplete: true,
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['npm test'] }),
+  });
+  const r = await controller.begin({ goal: 'g', cwd: '/r' });
+  assert.equal(r.planWarnings.length, 1);
+  assert.match(r.planWarnings[0], /2 untracked file\(s\).*notes\.txt.*BEFORE editing/);
+});
+
+test('begin warns when the baseline attribution is already incomplete', async () => {
+  const controller = createReviewLoopController({
+    persistence: new MemoryPersistence(),
+    captureBaselineFn: async () => ({
+      head: 'H', dirtyFiles: [], untrackedHashes: {}, evidenceComplete: false, incompleteReasons: ['symlink escapes the repository'],
+    }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['npm test'] }),
+  });
+  const r = await controller.begin({ goal: 'g', cwd: '/r' });
+  assert.match(r.planWarnings.join('\n'), /already incomplete \(symlink escapes the repository\)/);
+});
