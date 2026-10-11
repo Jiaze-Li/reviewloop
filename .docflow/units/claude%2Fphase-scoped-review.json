@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T07:14:21.918Z",
+  "updatedAt": "2026-10-11T07:20:54.729Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Document phase-scoped diffs; allow nextDiffScope in the MCP output schema",
+    "current": "Add human reopen-gate recovery; document final-gate reduction and plan warnings",
     "next": "",
     "history": [
       {
@@ -22,6 +22,18 @@
       {
         "at": "2026-10-11T07:14:12Z",
         "text": "Make same-family transient retry provider-neutral"
+      },
+      {
+        "at": "2026-10-11T07:18:51Z",
+        "text": "Document phase-scoped diffs; allow nextDiffScope in the MCP output schema"
+      },
+      {
+        "at": "2026-10-11T07:19:12Z",
+        "text": "Review an oversized final diff through its cross-phase subset instead of stopping"
+      },
+      {
+        "at": "2026-10-11T07:20:46Z",
+        "text": "Warn at begin about phases with no mechanical verification"
       }
     ],
     "commits": [
@@ -48,6 +60,24 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T07:14:12Z",
         "message": "Document phase-scoped diffs; allow nextDiffScope in the MCP output schema"
+      },
+      {
+        "sha": "a128fe45135f0dab51b3a99a05edc1efc75cdc76",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:18:51Z",
+        "message": "Review an oversized final diff through its cross-phase subset instead of stopping"
+      },
+      {
+        "sha": "bfa0e91caeba47d05a9e8af8cc212991f31df862",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:19:12Z",
+        "message": "Warn at begin about phases with no mechanical verification"
+      },
+      {
+        "sha": "024fd1a3f9a76d97a70760026b022c856f424046",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:20:46Z",
+        "message": "Add human reopen-gate recovery; document final-gate reduction and plan warnings"
       }
     ],
     "pr": null,
