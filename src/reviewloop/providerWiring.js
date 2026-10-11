@@ -857,6 +857,7 @@ export function createProductionReviewLoopProviders({
   // Same inert-by-default rule: only the MCP entrypoint passes a disk-backed
   // registry so quota-pool cooldowns survive an MCP restart.
   quotaRegistry = undefined,
+  preflightQuotaFn = null,
 } = {}) {
   // `agyCatalog` + `transportRuntime` + `customAgentSupport` are supplied by the
   // MCP entrypoint, which probes them once at startup; left null here so nothing
@@ -881,6 +882,7 @@ export function createProductionReviewLoopProviders({
     routeReviewerFn: (signals, requestContext) => pool.route('reviewer', signals, requestContext),
     routeSupervisorFn: (signals, requestContext) => pool.route('supervisor', signals, requestContext),
     recordProviderFailure: pool.recordFailure,
+    preflightQuotaFn,
     reviewerFn: async (args) => {
       const sel = args.selection ?? pool.route('reviewer');
       if (!sel?.transport) throw Object.assign(new Error('no eligible Reviewer provider'), { code: 'PROVIDER_UNAVAILABLE' });
