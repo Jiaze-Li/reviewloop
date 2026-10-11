@@ -377,6 +377,18 @@ const RETRYABLE = new Set([
   'EXECUTOR_TIMEOUT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED', 'AGY_NETWORK_UNAVAILABLE',
 ]);
 
+// A failure the transport itself proved safe to retry on the same family:
+// 'auth' (credential-refresh race, nothing billed) or 'network' (path lost
+// before any request reached the provider). Transports opt in by setting
+// transientAuth / transientNetwork on the error; the controller deliberately
+// does not care which provider produced it, so a new transport only needs a
+// classifier that sets the flag.
+function transientKindOf(code, flags) {
+  if (code === 'PROVIDER_AUTH_FAILED' && flags?.transientAuth === true) return 'auth';
+  if (code === 'AGY_NETWORK_UNAVAILABLE' && flags?.transientNetwork === true) return 'network';
+  return null;
+}
+
 // One logical review dispatch may absorb two mechanically-proven transient AGY
 // failures before the family is marked failed and normal pool failover takes
 // over. This covers the existing canonical 401/OAuth refresh race AND the
@@ -965,18 +977,9 @@ export function createReviewLoopController({
       if (attemptNumbers.length > 0) {
         startAttempt = Math.max(...attemptNumbers) + 1;
       }
-      // Family is the stable transport identity. Production AGY providers are
-      // quota-pool ids such as "agy-claude-gpt" / "agy-gemini", not the
-      // literal string "agy"; matching provider === "agy" would silently lose
-      // retry history after a real process restart.
-      transientRetriesUsed = priorAttempts.filter((r) => (
-        typeof r.family === 'string'
-        && r.family.startsWith('agy:')
-        && (
-          (r.failureCode === 'PROVIDER_AUTH_FAILED' && r.transientAuth === true)
-          || (r.failureCode === 'AGY_NETWORK_UNAVAILABLE' && r.transientNetwork === true)
-        )
-      )).length;
+      // Retry history comes from the durable attempt records, so a process
+      // restart cannot reset the same-family transient retry budget.
+      transientRetriesUsed = priorAttempts.filter((r) => transientKindOf(r.failureCode, r)).length;
 
       // Backward-compatible fallback for a consumed claim written by an older
       // build that has no spend-attempt projection. Starting at 2 preserves the
@@ -1003,11 +1006,8 @@ export function createReviewLoopController({
     const exhaustedTransientFamilies = new Map();
     const exhaustedFamilies = new Set();
     for (const record of priorAttempts) {
-      if (typeof record?.family !== 'string' || !record.family.startsWith('agy:')) continue;
-      const safeTransient =
-        (record?.failureCode === 'PROVIDER_AUTH_FAILED' && record?.transientAuth === true)
-        || (record?.failureCode === 'AGY_NETWORK_UNAVAILABLE' && record?.transientNetwork === true);
-      if (!safeTransient) continue;
+      if (typeof record?.family !== 'string') continue;
+      if (!transientKindOf(record?.failureCode, record)) continue;
 
       const entry = exhaustedTransientFamilies.get(record.family) ?? {
         family: record.family,
@@ -1158,13 +1158,10 @@ export function createReviewLoopController({
         lastErr = err;
         if (isAuthorizationFailure(err)) throw err; // spend/objective denial — never dispatched, never retried
         const code = err?.code ?? err?.providerFailure ?? '';
-        const transientAuth =
-          code === 'PROVIDER_AUTH_FAILED'
-          && err?.transientAuth === true;
-        const transientNetwork =
-          code === 'AGY_NETWORK_UNAVAILABLE'
-          && err?.transientNetwork === true;
-        const transientSameFamily = transientAuth || transientNetwork;
+        const transientKind = transientKindOf(code, err);
+        const transientAuth = transientKind === 'auth';
+        const transientNetwork = transientKind === 'network';
+        const transientSameFamily = transientKind !== null;
 
         onAttempt?.({
           attempt, family, provider, quotaPools: selection?.quotaPools ?? null, outcome: 'FAILURE', code,
