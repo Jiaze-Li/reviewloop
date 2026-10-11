@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:16:28.210Z",
+  "updatedAt": "2026-10-11T13:18:53.010Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "test: assert LOCAL-only Reviewer and Supervisor dispatch",
+    "current": "test: remove remaining PR fixtures from mixed LOCAL test files",
     "next": "",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-10-11T21:15:44+08:00",
         "text": "docs: remove active PR architecture and preserve historical certification provenance"
+      },
+      {
+        "at": "2026-10-11T21:18:40+08:00",
+        "text": "test: assert LOCAL-only Reviewer and Supervisor dispatch"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:15:44+08:00",
         "message": "test: assert LOCAL-only Reviewer and Supervisor dispatch"
+      },
+      {
+        "sha": "4708d20ad129b7673626318ecb2ef2d2710b7301",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-11T21:18:40+08:00",
+        "message": "test: remove remaining PR fixtures from mixed LOCAL test files"
       }
     ],
     "pr": {
