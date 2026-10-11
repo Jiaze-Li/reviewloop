@@ -40,18 +40,25 @@ function parseAgyQuotaSnapshot(stdout, nowMs = Date.now()) {
   let recognized = false;
   for (const group of payload.command.data.groups) {
     const poolId = poolForGroup(group?.name ?? group?.label ?? group?.title);
-    if (!poolId || !Array.isArray(group.buckets) || group.buckets.length === 0
-      || !group.buckets.every((bucket) => (
-        bucket && typeof bucket.remaining_fraction === 'number'
-        && Number.isFinite(bucket.remaining_fraction)
-        && bucket.remaining_fraction >= 0 && bucket.remaining_fraction <= 1
-      ))) continue;
-    recognized = true;
-    const empty = group.buckets.filter((bucket) => bucket.remaining_fraction === 0);
+    if (!poolId || !Array.isArray(group.buckets) || group.buckets.length === 0) continue;
+    const valid = group.buckets.filter((bucket) => (
+      bucket && typeof bucket.remaining_fraction === 'number'
+      && Number.isFinite(bucket.remaining_fraction)
+      && bucket.remaining_fraction >= 0 && bucket.remaining_fraction <= 1
+    ));
+    const empty = valid.filter((bucket) => bucket.remaining_fraction === 0);
     if (empty.length === 0) {
-      availablePools.add(poolId);
+      // Releasing a cooldown requires ALL windows to be explicitly nonzero.
+      // A missing window must never be interpreted as quota recovery.
+      if (valid.length === group.buckets.length) {
+        recognized = true;
+        availablePools.add(poolId);
+      }
       continue;
     }
+    // Any explicitly exhausted window is still useful even if another
+    // bucket is malformed; preserve the former conservative quota detection.
+    recognized = true;
     exhaustedPoolIds.add(poolId);
     const resets = empty.map((bucket) => Date.parse(bucket.reset_time ?? ''))
       .filter((value) => Number.isFinite(value) && value > nowMs && value <= nowMs + 8 * 86_400_000);
