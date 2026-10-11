@@ -181,6 +181,23 @@ test('malformed /usage, paid-turn envelope, and unrelated groups never suppress 
   ]), NOW), []);
 });
 
+
+test('a proven exhausted window is recognized despite other malformed buckets, but partial positive windows are not recovery evidence', () => {
+  assert.deepEqual(parseAgyQuotaUsage(usage([
+    group('Claude and GPT models', [
+      { remaining_fraction: 0, reset_time: reset(72) },
+      { window: 'unreadable' },
+    ]),
+  ]), NOW), [{ poolId: 'agy-claude-gpt', resetAt: reset(72) }]);
+
+  assert.equal(parseAgyQuotaUsage(usage([
+    group('Claude and GPT models', [
+      { remaining_fraction: 0.8, reset_time: reset(72) },
+      { window: 'unreadable' },
+    ]),
+  ]), NOW), null, 'a partial positive snapshot must never clear a cooldown');
+});
+
 test('unsupported AGY builds never run /usage (older versions treated slash text as a paid prompt)', async () => {
   const calls = [];
   const preflight = createAgyQuotaPreflight({
