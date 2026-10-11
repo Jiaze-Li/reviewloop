@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T07:46:29.924Z",
+  "updatedAt": "2026-10-11T08:15:42.313Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Move bounded provider failover out of controller.js into providerFailover.js",
+    "current": "Warn at begin about untracked files that would make review unattributable",
     "next": "",
     "history": [
       {
@@ -42,6 +42,10 @@
       {
         "at": "2026-10-11T07:46:16Z",
         "text": "Move pure phase/convergence helpers out of controller.js into phaseState.js"
+      },
+      {
+        "at": "2026-10-11T08:15:28Z",
+        "text": "Move bounded provider failover out of controller.js into providerFailover.js"
       }
     ],
     "commits": [
@@ -98,6 +102,12 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T07:46:16Z",
         "message": "Move bounded provider failover out of controller.js into providerFailover.js"
+      },
+      {
+        "sha": "06df11910824cbd19fb010f991ad2fc5cba647b6",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:15:28Z",
+        "message": "Warn at begin about untracked files that would make review unattributable"
       }
     ],
     "pr": null,
