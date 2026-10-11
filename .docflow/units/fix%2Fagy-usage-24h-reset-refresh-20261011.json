@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T03:04:24.751Z",
+  "updatedAt": "2026-10-11T03:04:36.318Z",
   "task": {
     "id": "fix/agy-usage-24h-reset-refresh-20261011",
     "branch": "fix/agy-usage-24h-reset-refresh-20261011",
@@ -50,7 +50,14 @@
         "message": "Document 24-hour and expected-reset quota refresh policy"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 16,
+      "state": "open",
+      "title": "Refresh AGY quota on 24h cadence or at predicted reset",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/16",
+      "merged": false,
+      "updatedAt": "2026-10-11T03:04:23Z"
+    },
     "completed": null,
     "outcome": null
   }
