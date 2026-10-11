@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T09:21:59.920Z",
+  "updatedAt": "2026-10-11T10:49:34.466Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
     "title": "claude/phase-scoped-review",
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Make the lease reclaim race test independent of runner speed",
     "next": "",
     "history": [
@@ -172,13 +172,15 @@
     ],
     "pr": {
       "number": 17,
-      "state": "open",
+      "state": "closed",
       "title": "Phase-scoped review for long tasks, plus recovery and begin-time warnings",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/17",
-      "merged": false,
-      "updatedAt": "2026-10-11T09:21:49Z"
+      "merged": true,
+      "mergedAt": "2026-10-11T10:49:24Z",
+      "closedAt": "2026-10-11T10:49:24Z",
+      "updatedAt": "2026-10-11T10:49:24Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-11T10:49:24Z",
+    "outcome": "Merged"
   }
 }
