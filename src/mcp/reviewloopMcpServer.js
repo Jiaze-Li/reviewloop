@@ -33,6 +33,7 @@ import {
 } from '../reviewloop/providerWiring.js';
 import { RouteAuditLog, QuotaPoolRegistry } from '../orchestrator/roleRouting.js';
 import { probeAgyModelCatalog } from '../agy/agyModelCatalog.js';
+import { createAgyQuotaPreflight } from '../agy/agyQuotaProbe.js';
 import { probeReviewTransportRuntime } from '../reviewloop/adapters/cliReviewTransports.js';
 
 export function createReviewLoopMcpServer({
@@ -53,14 +54,18 @@ export function createReviewLoopMcpServer({
   // and a zero-token stale-health revalidator for the AGY families. Every
   // deterministic test builds its own providers/pool directly and never
   // reaches this default.
+  const quotaRegistry = controller ? null : new QuotaPoolRegistry({
+    filePath: path.join(os.homedir(), '.reviewloop', 'quota-pools.json'),
+  });
   const ctl = controller ?? createReviewLoopController(
     createProductionReviewLoopProviders({
       agyCatalog,
       transportRuntime,
       customAgentSupport,
       routeAudit: new RouteAuditLog({ filePath: path.join(os.homedir(), '.reviewloop', 'route-audit.log') }),
-      // Disk-backed so a quota-pool cooldown survives an MCP restart.
-      quotaRegistry: new QuotaPoolRegistry({ filePath: path.join(os.homedir(), '.reviewloop', 'quota-pools.json') }),
+      // Disk-backed pool state is shared by preflight and the Reviewer router.
+      quotaRegistry,
+      preflightQuotaFn: createAgyQuotaPreflight({ quotaRegistry }),
       healthRevalidator: createAgyZeroTokenHealthRevalidator(),
     }),
   );

@@ -65,6 +65,20 @@ function pickNumericTree(value, depth = 0) {
   return undefined;
 }
 
+// A quota failure can have a structured ERROR shell on stdout even though
+// it never began a model turn. Accept zero usage ONLY when the raw envelope
+// reports a complete, unambiguous set of numeric zero counters.
+function explicitlyZeroUsageEnvelope(json) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false;
+  if (['token_usage', 'tokenUsage', 'metadata', 'meta'].some((key) => key in json)) return false;
+  const usage = json.usage;
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return false;
+  if (usage.input_tokens !== 0 || usage.output_tokens !== 0 || usage.total_tokens !== 0) return false;
+  return Object.entries(usage).every(([key, value]) => (
+    /^[a-z_]*tokens$/i.test(key) && typeof value === 'number' && Number.isFinite(value) && value === 0
+  ));
+}
+
 /**
  * @param {string} stdout  raw stdout captured from a non-zero `agy` exit
  * @returns {{ parsed: boolean, jsonObject: boolean, fields: object,
@@ -110,6 +124,15 @@ export function extractSafeAgyEnvelopeMetadata(stdout) {
   }
 
   const fields = pickSafeScalars(json);
+  // Only content-free proof about the CLI error envelope is retained. Never
+  // persist the (possibly prompt-bearing) response or raw error message.
+  if (typeof json.response === 'string') fields.responseWasEmpty = json.response.length === 0;
+  fields.explicitZeroUsage = explicitlyZeroUsageEnvelope(json);
+  if (Number.isInteger(json.num_turns) && json.num_turns >= 0) fields.numTurns = json.num_turns;
+  if (typeof json.conversation_id === 'string') fields.hasConversationId = json.conversation_id.trim() !== '';
+  if (typeof json.error === 'string') {
+    fields.quotaError = /(?:quota|credits?)\b[^\n]{0,100}\b(?:reached|exceeded|exhausted|depleted|insufficient)|\b(?:reached|exceeded|exhausted|depleted)\b[^\n]{0,100}\b(?:quota|credits?)/i.test(json.error);
+  }
 
   // A nested "error" object is common; take safe scalars from it too.
   if (json.error && typeof json.error === 'object' && !Array.isArray(json.error)) {

@@ -414,6 +414,8 @@ export function createReviewLoopController({
   routeReviewerFn = null,
   routeSupervisorFn = null,
   recordProviderFailure = null,
+  // Optional zero-model-turn AGY quota preflight; never spends Reviewer tokens.
+  preflightQuotaFn = null,
   transientAuthRetryDelaysMs = DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
   sleepFn = defaultRetrySleep,
   prBackend = null,
@@ -1035,6 +1037,25 @@ export function createReviewLoopController({
           : (entry.lastTransientNetwork === true ? 'network' : 'unknown'),
         failures: entry.failures,
       });
+    }
+
+    // Refresh a bounded, zero-model-turn quota snapshot before selecting the
+    // first provider. A failed/unsupported probe is just UNKNOWN: ordinary
+    // routing and its strict unknown-spend safety invariants remain intact.
+    if (typeof preflightQuotaFn === 'function') {
+      await assertLeaseHeld(workflowId);
+      try {
+        const quota = await preflightQuotaFn({ role, workflowId });
+        if (quota?.checked && quota.exhaustedPools?.length) {
+          onEvent?.({
+            type: 'AGY_QUOTA_PREFLIGHT_EXHAUSTED',
+            role, workflowId, pools: quota.exhaustedPools,
+          });
+        }
+      } catch {
+        // Never let a read-only quota service failure masquerade as a
+        // provider failure, zero spend, or permission for another model call.
+      }
     }
 
     for (let attempt = startAttempt; attempt < startAttempt + maxAttempts; attempt += 1) {
