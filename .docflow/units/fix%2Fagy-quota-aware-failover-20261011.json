@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:05:18.817Z",
+  "updatedAt": "2026-10-11T02:05:36.323Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Correct quota wording regex boundaries",
+    "current": "Prove zero-turn quota envelope usage from raw complete counters",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-10-11T10:05:08+08:00",
         "text": "Retain only content-free zero-turn quota envelope evidence"
+      },
+      {
+        "at": "2026-10-11T10:05:26+08:00",
+        "text": "Correct quota wording regex boundaries"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:05:08+08:00",
         "message": "Correct quota wording regex boundaries"
+      },
+      {
+        "sha": "27472638711476b5a4f08c3d01e9fdb300627e91",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:05:26+08:00",
+        "message": "Prove zero-turn quota envelope usage from raw complete counters"
       }
     ],
     "pr": null,
