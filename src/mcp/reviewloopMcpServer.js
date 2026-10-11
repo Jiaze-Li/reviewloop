@@ -5,8 +5,7 @@
 //
 //   reviewloop_begin(goal, cwd, prNumber?, phases?)
 //       Register the immutable task objective + optional phase plan and capture the baseline
-//       (LOCAL) or bind the exact PR snapshot: repository, prNumber, base SHA,
-//       HEAD SHA (PR). Zero model calls.
+//       pre-edit LOCAL baseline and verification contract. Zero model calls.
 //
 //   reviewloop_review(loopId)
 //       The one re-entrant operation: deterministic Gate -> Reviewer (if
@@ -14,7 +13,7 @@
 //       convergence). For a PR target the same engine runs over the PR
 //       base -> exact HEAD diff, with a pre-PASS live-HEAD recheck. Returns
 //       PHASE_PASS | PASS | REWORK | HUMAN_REQUIRED | WAITING_FOR_REVIEW |
-//       NO_PROGRESS | PUSH_REQUIRED. PHASE_PASS is non-terminal; PASS is final.
+//       NO_PROGRESS. PHASE_PASS is non-terminal; PASS is final.
 //
 // Status / dashboard / stop live on the human `reviewloop` CLI, not here.
 
@@ -74,11 +73,10 @@ export function createReviewLoopMcpServer({
     'reviewloop_begin',
     {
       description:
-        'Register one ReviewLoop session for a non-trivial coding task BEFORE your first edit so the baseline is captured. If the task contract has explicit execution phases, pass the frozen phase plan here; do not open a new loop between phases. Pass prNumber to review an open PR instead (PR base -> exact PR HEAD). ReviewLoop does not implement the task — you do, in this session. Returns a loopId. Zero model calls.',
+        'Register one ReviewLoop session for a non-trivial coding task BEFORE your first edit so the baseline is captured. If the task contract has explicit execution phases, pass the frozen phase plan here; do not open a new loop between phases. ReviewLoop does not implement the task — you do, in this session. Returns a loopId. Zero model calls.',
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
-        prNumber: z.number().int().optional().describe('PR number — review the PR (base -> exact HEAD) instead of the local worktree'),
         constraints: z.array(z.string().min(1)).optional().describe('global task constraints that remain binding across every phase and the final gate'),
         contractText: z.string().min(1).optional().describe('complete self-contained frozen task contract, at most 65536 UTF-8 bytes; never truncate acceptance criteria or replace them with a reference to earlier conversation'),
         evidenceRequirements: z.array(z.object({
@@ -104,12 +102,9 @@ export function createReviewLoopMcpServer({
       },
       outputSchema: {
         loopId: z.string(),
-        mode: z.enum(['LOCAL', 'PR']),
+        mode: z.literal('LOCAL'),
         status: z.literal('READY'),
         baseline: z.record(z.string(), z.any()).nullable(),
-        prHead: z.string().nullable(),
-        prBaseSha: z.string().nullable().optional(),
-        repository: z.string().nullable().optional(),
         reviewer: z.string(),
         phaseCount: z.number().int().optional(),
         currentPhase: z.string().optional(),
@@ -119,7 +114,6 @@ export function createReviewLoopMcpServer({
     async ({
       goal,
       cwd: reqCwd,
-      prNumber,
       constraints,
       contractText,
       evidenceRequirements,
@@ -131,7 +125,6 @@ export function createReviewLoopMcpServer({
       const res = await ctl.begin({
         goal,
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
-        prNumber: prNumber ?? null,
         constraints: constraints ?? [],
         contractText: contractText ?? '',
         evidenceRequirements: evidenceRequirements ?? [],
@@ -146,9 +139,6 @@ export function createReviewLoopMcpServer({
         mode: res.mode,
         status: 'READY',
         baseline: res.baseline ?? null,
-        prHead: res.prHead ?? null,
-        prBaseSha: res.prBaseSha ?? null,
-        repository: res.repository ?? null,
         reviewer: res.reviewer,
         phaseCount: res.phaseCount ?? 0,
         currentPhase: res.currentPhase ?? 'task',
