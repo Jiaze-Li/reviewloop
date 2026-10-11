@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:08:09.945Z",
+  "updatedAt": "2026-10-11T13:10:38.206Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,12 +8,16 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "refactor: retire PR engine, preserve LOCAL review and existing objective fingerprints",
+    "current": "test: retire PR-only fixtures, preserve LOCAL regression coverage",
     "next": "",
     "history": [
       {
         "at": "2026-10-11T21:07:59+08:00",
         "text": "Remove dead external-review (PR closeout) remnants"
+      },
+      {
+        "at": "2026-10-11T21:10:27+08:00",
+        "text": "refactor: retire PR engine, preserve LOCAL review and existing objective fingerprints"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:07:59+08:00",
         "message": "refactor: retire PR engine, preserve LOCAL review and existing objective fingerprints"
+      },
+      {
+        "sha": "e957717f5f6f04d4c623d9ef59ec1abd600c952a",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-11T21:10:27+08:00",
+        "message": "test: retire PR-only fixtures, preserve LOCAL regression coverage"
       }
     ],
     "pr": null,
