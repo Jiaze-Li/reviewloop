@@ -715,7 +715,7 @@ function reviewScopePromptLines(reviewScope) {
 export function buildReviewerInvoke() {
   return async ({
     objective, diff, changedFiles, gate, reviewScope = null, evidence = null,
-    supervisorGuidance = null, transport, model, signal,
+    supervisorGuidance = null, diffScope = 'cumulative', transport, model, signal,
   }) => {
     const prompt = [
       'You are an INDEPENDENT code reviewer.',
@@ -725,6 +725,9 @@ export function buildReviewerInvoke() {
         : '',
       objective.constraints?.length ? `GLOBAL CONSTRAINTS:\n- ${objective.constraints.join('\n- ')}` : '',
       ...reviewScopePromptLines(reviewScope),
+      diffScope === 'phase-delta'
+        ? 'DIFF SCOPE: only changes made since the previous phase passed review. Earlier phases are already certified; do not re-review code outside this diff.'
+        : '',
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
       ...evidencePromptLines(evidence),

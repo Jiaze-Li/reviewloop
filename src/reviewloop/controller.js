@@ -220,7 +220,31 @@ function phaseCompletionEvidenceHash(entry) {
     reviewFingerprint: entry.reviewFingerprint,
     previousProof: entry.previousProof,
     auditTargetFingerprint: entry.auditTargetFingerprint ?? null,
+    // Only folded in when present so loops completed before phase-scoped
+    // diffs existed keep a valid proof chain.
+    ...(entry.phaseBaseline
+      ? { phaseBaseline: { head: entry.phaseBaseline.head, baselineRef: entry.phaseBaseline.baselineRef } }
+      : {}),
   }));
+}
+
+// LOCAL phase gates review only what changed since the previous phase passed.
+// The boundary is the snapshot recorded (and hash-chained) at that PHASE_PASS;
+// anything else falls back to the original begin baseline (cumulative diff).
+function phaseScopedBaseline(loopState, objective, reviewScope) {
+  if (objective?.mode !== REVIEW_MODES.LOCAL || reviewScope?.type !== 'phase') return null;
+  const prev = (loopState?.completedPhases ?? [])[reviewScope.phaseIndex - 1];
+  const b = prev?.phaseBaseline;
+  if (!b?.head || !b?.baselineRef || prev.phaseIndex !== reviewScope.phaseIndex - 1) return null;
+  return {
+    head: b.head,
+    baselineRef: b.baselineRef,
+    capturedAt: prev.completedAt,
+    dirtyFiles: [],
+    untrackedHashes: {},
+    evidenceComplete: true,
+    incompleteReasons: [],
+  };
 }
 
 function phaseCompletionRoot(objective) {
@@ -265,6 +289,9 @@ function assertPhaseProgressionValid(loopState, objective = loopState?.objective
       && typeof entry?.gateFingerprint === 'string' && Boolean(entry.gateFingerprint)
       && typeof entry?.reviewFingerprint === 'string' && Boolean(entry.reviewFingerprint)
       && entry?.previousProof === previousProof
+      && (entry.phaseBaseline == null
+        || (typeof entry.phaseBaseline.head === 'string' && Boolean(entry.phaseBaseline.head)
+          && typeof entry.phaseBaseline.baselineRef === 'string' && Boolean(entry.phaseBaseline.baselineRef)))
       && typeof entry?.proof === 'string' && entry.proof === phaseCompletionEvidenceHash(entry);
     if (!structurallyValid) {
       throw new Error(
@@ -794,6 +821,7 @@ export function createReviewLoopController({
     telemetry,
     {
       head = null, gate = null, reviewScope = null, auditRecord = null, evidenceFingerprint = null,
+      phaseBaseline = null,
     } = {},
   ) {
     const scope = reviewScope ?? currentReviewScope(loopState);
@@ -812,6 +840,7 @@ export function createReviewLoopController({
       reviewFingerprint: review?.reviewedFingerprint ?? loopState.lastReviewedFingerprint ?? null,
       previousProof: previous?.proof ?? phaseCompletionRoot(loopState.objective),
       auditTargetFingerprint: auditRecord?.targetFingerprint ?? null,
+      ...(phaseBaseline ? { phaseBaseline: { head: phaseBaseline.head, baselineRef: phaseBaseline.baselineRef } } : {}),
     };
     completion.proof = phaseCompletionEvidenceHash(completion);
 
@@ -864,6 +893,9 @@ export function createReviewLoopController({
         ? { id: nextScope.id, title: nextScope.title, index: nextScope.phaseIndex }
         : null,
       finalGatePending: nextScope.type === 'final',
+      // 'phase-delta': the next phase gate reviews only changes made after this
+      // PHASE_PASS. 'cumulative': it reviews everything since reviewloop_begin.
+      nextDiffScope: nextScope.type === 'phase' && phaseBaseline ? 'phase-delta' : 'cumulative',
       resumePacket: loopState.resumePacket,
       contextRefreshSafe: true,
       reviewer: review?.reviewer ?? null,
@@ -1508,6 +1540,7 @@ export function createReviewLoopController({
           changedFiles: delta.changedFiles,
           gate,
           reviewScope,
+          diffScope: delta.diffScope ?? 'cumulative',
           round: loopState.round,
           chunk: { index: chunk.index, total: chunk.total },
           previousFindings: loopState.lastReview?.blockingFindings ?? [],
@@ -1574,14 +1607,40 @@ export function createReviewLoopController({
     };
   }
 
+  // Snapshot of the just-certified tree, used as the diff start for the NEXT
+  // LOCAL phase gate. Skipped (-> cumulative diff, never worse) when the next
+  // gate is the final one, or when the snapshot cannot be trusted: untracked
+  // files at the boundary would make every new Worker file unattributable
+  // (D25), so the Worker must stage or commit new files before the phase ends.
+  async function captureNextPhaseBoundary(loopState, objective, reviewScope, cwd) {
+    if (reviewScope?.type !== 'phase' || reviewScope.phaseIndex + 1 >= phasesOf(objective).length) return null;
+    try {
+      const b = await captureBaselineFn({ cwd });
+      if (!b?.head || b.evidenceComplete === false) return null;
+      if (Object.keys(b.untrackedHashes ?? {}).length) return null;
+      return { head: b.head, baselineRef: b.baselineRef ?? b.head };
+    } catch {
+      return null;
+    }
+  }
+
   // ---- LOCAL mode --------------------------------------------------------
   async function reviewLocal({ loopState, evidence, signal }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
-    const baseline = objective.baseline;
+    let baseline = phaseScopedBaseline(loopState, objective, reviewScope) ?? objective.baseline;
+    let diffScope = baseline === objective.baseline ? 'cumulative' : 'phase-delta';
 
     let delta = await collectWorkerDeltaFn({ cwd, baseline });
+    // A phase boundary that cannot be used (nothing changed this phase, or the
+    // delta cannot be attributed) falls back to the original baseline, so the
+    // result is never worse than a cumulative review.
+    if (diffScope === 'phase-delta' && (delta.noWorkerChangeYet || delta.evidenceComplete === false)) {
+      baseline = objective.baseline;
+      diffScope = 'cumulative';
+      delta = await collectWorkerDeltaFn({ cwd, baseline });
+    }
 
     // B7 — no Worker change since begin -> deterministic NO_PROGRESS, 0 Reviewer.
     if (delta.noWorkerChangeYet) {
@@ -1950,6 +2009,7 @@ export function createReviewLoopController({
       };
     }
 
+    delta.diffScope = diffScope;
     const spend = spendFor(loopState.loopId, objective);
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
@@ -2028,6 +2088,7 @@ export function createReviewLoopController({
         gate,
         reviewScope,
         evidenceFingerprint: delta.fingerprint,
+        phaseBaseline: await captureNextPhaseBoundary(loopState, objective, reviewScope, cwd),
       });
       if (phaseResult) {
         await saveLoop(loopState);

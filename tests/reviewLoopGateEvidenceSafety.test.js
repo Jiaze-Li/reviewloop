@@ -801,6 +801,7 @@ test('pre-verificationEvidence completed phase resumes with its legacy scope fin
   const completion = raw.reviewLoop.completedPhases[0];
   completion.reviewScopeFingerprint = oldScopeFp;
   completion.previousProof = `objective:${raw.reviewLoop.objective.fingerprint}`;
+  delete completion.phaseBaseline; // a truly legacy completion predates phase-scoped diffs
   completion.proof = createHash('sha256').update(JSON.stringify({
     id: completion.id,
     title: completion.title,
