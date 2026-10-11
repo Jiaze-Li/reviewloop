@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T13:10:38.206Z",
+  "updatedAt": "2026-10-11T13:14:51.541Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "test: retire PR-only fixtures, preserve LOCAL regression coverage",
+    "current": "docs: define ReviewLoop as LOCAL-only and reject retired PR MCP argument",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-10-11T21:10:27+08:00",
         "text": "refactor: retire PR engine, preserve LOCAL review and existing objective fingerprints"
+      },
+      {
+        "at": "2026-10-11T21:14:40+08:00",
+        "text": "test: retire PR-only fixtures, preserve LOCAL regression coverage"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-11T21:10:27+08:00",
         "message": "test: retire PR-only fixtures, preserve LOCAL regression coverage"
+      },
+      {
+        "sha": "715c30becd3bc51531eb3bc933a24dee1eef7320",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-11T21:14:40+08:00",
+        "message": "docs: define ReviewLoop as LOCAL-only and reject retired PR MCP argument"
       }
     ],
     "pr": null,
