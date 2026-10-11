@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:47:17.989Z",
+  "updatedAt": "2026-10-11T09:21:55.522Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Address Codex review: keep real code in the reduced final diff, never truncate the resume contract, list reopen-required loops, bound every Gate repair branch",
+    "current": "Make the lease reclaim race test independent of runner speed",
     "next": "",
     "history": [
       {
@@ -66,6 +66,10 @@
       {
         "at": "2026-10-11T08:46:49Z",
         "text": "Match non-rename diff headers exactly in the final-diff reducer"
+      },
+      {
+        "at": "2026-10-11T09:21:46Z",
+        "text": "Address Codex review: keep real code in the reduced final diff, never truncate the resume contract, list reopen-required loops, bound every Gate repair branch"
       }
     ],
     "commits": [
@@ -158,6 +162,12 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T08:46:49Z",
         "message": "Address Codex review: keep real code in the reduced final diff, never truncate the resume contract, list reopen-required loops, bound every Gate repair branch"
+      },
+      {
+        "sha": "96d1d6942317fc21adb9082a430b8f880204ad9f",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T09:21:46Z",
+        "message": "Make the lease reclaim race test independent of runner speed"
       }
     ],
     "pr": {
