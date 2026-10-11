@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T03:04:19.515Z",
+  "updatedAt": "2026-10-11T03:04:24.751Z",
   "task": {
     "id": "fix/agy-usage-24h-reset-refresh-20261011",
     "branch": "fix/agy-usage-24h-reset-refresh-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-usage-24h-reset-refresh-20261011",
     "started": "2026-10-11T11:02:32+08:00",
     "status": "In progress",
-    "current": "Test cross-restart 24h/reset quota checks and conservative recovery",
+    "current": "Document 24-hour and expected-reset quota refresh policy",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-10-11T11:04:05+08:00",
         "text": "Refresh successful AGY quota snapshots after 24h or predicted reset"
+      },
+      {
+        "at": "2026-10-11T11:04:14+08:00",
+        "text": "Test cross-restart 24h/reset quota checks and conservative recovery"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "fix/agy-usage-24h-reset-refresh-20261011",
         "timestamp": "2026-10-11T11:04:05+08:00",
         "message": "Test cross-restart 24h/reset quota checks and conservative recovery"
+      },
+      {
+        "sha": "fdce5b59c219ed58943a6b98ef3cde53e6ef3620",
+        "branch": "fix/agy-usage-24h-reset-refresh-20261011",
+        "timestamp": "2026-10-11T11:04:14+08:00",
+        "message": "Document 24-hour and expected-reset quota refresh policy"
       }
     ],
     "pr": null,
