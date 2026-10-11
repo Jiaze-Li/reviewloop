@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:06:33.187Z",
+  "updatedAt": "2026-10-11T02:07:02.995Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Wire optional AGY quota preflight before first model selection",
+    "current": "Test non-billing AGY quota probe, TTL, and conservative routing hints",
     "next": "",
     "history": [
       {
@@ -37,6 +37,10 @@
       },
       {
         "at": "2026-10-11T10:06:24+08:00",
+        "text": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "at": "2026-10-11T10:06:48+08:00",
         "text": "Wire optional AGY quota preflight before first model selection"
       }
     ],
@@ -88,6 +92,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:06:24+08:00",
         "message": "Wire optional AGY quota preflight before first model selection"
+      },
+      {
+        "sha": "7087fc3d32d16818048c6e7e8bec3822b8d6ccd9",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:06:48+08:00",
+        "message": "Test non-billing AGY quota probe, TTL, and conservative routing hints"
       }
     ],
     "pr": null,
