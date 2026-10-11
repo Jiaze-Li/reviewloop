@@ -235,18 +235,6 @@ export function checkReviewTransportRuntime({ execSync, env } = {}) {
   return { name: 'review_transports', ok: true, families: runtimeStatus };
 }
 
-export function checkGithubCapability({ execSync } = {}) {
-  const exec = execSync || nodeExecSync;
-  try {
-    probe(exec, 'gh --version');
-    let auth = false;
-    try { probe(exec, 'gh auth status'); auth = true; } catch { auth = false; }
-    return { name: 'github', ok: true, gh: true, authenticated: auth };
-  } catch {
-    return { name: 'github', ok: true, gh: false, authenticated: false };
-  }
-}
-
 export function runDoctor({ execSync, log, env } = {}) {
   const exec = execSync || nodeExecSync;
   const write = log || console.log;
@@ -286,9 +274,6 @@ export function runDoctor({ execSync, log, env } = {}) {
     write(`  info  transport ${family}: adapter=${s.adapterImplemented ? 'yes' : 'NO'}, ${rt}${iso}, model=${s.defaultModelResolution ?? 'n/a'}, versionPinnedByDefault=${s.concreteVersionPinnedByDefault ? 'YES' : 'no'}`);
   }
 
-  const gh = checkGithubCapability({ execSync: exec });
-  write(`  info  github: gh ${gh.gh ? 'present' : 'absent'}${gh.gh ? `, ${gh.authenticated ? 'authenticated' : 'not authenticated'}` : ''} (PR-mode diagnostic; no real trigger)`);
-
   const policy = checkGlobalPolicy({ env: environment });
   if (policy.ok) write('  ok    global_policy (ReviewLoop managed blocks match COMMON)');
   else if (policy.error) write(`  warn  global_policy: ${policy.error} (diagnostic only)`);
@@ -315,7 +300,7 @@ export function runDoctor({ execSync, log, env } = {}) {
   return {
     ok,
     status: ok ? 'pass' : 'fail',
-    results: Object.fromEntries([...core, pools, transports, policy, gh, mcpBinding].map((r) => [r.name, r])),
+    results: Object.fromEntries([...core, pools, transports, policy, mcpBinding].map((r) => [r.name, r])),
   };
 }
 

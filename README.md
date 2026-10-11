@@ -5,8 +5,9 @@ ReviewLoop freezes the task contract and pre-edit baseline, runs the
 mechanical Gate, and controls independent Reviewer/Supervisor and bounded repair.
 
 **GitHub PR review is owned by [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).**
-ReviewLoop's PR mode was retired on 2026-10-11. Saved PR sessions remain on
-disk but cannot be resumed as LOCAL; start a new PR review through the bot.
+ReviewLoop's PR mode is retired under [decision D37](docs/DECISIONS.md). Saved
+PR sessions remain on disk but cannot be resumed as LOCAL; start a new PR review
+through the bot.
 GitHub CI remains responsible for tests on pushed code.
 
 ## Model
@@ -159,6 +160,39 @@ The Worker pushes code and creates the PR using ordinary GitHub operations.
 The independent [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot)
 then owns PR discovery, finding validation, post-push verification, final audit
 and GitHub review state. ReviewLoop has no GH PR transport or merge operation.
+
+The Worker follows the PR through the bot's result:
+
+1. A non-draft PR opening, **Ready for review**, or a repair push triggers the
+   bot automatically when its App and deployed webhook Worker are configured.
+   Draft PRs do not start automatic review. If a run stops, the manual retry is
+   `@jiaze-claude-review-bot review`; check the run before retrying.
+2. Read the latest **Independent Review Session** comment authored by the
+   configured review App (`<app-slug>[bot]`), identified by
+   `<!-- jiaze-review-session:v1 -->`. Use the PR conversation or
+   `gh api --paginate 'repos/OWNER/REPO/issues/PR/comments?per_page=100'` and select
+   that author's session comment with the highest comment ID. Other authors'
+   copies and the separate **Independent review** run-status comment are not
+   review decisions.
+3. Read the comment's status, open finding IDs and next action. Its
+   `<!-- jiaze-review-state:... -->` payload is base64url-encoded JSON; decode it
+   to read `lastReviewedHead` and compare it with the current PR `.head.sha`
+   (`gh api repos/OWNER/REPO/pulls/PR --jq .head.sha`). Re-read HEAD before acting
+   on a result. `HUMAN_REQUIRED` remains a stop even if another commit was pushed.
+
+| Session result | Worker action |
+|---|---|
+| `REWORK` on current HEAD | Fix the open finding IDs, run project checks, commit and push. Read the updated session after targeted verification; keep the same bot session. |
+| `AUDIT_PENDING` on current HEAD | Wait for the automatic final audit. If the run stops, inspect it and use the normal retry command. |
+| `HUMAN_REQUIRED` | Stop and ask the user to decide the remaining findings or escalation. Do not reset or override the session to bypass its budget. |
+| `READY` on current HEAD | PR review is complete for that commit. Merge still requires passing CI and the user's merge authorization. A new push requires another bot result. |
+| Missing, stale, unreadable or unknown session | Review is incomplete. Check the bot run/configuration and retry or report the blocker; do not treat it as approval. |
+
+A LOCAL `PASS` and a successful workflow run do not substitute for bot `READY`.
+Before relying on this handoff in a target repository, verify the App is installed,
+subscribed to **Pull request** events, and its current webhook Worker is deployed;
+confirm an actual non-draft PR event produces a bot session for the matching HEAD.
+`npm run doctor` checks the local runtime, not this GitHub deployment.
 
 Supplying the retired `prNumber` input deliberately errors instead of
 accidentally starting a LOCAL session. Older PR-mode loop state is retained

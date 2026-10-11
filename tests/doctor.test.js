@@ -87,7 +87,7 @@ test('reviewer + supervisor pools have eligible internal candidates', () => {
 test('runDoctor passes on core prerequisites and reports Worker as external', () => {
   const lines = [];
   const report = runDoctor({
-    execSync: fakeExec({ 'git --version': 'git version 2.42.0', 'gh --version': new Error('no gh') }),
+    execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
     log: (l) => lines.push(l),
     env: {},
   });
@@ -107,7 +107,7 @@ test('a stale / absent global install is a warning, never a doctor failure', asy
 
     const lines = [];
     const report = runDoctor({
-      execSync: fakeExec({ 'git --version': 'git version 2.42.0', 'gh --version': new Error('no gh') }),
+      execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
       log: (l) => lines.push(l),
       env: {},
     });
