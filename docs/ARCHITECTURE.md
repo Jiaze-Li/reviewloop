@@ -314,6 +314,17 @@ failure leaves the shared pool healthy and the siblings still selectable;
 family health and
 shared-pool health stay independent.
 
+AGY quota-aware routing: before the first paid Reviewer/Supervisor dispatch,
+the MCP controller reads `agy --print=/usage --output-format json` (read-only,
+zero model turns, supported CLI >= 1.1.11) through an isolated, bounded
+90-second-cached probe. Any quota window explicitly at zero cools its shared
+pool until the latest exhausted window's reset time; an unsupported or
+unavailable probe leaves existing routing unchanged. A structured zero-turn,
+empty-response, complete all-zero AGY quota ERROR also qualifies as a proven
+pre-admission rejection. Other ambiguous errors still leave spend UNRESOLVED
+and require explicit human acknowledgement; no retry ever assumes unknown
+usage was zero.
+
 ### Automatic failover (the user does not participate)
 
 Any of the following, when the existing spend-safety semantics allow it,
