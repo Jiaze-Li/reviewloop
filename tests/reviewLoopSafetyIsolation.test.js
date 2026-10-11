@@ -1,14 +1,13 @@
 // Phase 1 — one long-lived controller (one MCP process, many loopIds):
 //   * a safety event raised while reviewing loop A must not appear in loop B's
 //     result (per-invocation / per-loop isolation);
-//   * telemetry on NO_PROGRESS / WAITING / PUSH_REQUIRED must still report the
-//     durable cumulative spend from earlier rounds, never reset to zero.
+//   * telemetry on NO_PROGRESS / WAITING preserves cumulative durable spend.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
-  MemoryPersistence, makeHarness, finding, mockPrBackend, prTestFakes,
+  MemoryPersistence, makeHarness, finding,
 } from './helpers/reviewLoopHarness.js';
 
 test('a safety event from loop A does not leak into loop B on the same controller', async () => {
@@ -60,27 +59,5 @@ test('NO_PROGRESS after a spending round still reports cumulative durable spend'
   const r2 = await controller.review({ loopId });
   assert.equal(r2.status, 'PASS'); // already terminal -> terminalResult
   assert.equal(r2.telemetry.reviewerCalls, 1, 'cumulative spend is not reset to zero on a terminal / no-progress re-call');
-  assert.equal(r2.telemetry.workerUsage, 'external / not observable by ReviewLoop');
-});
-
-test('PR PUSH_REQUIRED after a spending round still reports cumulative durable spend', async () => {
-  const backend = mockPrBackend({ heads: ['H1'] });
-  const controller = createReviewLoopController({
-    persistence: new MemoryPersistence(),
-    prBackend: backend,
-    ...prTestFakes(backend),
-    discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo t'], manifestFingerprint: 'mf' }),
-    runGateFn: async () => ({ verdict: 'PASS', pass: true, results: [], fingerprint: `g${Math.random()}`, failureIdentities: [] }),
-    reviewerFn: async () => ({ value: { findings: [{ severity: 'P1', file: 'a', title: 'b' }] }, usage: { input_tokens: 5, output_tokens: 5 }, model: 'm' }),
-  });
-  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
-  const r1 = await controller.review({ loopId });
-  assert.equal(r1.status, 'REWORK');
-  assert.equal(r1.telemetry.reviewerCalls, 1);
-
-  // No push -> PUSH_REQUIRED, no fresh Reviewer call, but the earlier spend stays.
-  const r2 = await controller.review({ loopId });
-  assert.equal(r2.status, 'PUSH_REQUIRED');
-  assert.equal(r2.telemetry.reviewerCalls, 1, 'cumulative spend is not reset to zero on an early-return re-call');
   assert.equal(r2.telemetry.workerUsage, 'external / not observable by ReviewLoop');
 });

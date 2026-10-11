@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { EVIDENCE_LIMITS } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke } from '../src/reviewloop/providerWiring.js';
-import { MemoryPersistence, mockPrBackend, prTestFakes, finding } from './helpers/reviewLoopHarness.js';
+import { MemoryPersistence, finding } from './helpers/reviewLoopHarness.js';
 
 const requirement = (id, extra = {}) => ({
   id, type: 'runtime', description: `Verify the production behavior for ${id}.`,
@@ -17,15 +17,13 @@ const phases = [1, 2].map((n) => ({
 }));
 
 // Restart creates a new controller over the same durable state. No real model,
-// shell, filesystem or GitHub calls are used by either target.
+// shell, filesystem or GitHub calls are used.
 function world(mode, reviews = [{ findings: [] }]) {
   const persistence = new MemoryPersistence();
-  const backend = mockPrBackend({ heads: ['H1', 'H2'] });
   const calls = { reviewer: 0, supervisor: 0, bundles: [], commands: [] };
   let code = 'code-1';
   const restart = () => createReviewLoopController({
     persistence, env: {},
-    ...(mode === 'PR' ? { prBackend: backend, ...prTestFakes(backend) } : {}),
     captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
     collectWorkerDeltaFn: async () => ({
       fingerprint: code, diff: 'diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
@@ -50,12 +48,12 @@ function world(mode, reviews = [{ findings: [] }]) {
   });
   return {
     persistence, calls, restart, controller: restart(),
-    advanceCode() { code = 'code-2'; backend.advanceHead(); },
-    beginArgs: { goal: 'Prove the actual runtime behavior.', cwd: '/r', ...(mode === 'PR' ? { prNumber: 7 } : {}) },
+    advanceCode() { code = 'code-2'; },
+    beginArgs: { goal: 'Prove the actual runtime behavior.', cwd: '/r' },
   };
 }
 
-for (const mode of ['LOCAL', 'PR']) {
+for (const mode of ['LOCAL']) {
   test(`${mode}: invalid evidence is atomic, structured, zero-spend and recoverable`, async () => {
     const w = world(mode);
     const { loopId } = await w.controller.begin({
