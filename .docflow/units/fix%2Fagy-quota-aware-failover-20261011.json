@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:09:13.837Z",
+  "updatedAt": "2026-10-11T02:09:23.274Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Avoid rewriting unchanged depleted pool state on repeated quota checks",
+    "current": "Test asynchronous quota responses and idempotent cooldown refresh",
     "next": "",
     "history": [
       {
@@ -54,6 +54,10 @@
       {
         "at": "2026-10-11T10:09:01+08:00",
         "text": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive"
+      },
+      {
+        "at": "2026-10-11T10:09:12+08:00",
+        "text": "Avoid rewriting unchanged depleted pool state on repeated quota checks"
       }
     ],
     "commits": [
@@ -128,6 +132,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:09:01+08:00",
         "message": "Avoid rewriting unchanged depleted pool state on repeated quota checks"
+      },
+      {
+        "sha": "b3493dca8c389f9879d45a3a15435aa430afb72e",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:09:12+08:00",
+        "message": "Test asynchronous quota responses and idempotent cooldown refresh"
       }
     ],
     "pr": {
