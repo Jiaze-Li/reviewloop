@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:05:36.323Z",
+  "updatedAt": "2026-10-11T02:05:55.720Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Prove zero-turn quota envelope usage from raw complete counters",
+    "current": "Classify structured zero-turn AGY quota rejection and compact reset durations",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-10-11T10:05:26+08:00",
         "text": "Correct quota wording regex boundaries"
+      },
+      {
+        "at": "2026-10-11T10:05:46+08:00",
+        "text": "Prove zero-turn quota envelope usage from raw complete counters"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:05:26+08:00",
         "message": "Prove zero-turn quota envelope usage from raw complete counters"
+      },
+      {
+        "sha": "92f3c3577df4b5484a129fd775221805d3116496",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:05:46+08:00",
+        "message": "Classify structured zero-turn AGY quota rejection and compact reset durations"
       }
     ],
     "pr": null,
