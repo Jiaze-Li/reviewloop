@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isResumable, needsReopen, resumableLoopsFor, buildResumePrompt } from '../src/reviewloop/resumeGuide.js';
+import { isResumable, needsReopen, resumableLoopsFor, unfinishedLoopsFor, buildResumePrompt } from '../src/reviewloop/resumeGuide.js';
 
 const phases = [
   { id: 'p1', title: 'Model', objective: 'build model', exitCriteria: ['model ok'], carryForwardInvariants: ['keep model pure'] },
@@ -51,4 +51,19 @@ test('REWORK shows the findings; after the last phase it points at the final gat
   const final = buildResumePrompt(loop({ currentPhaseIndex: 2, completedPhases: [{ id: 'p1' }, { id: 'p2' }] }));
   assert.match(final, /FINAL whole-task gate/);
   assert.doesNotMatch(final, /CURRENT PHASE/);
+});
+
+test('a long contract is included in full, never truncated', () => {
+  const long = `AC-START ${'x'.repeat(60000)} AC-END`;
+  const text = buildResumePrompt(loop({ objective: { ...loop().objective, contractText: long } }));
+  assert.ok(text.includes('AC-START'));
+  assert.ok(text.includes('AC-END'), 'the tail of the contract must reach the fresh Worker');
+  assert.doesNotMatch(text, /truncated/);
+});
+
+test('discovery also surfaces loops that need a human reopen-gate', () => {
+  const exhausted = loop({ loopId: 'rl-9', state: 'HUMAN_REQUIRED', budgetExhausted: true });
+  const loops = [loop({ loopId: 'rl-1' }), exhausted, loop({ loopId: 'rl-2', state: 'PASS' })];
+  assert.deepEqual(unfinishedLoopsFor(loops, '/proj').map((l) => l.loopId), ['rl-9', 'rl-1']);
+  assert.deepEqual(resumableLoopsFor(loops, '/proj').map((l) => l.loopId), ['rl-1'], 'strict resumability is unchanged');
 });

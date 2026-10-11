@@ -729,7 +729,7 @@ export function buildReviewerInvoke() {
         ? 'DIFF SCOPE: only changes made since the previous phase passed review. Earlier phases are already certified; do not re-review code outside this diff.'
         : '',
       diffScope === 'final-cross-phase'
-        ? 'DIFF SCOPE: the cumulative diff was too large to review whole. It contains every file changed in more than one phase and every change made after the last phase passed; files changed in a single phase were fully reviewed at that phase gate and are listed in the NOTE line. Judge cross-phase interactions and the task as a whole.'
+        ? 'DIFF SCOPE: the cumulative diff was too large to review whole. It contains every file changed in more than one phase and every change made after the last phase passed; files changed in a single phase were fully reviewed at that phase gate; the ones omitted here are listed in the NOTE line, and some others are included to keep real code in view. Interactions between omitted files are not shown, so rely on the Gate result for those. Judge cross-phase interactions and the task as a whole.'
         : '',
       `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,

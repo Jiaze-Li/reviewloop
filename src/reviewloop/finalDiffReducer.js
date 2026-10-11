@@ -7,7 +7,11 @@
 // provided nothing touched it afterwards. The final gate still reviews, in full:
 //   - every file changed in two or more phases (cross-phase interaction),
 //   - every file changed since the last PHASE_PASS boundary,
-//   - every changed file no phase gate recorded.
+//   - every changed file no phase gate recorded,
+//   - and, so the Reviewer is never handed an empty diff, as many of the other
+//     files as fit in `fillChars` (most recent phases first, within `maxChars`).
+// Cross-file interactions between omitted single-phase files are NOT reviewed
+// jointly; the deterministic Gate's global checks are what covers them.
 // The reduction is all-or-nothing: if the diff cannot be split into exactly one
 // unit per changed file it returns null and the caller keeps the old behaviour.
 
@@ -42,7 +46,7 @@ function unitFile(unit, changedFiles) {
  * @returns {{ diff: string, omittedFiles: string[] } | null}
  */
 export function reduceFinalDiff({
-  diff, changedFiles, completedPhases, postBoundaryFiles,
+  diff, changedFiles, completedPhases, postBoundaryFiles, fillChars = 0, maxChars = Infinity,
 }) {
   if (!Array.isArray(changedFiles) || !changedFiles.length || !Array.isArray(postBoundaryFiles)) return null;
   if (!Array.isArray(completedPhases) || !completedPhases.length) return null;
@@ -70,9 +74,26 @@ export function reduceFinalDiff({
   if (labelled.map((u) => u.unit).join('') !== String(diff)) return null;
   for (const f of files) if (seen.get(f) !== 1) return null;
 
-  const kept = labelled.filter((u) => mustReview(u.file));
-  const omittedFiles = labelled.filter((u) => !mustReview(u.file)).map((u) => u.file).sort();
-  if (!omittedFiles.length) return null;
+  // Required files first; then fill with the rest, newest phase first, so some
+  // real code is always in view. Output keeps the original diff order.
+  const lastPhase = new Map();
+  completedPhases.forEach((p, i) => { for (const f of p.reviewedFiles) lastPhase.set(f, i); });
+  const keptUnits = new Set(labelled.filter((u) => mustReview(u.file)));
+  let chars = [...keptUnits].reduce((n, u) => n + u.unit.length, 0);
+  const pool = labelled.filter((u) => !keptUnits.has(u)).sort((a, b) => (
+    (lastPhase.get(b.file) ?? -1) - (lastPhase.get(a.file) ?? -1)
+    || a.unit.length - b.unit.length
+    || a.file.localeCompare(b.file)
+  ));
+  for (const u of pool) {
+    if (chars >= fillChars) break;
+    if (chars + u.unit.length > maxChars) continue;
+    keptUnits.add(u);
+    chars += u.unit.length;
+  }
+  const kept = labelled.filter((u) => keptUnits.has(u));
+  const omittedFiles = labelled.filter((u) => !keptUnits.has(u)).map((u) => u.file).sort();
+  if (!omittedFiles.length || !kept.length) return null;
   const note = '# NOTE: omitted from this diff because each file was changed in exactly one phase, '
     + `fully reviewed at that phase gate, and untouched since: ${omittedFiles.join(', ')}\n`;
   return { diff: note + kept.map((u) => u.unit).join(''), omittedFiles };

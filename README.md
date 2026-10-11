@@ -104,7 +104,9 @@ commit new files before ending a phase to keep the phase-delta path.
 If the cumulative diff is too large for one final review, the final gate
 reviews every file changed in more than one phase plus everything changed since
 the last `PHASE_PASS`; each remaining file was changed in exactly one phase and
-fully reviewed at that gate (`diffScope: final-cross-phase`). Any doubt keeps the
+fully reviewed at that gate (`diffScope: final-cross-phase`); some recent-phase
+files are kept in view so the Reviewer never gets an empty diff, and interactions
+between omitted files are covered by the Gate, not jointly reviewed. Any doubt keeps the
 old behaviour. `reviewloop_begin` also returns advisory `planWarnings`: phases
 that only a model can judge, phases registered without `contractText` (the Reviewer would never see the acceptance criteria), and (LOCAL) untracked files at begin that would make
 the first review stop at `HUMAN_REQUIRED` - fix those and re-begin before editing.

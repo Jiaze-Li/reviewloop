@@ -54,3 +54,28 @@ test('the default limit is generous', async () => {
   for (let i = 0; i < 15; i += 1) assert.equal((await w.controller.review({ loopId })).status, 'REWORK'); // eslint-disable-line no-await-in-loop
   assert.equal((await w.controller.review({ loopId })).status, 'HUMAN_REQUIRED');
 });
+
+test('persistent verification-plan drift is bounded by the same limit', async () => {
+  const persistence = new MemoryPersistence();
+  let manifest = 'm0';
+  let n = 0;
+  const controller = createReviewLoopController({
+    persistence,
+    env: { ...process.env, REVIEWLOOP_MAX_GATE_REPAIRS: '2' },
+    captureBaselineFn: async () => ({ head: 'H', dirtyFiles: [], untrackedHashes: {}, evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => {
+      n += 1;
+      return { baselineHead: 'H', currentHead: 'H', evidenceComplete: true, noWorkerChangeYet: false, fingerprint: `d${n}`, diff: `diff${n}`, changedFiles: ['a.js'] };
+    },
+    runGateFn: async () => ({ pass: true, verdict: 'PASS', fingerprint: `g${n}`, failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo t'], manifestFingerprint: manifest }),
+    reviewerFn: async () => ({ value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' }),
+  });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
+  manifest = 'tampered'; // the Worker keeps the verification config changed
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  assert.equal((await controller.review({ loopId })).status, 'REWORK');
+  const stopped = await controller.review({ loopId });
+  assert.equal(stopped.status, 'HUMAN_REQUIRED');
+  assert.equal(stopped.terminal, true);
+});

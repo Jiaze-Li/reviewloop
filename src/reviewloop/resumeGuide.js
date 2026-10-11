@@ -4,7 +4,6 @@
 // the loop stands. Pure functions - the CLI does the I/O.
 
 const FINISHED = new Set(['PASS', 'FAILED', 'STOPPED']);
-const MAX_CONTRACT_CHARS = 6000;
 
 export function isResumable(loop) {
   if (!loop || typeof loop !== 'object' || !loop.loopId || !loop.state) return false;
@@ -15,6 +14,14 @@ export function isResumable(loop) {
 
 export function needsReopen(loop) {
   return loop?.state === 'HUMAN_REQUIRED' && loop?.budgetExhausted === true;
+}
+
+// Every unfinished loop of one repository that the CLI should mention: ones a
+// fresh Worker can continue AND ones that first need a human reopen-gate.
+export function unfinishedLoopsFor(loops, repositoryRoot) {
+  return loops
+    .filter((loop) => (isResumable(loop) || needsReopen(loop)) && loop.objective?.repository?.root === repositoryRoot)
+    .sort((a, b) => String(b.loopId).localeCompare(String(a.loopId)));
 }
 
 // Loops for one repository, newest first (loop ids embed their creation time).
@@ -70,12 +77,10 @@ export function buildResumePrompt(loop) {
   }
   if ((objective.constraints ?? []).length) lines.push('', 'global constraints:', ...bullets(objective.constraints, ''));
 
+  // Never truncated: contractText is already bounded at begin (64 KiB), and a
+  // fresh Worker has no other way to retrieve the acceptance criteria.
   const contract = String(objective.contractText ?? '');
-  if (contract) {
-    lines.push('', 'FROZEN CONTRACT (authoritative):', contract.length > MAX_CONTRACT_CHARS
-      ? `${contract.slice(0, MAX_CONTRACT_CHARS)}\n[... truncated; the full text is frozen in the loop]`
-      : contract);
-  }
+  if (contract) lines.push('', 'FROZEN CONTRACT (authoritative, complete):', contract);
 
   lines.push(
     '',

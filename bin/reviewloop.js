@@ -20,7 +20,7 @@ import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
-import { resumableLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
+import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 
 async function listSessions() {
@@ -137,7 +137,7 @@ async function resume(rest) {
     loop = loops.find((l) => l.loopId === wanted);
     if (!loop) throw new Error(`unknown loopId ${wanted}`);
   } else {
-    const candidates = resumableLoopsFor(loops, process.cwd());
+    const candidates = unfinishedLoopsFor(loops, process.cwd());
     if (!candidates.length) {
       console.log(`No unfinished ReviewLoop task found for ${process.cwd()}.`);
       console.log('Run this from the project directory, or pass --loop <loopId> (see: reviewloop status).');

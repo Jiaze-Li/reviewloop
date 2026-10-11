@@ -86,6 +86,33 @@ test('a rename header is still attributed to its new path', () => {
   assert.deepEqual(r.omittedFiles, ['new.js']);
 });
 
+test('when every file is single-phase the Reviewer still gets real code, newest phase first', () => {
+  const big = (f) => section(f, `+${'y'.repeat(400)}\n`);
+  const diff = ['p1.js', 'p2.js', 'p3.js'].map(big).join('');
+  const base = {
+    diff, changedFiles: ['p1.js', 'p2.js', 'p3.js'],
+    completedPhases: [{ reviewedFiles: ['p1.js'] }, { reviewedFiles: ['p2.js'] }, { reviewedFiles: ['p3.js'] }],
+    postBoundaryFiles: [],
+  };
+  assert.equal(reduceFinalDiff(base), null, 'with no fill budget there would be nothing to review: fail closed');
+  const r = reduceFinalDiff({ ...base, fillChars: 500, maxChars: 1200 });
+  assert.match(r.diff, /diff --git a\/p3\.js/, 'the most recent phase is kept first');
+  assert.deepEqual(r.omittedFiles.sort(), ['p1.js', 'p2.js'].filter((f) => !r.diff.includes(`diff --git a/${f} `)).sort());
+  assert.ok(r.omittedFiles.length >= 1);
+});
+
+test('fill never exceeds the whole review budget and skips what does not fit', () => {
+  const small = section('s.js');
+  const huge = section('h.js', `+${'z'.repeat(5000)}\n`);
+  const r = reduceFinalDiff({
+    diff: small + huge, changedFiles: ['s.js', 'h.js'],
+    completedPhases: [{ reviewedFiles: ['s.js'] }, { reviewedFiles: ['h.js'] }],
+    postBoundaryFiles: [], fillChars: 10_000, maxChars: 1000,
+  });
+  assert.deepEqual(r.omittedFiles, ['h.js']);
+  assert.match(r.diff, /s\.js/);
+});
+
 test('untracked blocks are attributed by their header', () => {
   const diff = section('t.js') + '--- Worker untracked file new.js (10 bytes) ---\nconst a = 1;\n';
   const r = reduceFinalDiff({
@@ -131,8 +158,9 @@ test('end to end: an oversized final diff is reviewed through the cross-phase su
     const final = seen[seen.length - 1];
     assert.equal(final.diffScope, 'final-cross-phase');
     assert.match(final.diff, /shared\.js/);
+    assert.match(final.diff, /diff --git a\/only2\.js/, 'newest phase stays in view so the final Reviewer sees real code');
     assert.doesNotMatch(final.diff, /diff --git a\/only1\.js/);
-    assert.match(final.diff, /NOTE: omitted[^\n]*only1\.js[^\n]*only2\.js/);
+    assert.match(final.diff, /NOTE: omitted[^\n]*only1\.js/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

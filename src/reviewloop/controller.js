@@ -76,7 +76,7 @@ import {
   reviewGateCount,
   mergeScopedGateCommands,
 } from './phaseState.js';
-import { chunkDiffForReview } from './diffChunker.js';
+import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 import {
   assertContractHandoff,
   EvidenceValidationError,
@@ -1105,11 +1105,16 @@ export function createReviewLoopController({
       if (!lastBoundary) return null;
       const post = await collectWorkerDeltaFn({ cwd, baseline: lastBoundary });
       if (!post || post.evidenceComplete === false) return null;
+      const { limit, maxChunks } = reviewDiffBudget(env);
       const reduced = reduceFinalDiff({
         diff: delta.diff,
         changedFiles: delta.changedFiles,
         completedPhases: completed,
         postBoundaryFiles: post.changedFiles ?? [],
+        // Never hand the final Reviewer an empty diff: keep real code in view
+        // (most recent phases first) up to one chunk, within the whole budget.
+        fillChars: limit,
+        maxChars: limit * maxChunks,
       });
       if (!reduced || chunkDiffForReview(reduced.diff, { env }).oversized) return null;
       return reduced;
@@ -1238,6 +1243,8 @@ export function createReviewLoopController({
         actionTaken: 'review blocked; frozen Gate cannot be trusted',
       });
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+      const driftStop = await stopIfGateRepairsExhausted(loopState);
+      if (driftStop) return driftStop;
       recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
       await saveLoop(loopState);
       return {
@@ -2141,6 +2148,8 @@ export function createReviewLoopController({
           actionTaken: 'review blocked; frozen Gate cannot be trusted',
         });
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const driftStop = await stopIfGateRepairsExhausted(loopState);
+        if (driftStop) return { ...driftStop, head: observedHead };
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
         await saveLoop(loopState);
         return {
@@ -2163,6 +2172,8 @@ export function createReviewLoopController({
           actionTaken: 'review blocked; Reviewer not invoked; reviewedSnapshotHeadSha not asserted for this HEAD',
         });
         loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
+        const mutationStop = await stopIfGateRepairsExhausted(loopState);
+        if (mutationStop) return { ...mutationStop, head: observedHead };
         recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate mutated pr snapshot');
         await saveLoop(loopState);
         return {

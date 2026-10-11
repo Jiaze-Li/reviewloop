@@ -44,6 +44,14 @@ function splitOversizedUnit(unit, limit) {
   return out;
 }
 
+// The effective per-call character limit and chunk ceiling (env-tunable).
+export function reviewDiffBudget(env = process.env) {
+  return {
+    limit: num(env, 'REVIEWLOOP_MAX_REVIEW_DIFF_CHARS', DEFAULT_MAX_REVIEW_DIFF_CHARS),
+    maxChunks: num(env, 'REVIEWLOOP_MAX_REVIEW_CHUNKS', DEFAULT_MAX_REVIEW_CHUNKS),
+  };
+}
+
 // Returns { chunks: [{ index, total, text, hash }], oversized: bool, reason? }.
 export function chunkDiffForReview(diff, { env = process.env } = {}) {
   const text = String(diff ?? '');
