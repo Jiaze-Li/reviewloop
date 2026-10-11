@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T07:20:54.729Z",
+  "updatedAt": "2026-10-11T07:46:29.924Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Add human reopen-gate recovery; document final-gate reduction and plan warnings",
+    "current": "Move bounded provider failover out of controller.js into providerFailover.js",
     "next": "",
     "history": [
       {
@@ -34,6 +34,14 @@
       {
         "at": "2026-10-11T07:20:46Z",
         "text": "Warn at begin about phases with no mechanical verification"
+      },
+      {
+        "at": "2026-10-11T07:45:06Z",
+        "text": "Add human reopen-gate recovery; document final-gate reduction and plan warnings"
+      },
+      {
+        "at": "2026-10-11T07:46:16Z",
+        "text": "Move pure phase/convergence helpers out of controller.js into phaseState.js"
       }
     ],
     "commits": [
@@ -78,6 +86,18 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T07:20:46Z",
         "message": "Add human reopen-gate recovery; document final-gate reduction and plan warnings"
+      },
+      {
+        "sha": "3425222c0cddf16d0007b46c0b51ad041b8264ba",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:45:06Z",
+        "message": "Move pure phase/convergence helpers out of controller.js into phaseState.js"
+      },
+      {
+        "sha": "d9534ccea2930911b705d87e4d2c9e3b0319f133",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T07:46:16Z",
+        "message": "Move bounded provider failover out of controller.js into providerFailover.js"
       }
     ],
     "pr": null,
