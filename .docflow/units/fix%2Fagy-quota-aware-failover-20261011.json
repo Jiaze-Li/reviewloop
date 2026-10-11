@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:04:41.471Z",
+  "updatedAt": "2026-10-11T02:05:04.233Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,15 +8,26 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Add guarded zero-model-turn AGY quota preflight before routing",
+    "current": "Retain only content-free zero-turn quota envelope evidence",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-10-11T10:04:54+08:00",
+        "text": "Add guarded zero-model-turn AGY quota preflight before routing"
+      }
+    ],
     "commits": [
       {
         "sha": "8b22c9a1216eec8f3ac9d33a1d60343ab5b5c1e9",
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:04:33+08:00",
         "message": "Add guarded zero-model-turn AGY quota preflight before routing"
+      },
+      {
+        "sha": "f714a1cbb3f01d02725d8e1fef2effcc0c769695",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:04:54+08:00",
+        "message": "Retain only content-free zero-turn quota envelope evidence"
       }
     ],
     "pr": null,
