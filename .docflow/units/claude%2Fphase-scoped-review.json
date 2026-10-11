@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:29:05.659Z",
+  "updatedAt": "2026-10-11T08:38:21.983Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/phase-scoped-review",
     "started": "2026-10-11T07:11:07Z",
     "status": "In progress",
-    "current": "Warn at begin when phases are registered without the contract text",
+    "current": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)",
     "next": "",
     "history": [
       {
@@ -50,6 +50,14 @@
       {
         "at": "2026-10-11T08:28:56Z",
         "text": "Warn at begin about untracked files that would make review unattributable"
+      },
+      {
+        "at": "2026-10-11T08:36:34Z",
+        "text": "Warn at begin when phases are registered without the contract text"
+      },
+      {
+        "at": "2026-10-11T08:38:08Z",
+        "text": "Stop for a human after too many deterministic Gate failures in one gate"
       }
     ],
     "commits": [
@@ -118,6 +126,18 @@
         "branch": "claude/phase-scoped-review",
         "timestamp": "2026-10-11T08:28:56Z",
         "message": "Warn at begin when phases are registered without the contract text"
+      },
+      {
+        "sha": "d0db73f33326c95116b8ec69f7e8cbd9ac8944ca",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:36:34Z",
+        "message": "Stop for a human after too many deterministic Gate failures in one gate"
+      },
+      {
+        "sha": "bca8b2811306dd59676e37603b548d6c7f3cff57",
+        "branch": "claude/phase-scoped-review",
+        "timestamp": "2026-10-11T08:38:08Z",
+        "message": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)"
       }
     ],
     "pr": null,
