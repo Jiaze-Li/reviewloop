@@ -4,16 +4,17 @@
 // the loop stands. Pure functions - the CLI does the I/O.
 
 const FINISHED = new Set(['PASS', 'FAILED', 'STOPPED']);
+const retiredPr = (loop) => loop?.objective?.mode === 'PR';
 
 export function isResumable(loop) {
-  if (!loop || typeof loop !== 'object' || !loop.loopId || !loop.state) return false;
+  if (!loop || typeof loop !== 'object' || !loop.loopId || !loop.state || retiredPr(loop)) return false;
   if (FINISHED.has(loop.state)) return false;
   // A spent convergence budget is a human decision (reopen-gate), not a resume.
   return !(loop.state === 'HUMAN_REQUIRED' && loop.budgetExhausted === true);
 }
 
 export function needsReopen(loop) {
-  return loop?.state === 'HUMAN_REQUIRED' && loop?.budgetExhausted === true;
+  return !retiredPr(loop) && loop?.state === 'HUMAN_REQUIRED' && loop?.budgetExhausted === true;
 }
 
 // Every unfinished loop of one repository that the CLI should mention: ones a
@@ -36,6 +37,7 @@ function bullets(items, indent = '  ') {
 }
 
 export function buildResumePrompt(loop) {
+  if (retiredPr(loop)) throw new Error('ReviewLoop PR session retired; use claude-review-bot.');
   const objective = loop.objective ?? {};
   const phases = Array.isArray(objective.phases) ? objective.phases : [];
   const done = (loop.completedPhases ?? []).map((p) => p.id);
