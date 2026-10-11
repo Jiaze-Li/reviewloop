@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T08:38:21.983Z",
+  "updatedAt": "2026-10-11T08:38:40.348Z",
   "task": {
     "id": "claude/phase-scoped-review",
     "branch": "claude/phase-scoped-review",
@@ -140,7 +140,14 @@
         "message": "Add reviewloop resume; tidy docs (numeric decisions, certification records in their own file)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 17,
+      "state": "open",
+      "title": "Phase-scoped review for long tasks, plus recovery and begin-time warnings",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/17",
+      "merged": false,
+      "updatedAt": "2026-10-11T08:38:29Z"
+    },
     "completed": null,
     "outcome": null
   }
