@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T03:06:00.206Z",
+  "updatedAt": "2026-10-11T03:40:25.968Z",
   "task": {
     "id": "fix/agy-usage-24h-reset-refresh-20261011",
     "branch": "fix/agy-usage-24h-reset-refresh-20261011",
     "title": "fix/agy-usage-24h-reset-refresh-20261011",
     "task": "Development branch: fix/agy-usage-24h-reset-refresh-20261011",
     "started": "2026-10-11T11:02:32+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Regress partial AGY bucket safety during quota refresh",
     "next": "",
     "history": [
@@ -72,13 +72,15 @@
     ],
     "pr": {
       "number": 16,
-      "state": "open",
+      "state": "closed",
       "title": "Refresh AGY quota on 24h cadence or at predicted reset",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/16",
-      "merged": false,
-      "updatedAt": "2026-10-11T03:05:46Z"
+      "merged": true,
+      "mergedAt": "2026-10-11T03:40:15Z",
+      "closedAt": "2026-10-11T03:40:15Z",
+      "updatedAt": "2026-10-11T03:40:15Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-11T03:40:15Z",
+    "outcome": "Merged"
   }
 }
