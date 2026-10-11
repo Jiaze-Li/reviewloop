@@ -34,15 +34,17 @@ test('removed modules are gone from the tree', () => {
     'src/orchestrator/workflowWorktree.js',
     'src/orchestrator/adapters/claudeSessionManager.js',
     'src/mcp/supergptMcpServer.js',
-    // The external-review engine: PR is now a review TARGET for the ONE
-    // internal Reviewer engine, never an `@codex review` / `@claude review`
-    // transport.
+    // Retired external and internal PR review engines.
     'src/reviewloop/prReviewController.js',
     'src/reviewloop/prTrust.js',
     'src/reviewloop/threadResolution.js',
     'src/orchestrator/externalModelTriggerAuthority.js',
     'src/orchestrator/prCloseoutPolicy.js',
     'src/orchestrator/trustedPrReview.js',
+    'src/reviewloop/prEvidence.js',
+    'src/reviewloop/prWorktree.js',
+    'src/reviewloop/prIdentity.js',
+    'src/reviewloop/githubBackend.js',
   ]) {
     assert.equal(existsSync(new URL(f, new URL('..', import.meta.url))), false, f);
   }
@@ -75,14 +77,14 @@ test('no silent diff truncation and no unwired PR backend remain', () => {
   assert.deepEqual(grep('slice\\(0, ?12000|no GitHub backend wired', 'src'), []);
 });
 
-test('the PR target reuses the ONE review engine (no second Reviewer state machine)', async () => {
+test('LOCAL is the only Reviewer evidence dispatch path', async () => {
   const controller = readFileSync(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8');
-  // Both targets flow through the same evidence -> Reviewer routing path.
+  // The retired PR pipeline must not dispatch any Reviewer calls.
   const sharedCalls = controller.match(
     /runReviewerOverEvidence\(\{\s*spend, loopState, objective, delta, gate, reviewScope,\s*evidenceBundle: evidenceCheck\.bundle,\s*evidenceProofFingerprint: effectiveEvidenceFingerprint,\s*signal,?\s*\}\)/g,
   ) ?? [];
-  assert.equal(sharedCalls.length, 2, 'LOCAL and PR must both use the same evidence-aware Reviewer engine');
-  assert.doesNotMatch(controller, /createPrReviewController|PR_REVIEW_OUTCOMES|ExternalModelTriggerAuthority/);
+  assert.equal(sharedCalls.length, 1, 'LOCAL must be the only Reviewer evidence dispatch path');
+  assert.doesNotMatch(controller, /reviewPr\(|buildPrRoundEvidence\(|createPrReviewController|PR_REVIEW_OUTCOMES|ExternalModelTriggerAuthority/);
 });
 
 test('package.json is renamed to reviewloop with reviewloop bins', () => {
@@ -93,12 +95,12 @@ test('package.json is renamed to reviewloop with reviewloop bins', () => {
 });
 
 
-test('Supervisor receives the same current evidence bundle in LOCAL and PR convergence paths', () => {
+test('LOCAL Supervisor receives the current evidence bundle', () => {
   const controller = readFileSync(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8');
   const convergenceCalls = controller.match(
     /runSupervisor\(\{\s*spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck\.bundle, signal,?\s*\}\)/g,
   ) ?? [];
-  assert.equal(convergenceCalls.length, 2, 'LOCAL and PR Supervisor escalations must both carry current evidence');
+  assert.equal(convergenceCalls.length, 1, 'LOCAL Supervisor escalation must carry current evidence');
   assert.match(
     controller,
     /supervisorFn\(\{\s*objective, blockingFindings: review\.blockingFindings, gate, reviewScope, evidence: evidenceBundle,/,
