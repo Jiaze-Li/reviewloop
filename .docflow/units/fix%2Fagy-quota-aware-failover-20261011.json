@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T02:07:50.206Z",
+  "updatedAt": "2026-10-11T02:08:42.118Z",
   "task": {
     "id": "fix/agy-quota-aware-failover-20261011",
     "branch": "fix/agy-quota-aware-failover-20261011",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/agy-quota-aware-failover-20261011",
     "started": "2026-10-11T10:04:33+08:00",
     "status": "In progress",
-    "current": "Reproduce real Opus zero-turn quota error and assert Gemini failover",
+    "current": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive",
     "next": "",
     "history": [
       {
@@ -46,6 +46,10 @@
       {
         "at": "2026-10-11T10:07:10+08:00",
         "text": "Test non-billing AGY quota probe, TTL, and conservative routing hints"
+      },
+      {
+        "at": "2026-10-11T10:08:33+08:00",
+        "text": "Reproduce real Opus zero-turn quota error and assert Gemini failover"
       }
     ],
     "commits": [
@@ -108,6 +112,12 @@
         "branch": "fix/agy-quota-aware-failover-20261011",
         "timestamp": "2026-10-11T10:07:10+08:00",
         "message": "Reproduce real Opus zero-turn quota error and assert Gemini failover"
+      },
+      {
+        "sha": "f362e6c2ead5a3cd7dbb28a7540c40120bd358b2",
+        "branch": "fix/agy-quota-aware-failover-20261011",
+        "timestamp": "2026-10-11T10:08:33+08:00",
+        "message": "Make quota probe asynchronous to keep the ReviewLoop MCP responsive"
       }
     ],
     "pr": {
