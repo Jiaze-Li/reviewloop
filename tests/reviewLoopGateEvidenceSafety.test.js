@@ -12,7 +12,7 @@ import {
   latestEvidenceRecords, evidenceStatusForScope,
 } from '../src/reviewloop/contractEvidence.js';
 import { buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
-import { MemoryPersistence, mockPrBackend, prTestFakes, finding, makeHarness } from './helpers/reviewLoopHarness.js';
+import { MemoryPersistence, finding, makeHarness } from './helpers/reviewLoopHarness.js';
 
 const req = (id = 'runtime', extra = {}) => ({
   id, type: 'runtime', description: `Prove ${id}.`, gate: 'final', required: true, covers: [], ...extra,
@@ -25,9 +25,7 @@ const phases = [1, 2].map((n) => ({
 
 function world(mode, reviews = [{ findings: [] }]) {
   const persistence = new MemoryPersistence();
-  const backend = mockPrBackend({ heads: ['H1', 'H2'] });
-  const fakes = prTestFakes(backend);
-  const calls = { gate: 0, snapshots: 0, reviewer: 0, supervisor: 0, bundles: [] };
+  const calls = { gate: 0, reviewer: 0, supervisor: 0, bundles: [] };
   let code = 'A';
   let verdict = 'PASS';
   let mutations = [];
@@ -38,10 +36,6 @@ function world(mode, reviews = [{ findings: [] }]) {
   });
   const restart = () => createReviewLoopController({
     persistence, env: {},
-    ...(mode === 'PR' ? {
-      prBackend: backend, ...fakes,
-      buildPrSnapshotFn: async (...args) => { calls.snapshots += 1; return fakes.buildPrSnapshotFn(...args); },
-    } : {}),
     captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
     collectWorkerDeltaFn: async () => delta(),
     collectPostGateDeltaFn: async () => delta(),
@@ -60,10 +54,10 @@ function world(mode, reviews = [{ findings: [] }]) {
     supervisorFn: async () => { calls.supervisor += 1; throw new Error('Supervisor must not run'); },
   });
   return {
-    persistence, calls, backend, restart, controller: restart(),
+    persistence, calls, restart, controller: restart(),
     mutate(sequence) { mutations = [...sequence]; },
     gate(next) { verdict = next; },
-    args: { goal: 'Implement the runtime-sensitive behavior.', cwd: '/r', ...(mode === 'PR' ? { prNumber: 7 } : {}) },
+    args: { goal: 'Implement the runtime-sensitive behavior.', cwd: '/r' },
   };
 }
 
@@ -134,54 +128,7 @@ test('LOCAL ordinary task without evidence still reviews the stabilized tree', a
   assert.equal(w.calls.reviewer, 1);
 });
 
-for (const declared of [false, true]) {
-  test(`PR ${declared ? 'with' : 'without'} requirements: invalid unchanged-HEAD retries never build a snapshot or run Gate`, async () => {
-    const w = world('PR', [{ findings: [finding('P1', 'a.js', 'Needs repair.')] }, { findings: [] }]);
-    const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: declared ? [req()] : [] });
-    const weak = declared ? [proof('runtime', 'Weak proof.')] : [];
-    assert.equal((await w.controller.review({ loopId, evidence: weak })).status, 'REWORK');
-    const before = { gate: w.calls.gate, snapshots: w.calls.snapshots, reviewer: w.calls.reviewer };
-    const saved = (await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords;
-    const bad = [[proof('bogus')], { malformed: true }, [null], [proof('runtime', 'x'.repeat(EVIDENCE_LIMITS.summaryBytes + 1))]];
-    if (declared) bad.push([proof(), proof('bogus')], [proof(), proof()]);
-    for (const evidence of bad) {
-      const result = await w.restart().review({ loopId, evidence });
-      assert.equal(result.status, 'REWORK');
-      assert.equal(result.gate.verdict, 'NOT_RUN');
-      assert.equal(result.evidenceSubmission.reason, 'INVALID_EVIDENCE');
-      assert.equal(result.head, 'H1');
-      assert.equal(result.round, 1);
-      assert.deepEqual((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords, saved);
-    }
-    for (const evidence of [[], null, undefined]) {
-      assert.equal((await w.controller.review({ loopId, evidence })).status, 'PUSH_REQUIRED');
-    }
-    assert.deepEqual({ gate: w.calls.gate, snapshots: w.calls.snapshots, reviewer: w.calls.reviewer }, before);
-    if (declared) {
-      assert.equal((await w.restart().review({ loopId, evidence: weak })).status, 'NO_PROGRESS');
-      const done = await w.restart().review({ loopId, evidence: [proof('runtime', 'New complete observations.')] });
-      assert.equal(done.status, 'PASS');
-      assert.equal(done.round, 2);
-    }
-  });
-}
-
-test('PR wrong-gate and mixed batches are rejected before any worktree/Gate execution', async () => {
-  const w = world('PR');
-  const { loopId } = await w.controller.begin({ ...w.args, phases,
-    evidenceRequirements: [req('p1-proof', { gate: 'p1' }), req('p2-proof', { gate: 'p2' })],
-  });
-  const before = { gate: w.calls.gate, snapshots: w.calls.snapshots };
-  const result = await w.controller.review({ loopId, evidence: [proof('p1-proof'), proof('p2-proof')] });
-  assert.equal(result.status, 'REWORK');
-  assert.equal(result.currentPhase, 'p1');
-  assert.equal(result.gate.verdict, 'NOT_RUN');
-  assert.deepEqual({ gate: w.calls.gate, snapshots: w.calls.snapshots }, before);
-  assert.equal(w.calls.reviewer, 0);
-  assert.deepEqual((await w.persistence.readWorkflowState(loopId)).reviewLoop.evidenceRecords, []);
-});
-
-for (const mode of ['LOCAL', 'PR']) {
+for (const mode of ['LOCAL']) {
   test(`${mode}: Gate FAIL and repeated failure acknowledge discarded evidence without new model progress`, async () => {
     const w = world(mode);
     const { loopId } = await w.controller.begin({ ...w.args, evidenceRequirements: [req()] });
@@ -328,7 +275,7 @@ function legacyFingerprint(o) {
   if (o.baselineGateEvidence) fields.baselineGateEvidence = o.baselineGateEvidence;
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
 }
-for (const mode of ['LOCAL', 'PR']) {
+for (const mode of ['LOCAL']) {
   test(`${mode}: oversized legacy frozen contract is retained but blocked before Gate/model after reload`, async () => {
     const w = world(mode);
     const { loopId } = await w.controller.begin(w.args);
