@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { REVIEW_MODES } from './objective.js';
 import { REVIEW_LOOP_STATES } from './state.js';
-import { REVIEW_VERDICTS, reviewFingerprint } from './reviewPolicy.js';
+import { reviewFingerprint } from './reviewPolicy.js';
 
 export function sha256Hex(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
@@ -219,28 +219,6 @@ export function assertPhaseProgressionValid(loopState, objective = loopState?.ob
       throw new Error(
         `ReviewLoop phase progression invalid: completed phase ${JSON.stringify(phase.id)} has no valid PHASE_PASS completion evidence`,
       );
-    }
-
-    if (objective?.mode === REVIEW_MODES.PR) {
-      const matchingAudit = (loopState?.audit ?? []).find((record) =>
-        record?.result === 'PHASE_PASS'
-        && record?.round === entry.round
-        && record?.reviewScope?.id === phase.id
-        && record?.reviewScope?.fingerprint === entry.reviewScopeFingerprint
-        && record?.gate?.fingerprint === entry.gateFingerprint
-        && record?.review?.reviewedFingerprint === entry.reviewFingerprint
-        && record?.targetFingerprint === entry.auditTargetFingerprint
-        && record?.target?.reviewedHeadSha === entry.head
-        && record?.target?.finalObservedHeadSha === entry.head
-        && record?.target?.headStillCurrent === true
-        && record?.target?.gateRanOnReviewedHead === true
-        && record?.convergence?.verdict === REVIEW_VERDICTS.PASS
-      );
-      if (!matchingAudit) {
-        throw new Error(
-          `ReviewLoop phase progression invalid: completed PR phase ${JSON.stringify(phase.id)} is not bound to a successful exact-HEAD PHASE_PASS audit record`,
-        );
-      }
     }
 
     previousProof = entry.proof;

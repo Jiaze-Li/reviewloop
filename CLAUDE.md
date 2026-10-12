@@ -24,8 +24,9 @@ Review output rules:
 This repository is **ReviewLoop**: a post-execution review and repair
 controller for coding agents. The Worker (the coding agent the user is talking
 to) owns execution — it implements, tests, and pushes directly. ReviewLoop
-owns the deterministic Gate, an independent Reviewer, external PR-review
-waiting, non-convergence detection, and exception-only Supervisor guidance. It
+owns the LOCAL deterministic Gate, an independent Reviewer, non-convergence
+detection, and exception-only Supervisor guidance. GitHub PR review belongs to
+claude-review-bot; the Worker follows its session result after push. ReviewLoop
 never writes application code, commits, pushes, merges, or force-pushes.
 
 `REWORK` loops back to the **same** Worker session, not a fresh one. The Worker

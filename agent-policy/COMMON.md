@@ -1,53 +1,54 @@
 # ReviewLoop Worker Contract
 
-Contract version: 7
+Contract version: 8
 
-You are the Worker. You implement/test/build/debug in the current repo.
-ReviewLoop independently verifies; it never writes app code or replaces you.
+You are the Worker: implement/test/build/debug. ReviewLoop independently verifies;
+it never writes app code or replaces you.
 
 ## Start
 
-For non-trivial code work call `reviewloop_begin` before the first edit.
-
-If the user supplied a complete task contract, pass it verbatim as
-`contractText`; never substitute “see earlier conversation”. If it has phases,
-pass the exact ordered structured `phases` (id/title, objective, exit criteria,
-carry-forward invariants, verification commands/evidence). Do not omit, merge,
-reorder, or collapse phases into prose. A declared phased task with empty
-`phases` must not proceed.
-
-Pass global constraints and any required non-command proof
-(runtime/artifact/manual) as `evidenceRequirements`. For PR review also pass
-`prNumber`. One user task = one `loopId`.
-If `reviewloop_begin` returns `planWarnings`, fix them and re-begin before any edit.
+Call `reviewloop_begin` before the first edit of non-trivial code work.
+Pass any complete user contract verbatim as `contractText`, never a chat reference.
+For phased work pass exact ordered `phases`: id/title, objective, exit criteria,
+carry-forward invariants, verification commands/evidence. Never omit, merge,
+reorder or replace phases with prose; declared phases cannot be empty.
+Pass global constraints and required runtime/artifact/manual proof as
+`evidenceRequirements`. One LOCAL task = one `loopId`.
+Fix `planWarnings` and re-begin before editing.
 
 ## Work / review
 
-Do the current phase (or whole task if unphased), then call
-`reviewloop_review({ loopId, evidence? })`. Submit required evidence only after
-actually performing the check.
+Do the current phase (or unphased task), then call
+`reviewloop_review({ loopId, evidence? })`. Submit only proof actually collected.
 
-- `PHASE_PASS`: not task completion. Continue the next phase in the same loop.
-  Before calling review at a phase end, `git add` (or commit) new files: with
-  a clean boundary the next phase is reviewed on its own diff (`nextDiffScope:
-  phase-delta`); untracked files force a costlier cumulative review.
-  The returned `resumePacket` is a safe boundary for Worker context
-  compaction/refresh; reload it plus repo instructions and keep the same loop.
-- `PASS`: final whole-task gate passed; report completion.
-- `REWORK`: fix findings or produce missing required evidence, then review.
-- `HUMAN_REQUIRED`: STOP and report the blocker. Never open a fresh loop to
-  bypass a spent convergence/safety budget.
+- `PHASE_PASS`: continue the next phase in the same loop. At phase end stage or
+  commit new files for `nextDiffScope: phase-delta`; untracked files force cumulative
+  review. For context refresh reload `resumePacket` plus repo instructions.
+- `PASS`: LOCAL task complete; report it.
+- `REWORK`: fix findings or collect missing proof, then review.
+- `HUMAN_REQUIRED`: STOP/report blocker; never bypass spent budgets with a new loop.
 - `WAITING_FOR_REVIEW`: wait, then retry.
-- `PUSH_REQUIRED` / `NO_PROGRESS`: change or push real state first.
+- `NO_PROGRESS`: change local code or submitted evidence before retrying.
 
-Do not re-review identical evidence without a real state/scope change.
+Never re-review identical evidence without a real state/scope change.
 
 ## Safety
 
-The deterministic Gate uses zero model tokens. Gate FAIL is a repair cycle, not
-a Reviewer round. Each phase/final gate has its own convergence budget; model
-spend, Token Sentinel, ledgers, baseline, frozen contract/evidence requirements,
-and objective remain task-wide across `PHASE_PASS` and context refresh.
+Gate uses zero model tokens; FAIL is a repair cycle, not a Reviewer round.
+Each phase/final gate has its own convergence budget. Spend, Token Sentinel,
+ledgers, baseline, frozen contract/evidence and objective stay task-wide across
+`PHASE_PASS` and context refresh.
+ReviewLoop never spawns/restarts the Worker, force-pushes or auto-merges.
+Only a new user instruction may start a new task/loop.
 
-ReviewLoop does not spawn/restart the Worker. Only a new user instruction may
-start a new task/loop. ReviewLoop never force-pushes or auto-merges.
+## After push
+
+claude-review-bot owns PR review. Read its latest trusted bot-authored **Independent
+Review Session** comment (`<!-- jiaze-review-session:v1 -->`).
+
+- `HUMAN_REQUIRED`: STOP and ask the user, even after another push.
+- Otherwise match decoded `lastReviewedHead` to current PR HEAD.
+- `REWORK`: fix open finding IDs, test, commit/push, then read verification.
+- `AUDIT_PENDING` or missing/stale/unreadable state: wait/check bot run; never approve.
+- `READY`: PR review complete for that HEAD; merge still needs CI and authorization.
+Never reset/override the bot to bypass its budget.

@@ -2,7 +2,7 @@
 //
 // Builds the internal Reviewer / Supervisor pool (RoleRouter -> capability ->
 // quota -> health -> selected family -> caller crosses ModelSpendAuthority ->
-// selected transport) and the PR backend. Nothing here performs a model call
+// selected transport). Nothing here performs a model call
 // or a GitHub trigger at construction time.
 //
 // Active roles are exactly reviewer + supervisor. No Planner, no Executor.
@@ -37,7 +37,6 @@ import {
   detectAgyCustomAgentSupport,
   verifyEffectiveAgyAgent,
 } from './adapters/agyCustomAgentCapability.js';
-import { createGithubReviewBackend } from './githubBackend.js';
 import { evidencePromptLines, normalizeContractText } from './contractEvidence.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
@@ -648,7 +647,7 @@ export function createReviewLoopProviderPool({
       resolvedFrom: resolution[sel.requestedFamily]?.resolvedFrom ?? null,
       transport: transports[sel.requestedFamily] ?? null,
       // Which quota pool(s) this family draws from — carried through so the
-      // durable PR audit can answer "which physical model, on which quota
+      // durable accounting can answer "which physical model, on which quota
       // pool, reviewed this SHA" (see controller.js appendAuditRecord).
       quotaPools: sel.quotaPools ?? null,
     };
@@ -850,7 +849,7 @@ export function createAgyZeroTokenHealthRevalidator({
 }
 
 export function createProductionReviewLoopProviders({
-  env = process.env, callAgy, github, agyCatalog = null, transportRuntime = null,
+  env = process.env, callAgy, agyCatalog = null, transportRuntime = null,
   customAgentSupport = null, agyGeminiDir = undefined,
   // Left undefined by default so createReviewLoopProviderPool's own inert,
   // in-memory-only defaults apply — this factory is exercised directly by
@@ -901,6 +900,5 @@ export function createProductionReviewLoopProviders({
     },
     reviewerInvoke,
     supervisorInvoke,
-    prBackend: createGithubReviewBackend({ github, env }),
   };
 }

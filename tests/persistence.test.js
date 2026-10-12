@@ -61,20 +61,13 @@ test('writeWorkflowState fails closed on a missing workflow id', async () => {
   });
 });
 
-test('updateWorkflowState merges PR closeout reviewer state without clobbering siblings', async () => {
+test('updateWorkflowState merges a patch without clobbering siblings', async () => {
   await withPersistence(async (p) => {
     await p.writeWorkflowState('wf-1', { supervisor: { conversation_id: 'sup-1' } });
-    await p.updateWorkflowState('wf-1', {
-      prCloseout: { prReviewer: 'codex', reviewerLocked: false, repairRounds: 0, maxRepairRounds: 3 },
-    });
-    const merged = await p.updateWorkflowState('wf-1', {
-      prCloseout: { prReviewer: 'codex', reviewerLocked: true, activeReviewer: 'codex', repairRounds: 1, maxRepairRounds: 3 },
-    });
+    const merged = await p.updateWorkflowState('wf-1', { acceptanceChain: { id: 'c1' } });
     assert.equal(merged.supervisor.conversation_id, 'sup-1');
-    assert.equal(merged.prCloseout.reviewerLocked, true);
-    assert.equal(merged.prCloseout.activeReviewer, 'codex');
-    assert.equal(merged.prCloseout.repairRounds, 1);
-    assert.deepEqual((await p.readWorkflowState('wf-1')).prCloseout, merged.prCloseout);
+    assert.deepEqual(merged.acceptanceChain, { id: 'c1' });
+    assert.deepEqual(await p.readWorkflowState('wf-1'), merged);
   });
 });
 

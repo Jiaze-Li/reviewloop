@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import {
   normalizeProviderReview,
   blockingSignatures as blockingSigs,
-} from '../orchestrator/adapters/normalizedPrReview.js';
+} from '../orchestrator/adapters/normalizedReview.js';
 
 function sha256(v) {
   return createHash('sha256').update(String(v)).digest('hex');
@@ -53,9 +53,7 @@ export function convergenceEpochBudget(loopState) {
 // Compact normalized review the Core stores and (partly) returns to the Worker.
 // Raw findings text and full diff stay in local persistence, never echoed
 // wholesale into Worker context.
-export function normalizeReview({
-  raw, reviewer, provider, head, requireExplicitHead = false,
-} = {}) {
+export function normalizeReview({ raw, reviewer, provider, head } = {}) {
   // B1 — a malformed / unparseable / schema-invalid provider payload is
   // surfaced (never silently reduced to an empty findings list) and fails
   // closed here.
@@ -73,27 +71,8 @@ export function normalizeReview({
       error: { reason: 'MALFORMED_REVIEWER_OUTPUT', message: String(raw.reason ?? 'reviewer output is malformed') },
     };
   }
-  // B4 — in PR mode the reviewed HEAD must be explicit in the payload, never
-  // substituted from the current HEAD.
-  const explicitHead = typeof (raw?.head_sha ?? raw?.headSha ?? raw?.reviewedHead ?? raw?.commit_id) === 'string'
-    ? String(raw.head_sha ?? raw.headSha ?? raw.reviewedHead ?? raw.commit_id).trim()
-    : null;
-  if (requireExplicitHead && !explicitHead) {
-    return {
-      status: 'FAILED',
-      reviewer: reviewer ?? null,
-      provider: provider ?? null,
-      reviewedFingerprint: null,
-      reviewedHead: null,
-      blockingFindings: [],
-      nonBlockingFindings: [],
-      nonBlockingOmitted: 0,
-      findingSignatures: [],
-      error: { reason: 'MISSING_REVIEWED_HEAD', message: 'PR review payload does not state which HEAD it reviewed' },
-    };
-  }
   const normalized = normalizeProviderReview({
-    raw, reviewer, provider, currentPrHead: requireExplicitHead ? explicitHead : head,
+    raw, reviewer, provider, currentHead: head,
   });
   const blocking = (normalized.blocking ?? []).map((f) => ({
     severity: f.severity,
@@ -101,18 +80,6 @@ export function normalizeReview({
     line: f.line ?? null,
     title: (f.title ?? f.message ?? '').slice(0, 200),
     signature: f.signature,
-    // Durable GitHub review-thread identity for this finding (PR mode only;
-    // null for internal LOCAL findings). Preserved through normalization so the
-    // controller can resolve the thread once the finding is independently
-    // cleared on a newer HEAD.
-    threadIdentity: (f.threadNodeId || f.reviewId || f.commentId) ? {
-      threadNodeId: f.threadNodeId ?? null,
-      reviewId: f.reviewId ?? null,
-      commentId: f.commentId ?? null,
-      reviewedHead: f.reviewedHead ?? f.head_sha ?? null,
-      reviewerLogin: f.reviewerLogin ?? null,
-      identityReliable: Boolean(f.identityReliable),
-    } : null,
   }));
   const nonBlocking = (normalized.findings ?? [])
     .filter((f) => !blocking.some((b) => b.signature === f.signature))
@@ -123,9 +90,7 @@ export function normalizeReview({
     reviewer: normalized.reviewer ?? reviewer ?? null,
     provider: normalized.provider ?? provider ?? null,
     reviewedFingerprint: null, // filled by the controller
-    reviewedHead: requireExplicitHead ? explicitHead : (normalized.head_sha ?? head ?? null),
-    // The trusted review submission id that produced this result (PR mode);
-    // recorded as the independent verification id when a prior thread resolves.
+    reviewedHead: normalized.head_sha ?? head ?? null,
     reviewId: normalized.review_id ?? raw?.review_id ?? raw?.reviewId ?? null,
     blockingFindings: blocking,
     nonBlockingFindings: nonBlocking.slice(0, 8),

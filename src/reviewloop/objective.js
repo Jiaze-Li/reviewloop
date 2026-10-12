@@ -9,15 +9,10 @@
 import { createHash } from 'node:crypto';
 import { normalizeContractText, normalizeEvidenceRequirements } from './contractEvidence.js';
 
-export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL', PR: 'PR' });
+export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL' });
 
 export const DEFAULT_BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2']);
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
-// ReviewLoop has ONE review engine. Both LOCAL and PR targets are judged by the
-// same internal Reviewer pool (`reviewer: 'internal'`). PR is a review TARGET
-// (PR base -> exact PR HEAD), never a reviewer transport — no third-party
-// review-trigger engine exists any more.
-
 function sha256(value) {
   return createHash('sha256').update(String(value)).digest('hex');
 }
@@ -26,7 +21,7 @@ function sha256(value) {
 // input to FAIL->WARN baseline-diff suppression at review time. `capturedAt` is
 // volatile and excluded; the failure evidence is hashed rather than embedded so
 // a large results payload never bloats the objective fingerprint. Returns null
-// when no baseline Gate ran (PR mode, or no discoverable verification), which
+// when no baseline Gate ran (no discoverable verification), which
 // keeps a pre-existing objective's fingerprint unchanged.
 export function baselineGateEvidenceIdentity(bg) {
   if (!bg || typeof bg !== 'object') return null;
@@ -148,13 +143,6 @@ export function createReviewObjective({
   prNumber = null,
   reviewer = null,
   baseline = null,
-  prHead = null,
-  // PR target identity, frozen at reviewloop_begin. `prBaseSha` is the PR's
-  // merge-base with its target branch; `reviewedHeadSha` is the exact PR HEAD
-  // bound at begin. Both are folded into the objective fingerprint so persisted
-  // state cannot be edited to swap the review onto a different PR snapshot.
-  prBaseSha = null,
-  reviewedHeadSha = null,
   constraints = [],
   phases = [],
   contractText = '',
@@ -171,8 +159,8 @@ export function createReviewObjective({
   if (!loopId) throw new Error('createReviewObjective: loopId is required');
   if (!goal || !String(goal).trim()) throw new Error('createReviewObjective: goal is required');
 
-  const resolvedMode = mode
-    || (prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL);
+  if (prNumber != null || mode === 'PR') throw new Error('createReviewObjective: PR mode retired; use claude-review-bot');
+  const resolvedMode = mode || REVIEW_MODES.LOCAL;
   if (!Object.values(REVIEW_MODES).includes(resolvedMode)) {
     throw new Error(`createReviewObjective: unknown mode "${resolvedMode}"`);
   }
@@ -214,15 +202,8 @@ export function createReviewObjective({
       }
       : null,
     mode: resolvedMode,
-    prNumber: resolvedMode === REVIEW_MODES.PR ? (prNumber ?? null) : null,
-    // ONE review engine: the internal Reviewer pool judges every target.
     reviewer: 'internal',
     baseline: baseline ?? null,
-    prBaseSha: resolvedMode === REVIEW_MODES.PR ? (prBaseSha ?? null) : null,
-    // The exact PR HEAD this objective is bound to review (PR base -> this SHA).
-    reviewedHeadSha: resolvedMode === REVIEW_MODES.PR
-      ? (reviewedHeadSha ?? prHead ?? null)
-      : null,
     constraints: normalizedConstraints,
     phases: normalizedPhases,
     // Optional complete user-facing task contract. When supplied it is the
@@ -266,6 +247,7 @@ function fingerprintFields(o) {
     goal: o.goal,
     repository: o.repository ?? null,
     mode: o.mode,
+    // Historic null field must remain in the hash for saved LOCAL sessions.
     prNumber: o.prNumber ?? null,
     reviewer: o.reviewer,
     constraints: o.constraints ?? [],
@@ -280,9 +262,7 @@ function fingerprintFields(o) {
     base.evidenceRequirements = o.evidenceRequirements;
   }
   if (o.verificationPlan) base.verificationPlan = o.verificationPlan;
-  // PR target identity — load-bearing for "which PR snapshot is under review".
-  // Only folded in when present, so a LOCAL / pre-existing objective keeps its
-  // original hash.
+  // Historic identity components only for verifying previously saved state.
   if (o.prBaseSha) base.prBaseSha = o.prBaseSha;
   if (o.reviewedHeadSha) base.reviewedHeadSha = o.reviewedHeadSha;
   // The captured pre-Worker baseline is load-bearing: a state editor that swaps
@@ -342,9 +322,6 @@ export function assertObjectiveNotWeakened(original, candidate) {
   const problems = [];
   if (candidate.goal !== original.goal) problems.push('goal changed');
   if (candidate.mode !== original.mode) problems.push('mode changed');
-  if ((candidate.prNumber ?? null) !== (original.prNumber ?? null)) problems.push('prNumber changed');
-  if ((candidate.prBaseSha ?? null) !== (original.prBaseSha ?? null)) problems.push('PR base SHA changed');
-  if ((candidate.reviewedHeadSha ?? null) !== (original.reviewedHeadSha ?? null)) problems.push('reviewed PR HEAD changed');
   if (JSON.stringify(candidate.repository ?? null) !== JSON.stringify(original.repository ?? null)) {
     problems.push('repository changed');
   }

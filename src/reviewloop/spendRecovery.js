@@ -77,6 +77,7 @@ export async function acknowledgeUnresolvedSpend({
 
   const state = await persistence.readWorkflowState(loopId);
   if (!state?.reviewLoop) throw new Error(`unknown ReviewLoop session: ${loopId}`);
+  if (state.reviewLoop.objective?.mode === 'PR') throw new Error('ReviewLoop PR session retired; cannot resume model spend; use claude-review-bot');
   if (state.reviewLoop.budgetExhausted === true) {
     throw new Error('this loop exhausted its convergence budget; spend acknowledgement cannot reopen it');
   }

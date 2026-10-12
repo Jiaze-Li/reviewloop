@@ -19,6 +19,7 @@ export async function reopenExhaustedGate({ persistence, loopId, reason, now = (
   const workflow = await persistence.readWorkflowState(loopId);
   const loop = workflow?.[STATE_KEY];
   if (!loop) throw new Error(`unknown loopId ${loopId}`);
+  if (loop.objective?.mode === 'PR') throw new Error('ReviewLoop PR session retired; cannot reopen it; use claude-review-bot');
   if (loop.state !== REVIEW_LOOP_STATES.HUMAN_REQUIRED || loop.budgetExhausted !== true) {
     throw new Error(`loop is ${loop.state}${loop.budgetExhausted ? '' : ' (budget not exhausted)'}; only a HUMAN_REQUIRED loop with a spent convergence budget can be reopened`);
   }

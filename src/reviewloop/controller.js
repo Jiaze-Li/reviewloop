@@ -1,19 +1,6 @@
-// ReviewLoop controller — the two re-entrant operations behind the MCP tools.
-//
-//   reviewloop_begin  -> register the immutable objective + capture the exact
-//     pre-Worker baseline (LOCAL) or freeze the exact PR snapshot —
-//     repository, prNumber, base SHA, HEAD SHA (PR). Also captures
-//     baseline Gate evidence when trusted verification is deterministically
-//     discoverable. ZERO model calls.
-//
-//   reviewloop_review -> the one re-entrant operation: attribute the Worker's
-//     delta -> deterministic Gate -> independent Reviewer over the FULL
-//     attributed evidence (bounded or deterministically chunked) -> convergence
-//     policy -> Supervisor (exception-only) -> PASS | REWORK | HUMAN_REQUIRED |
-//     WAITING_FOR_REVIEW | NO_PROGRESS | PUSH_REQUIRED.
-//
-// The SAME Worker handles REWORK and calls reviewloop_review again. ReviewLoop
-// never writes application code, never commits, pushes, merges, or force-pushes.
+// ReviewLoop LOCAL controller. A single Worker-facing review engine verifies
+// a frozen local baseline, runs the Gate, then Reviewer / Supervisor as needed.
+// GitHub PR review is owned by claude-review-bot.
 
 import { randomUUID } from 'node:crypto';
 import { Persistence } from '../orchestrator/persistence.js';
@@ -37,11 +24,6 @@ import {
   isTerminal,
 } from './state.js';
 import { captureBaseline, collectWorkerDelta } from './gitEvidence.js';
-import { collectPrDelta } from './prEvidence.js';
-import {
-  withPrSnapshotWorktree, PrSnapshotError, worktreeSnapshotFingerprint, worktreeSnapshotMutated,
-} from './prWorktree.js';
-import { assertPrRepositoryIdentity } from './prIdentity.js';
 import { withInProcessLoopLock, acquireLoopFileLease } from './loopLease.js';
 import { discoverVerificationCommands, runGate, GATE_VERDICTS } from './gatePolicy.js';
 import {
@@ -137,16 +119,6 @@ export function createReviewLoopController({
   preflightQuotaFn = null,
   transientAuthRetryDelaysMs = DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
   sleepFn = defaultRetrySleep,
-  prBackend = null,
-  // PR-target snapshot correctness. Real implementations by default; tests
-  // inject deterministic fakes so no real git/gh call is ever made.
-  resolvePrRepositoryIdentityFn = assertPrRepositoryIdentity,
-  buildPrSnapshotFn = withPrSnapshotWorktree,
-  collectPrDeltaFn = collectPrDelta,
-  // Proves (or disproves) that the deterministic PR Gate left the exact
-  // reviewed snapshot byte-identical. Real implementation by default; tests
-  // inject a deterministic fake (the fake worktree is never a real checkout).
-  captureWorktreeSnapshotFn = worktreeSnapshotFingerprint,
   captureBaselineFn = captureBaseline,
   collectWorkerDeltaFn = collectWorkerDelta,
   // Re-collect the Worker delta AFTER the review-time Gate (a snapshot / codegen
@@ -201,7 +173,7 @@ export function createReviewLoopController({
 
   // Cumulative, durable per-loop spend telemetry with zero model calls — used
   // on every early-return path (NO_PROGRESS / WAITING_FOR_REVIEW /
-  // PUSH_REQUIRED / terminal) so those results never understate spend that
+  // terminal) so those results never understate spend that
   // earlier rounds already incurred.
   async function durableTelemetry(loopId) {
     try {
@@ -288,6 +260,7 @@ export function createReviewLoopController({
     verificationCommands = null, blockingSeverities, maxReviewRounds,
     constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
   } = {}) {
+    if (prNumber != null) throw new Error('reviewloop_begin: PR mode has been retired; use claude-review-bot for GitHub PR review.');
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
     const frozenContractText = assertContractHandoff({
@@ -318,11 +291,9 @@ export function createReviewLoopController({
     });
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
     const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
-    const mode = prNumber != null ? REVIEW_MODES.PR : REVIEW_MODES.LOCAL;
+    const mode = REVIEW_MODES.LOCAL;
 
     let baseline = null;
-    let prHead = null;
-    let prBaseSha = null;
     const repository = { root: cwd, name: null, url: null };
     let baselineGate = null;
     let verificationPlan = null;
@@ -353,97 +324,54 @@ export function createReviewLoopController({
       return plan;
     };
 
-    if (mode === REVIEW_MODES.LOCAL) {
-      baseline = await captureBaselineFn({ cwd });
+    baseline = await captureBaselineFn({ cwd });
 
-      // Freeze the verification plan NOW. reviewloop_review always runs these
-      // exact commands; a later edit to .reviewloop.json / package.json's test
-      // script cannot weaken the Gate.
-      verificationPlan = freezeVerificationPlan(cwd);
+    // Freeze the verification plan NOW. reviewloop_review always runs these
+    // exact commands; a later edit to .reviewloop.json / package.json's test
+    // script cannot weaken the Gate.
+    verificationPlan = freezeVerificationPlan(cwd);
 
-      // B8 — baseline Gate evidence, 0 model tokens, over the FROZEN plan. Only
-      // when trusted/discoverable verification exists; a failure to run it is
-      // recorded as incomplete coverage, never faked as PASS.
-      if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline Gate ran');
-      let baselineGateRan = false;
+    // B8 — baseline Gate evidence, 0 model tokens, over the FROZEN plan. Only
+    // when trusted/discoverable verification exists; a failure to run it is
+    // recorded as incomplete coverage, never faked as PASS.
+    if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline Gate ran');
+    let baselineGateRan = false;
+    try {
+      if (verificationPlan.source !== 'mechanical' && verificationPlan.commands.length) {
+        const g = await runGateFn({
+          cwd, commands: verificationPlan.commands, runner: gateRunner, env, signal,
+        });
+        baselineGateRan = true;
+        baselineGate = {
+          evidence: g.evidence ?? { results: g.results ?? [], pass: g.pass },
+          pass: g.pass,
+          capturedAt: new Date().toISOString(),
+          source: verificationPlan.source,
+        };
+      }
+    } catch (err) {
+      // A caller cancellation is NOT "incomplete Gate coverage" — it aborts
+      // reviewloop_begin so no loop is registered for an abandoned request.
+      if (signal?.aborted) {
+        throw new Error(`reviewloop_begin: cancelled by the caller during the baseline Gate (${String(err?.message ?? err)})`);
+      }
+      baselineGate = { coverage: 'INCOMPLETE', reason: String(err?.message ?? err) };
+    }
+    if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller after the baseline Gate ran');
+    // The baseline Gate may itself mutate tracked files (a snapshot test, a
+    // codegen/format check). Re-capture the baseline AFTER it runs so those
+    // Gate-caused edits are part of the baseline and are never later
+    // attributed to the Worker's delta. If this recapture FAILS we must NOT
+    // fall back to the pre-Gate baseline — that reintroduces the exact
+    // misattribution the recapture prevents. Abort reviewloop_begin instead.
+    if (baselineGateRan) {
       try {
-        if (verificationPlan.source !== 'mechanical' && verificationPlan.commands.length) {
-          const g = await runGateFn({
-            cwd, commands: verificationPlan.commands, runner: gateRunner, env, signal,
-          });
-          baselineGateRan = true;
-          baselineGate = {
-            evidence: g.evidence ?? { results: g.results ?? [], pass: g.pass },
-            pass: g.pass,
-            capturedAt: new Date().toISOString(),
-            source: verificationPlan.source,
-          };
-        }
+        baseline = await captureBaselineFn({ cwd });
       } catch (err) {
-        // A caller cancellation is NOT "incomplete Gate coverage" — it aborts
-        // reviewloop_begin so no loop is registered for an abandoned request.
-        if (signal?.aborted) {
-          throw new Error(`reviewloop_begin: cancelled by the caller during the baseline Gate (${String(err?.message ?? err)})`);
-        }
-        baselineGate = { coverage: 'INCOMPLETE', reason: String(err?.message ?? err) };
-      }
-      if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller after the baseline Gate ran');
-      // The baseline Gate may itself mutate tracked files (a snapshot test, a
-      // codegen/format check). Re-capture the baseline AFTER it runs so those
-      // Gate-caused edits are part of the baseline and are never later
-      // attributed to the Worker's delta. If this recapture FAILS we must NOT
-      // fall back to the pre-Gate baseline — that reintroduces the exact
-      // misattribution the recapture prevents. Abort reviewloop_begin instead.
-      if (baselineGateRan) {
-        try {
-          baseline = await captureBaselineFn({ cwd });
-        } catch (err) {
-          throw new Error(
-            `reviewloop_begin: the baseline Gate ran but the post-Gate baseline could not be re-captured (${err?.message ?? err}); `
-            + 'refusing to start a loop whose baseline would misattribute the Gate\'s own edits to the Worker',
-          );
-        }
-      }
-    } else {
-      // PR target. Resolve + FREEZE the PR snapshot identity: repository,
-      // prNumber, base SHA, exact HEAD. Fail closed on anything unresolvable —
-      // a review that cannot prove which snapshot it covers is worthless.
-      if (!prBackend) throw new Error('reviewloop_begin: PR mode requires a PR backend');
-      if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller');
-      // Repository identity is NOT best-effort metadata: cwd's own repository
-      // must be PROVEN identical to the PR's repository before any PR loop is
-      // registered. GitHub commands are always scoped by cwd, never by the
-      // MCP process's own (accidental) working directory.
-      const repoIdentity = await resolvePrRepositoryIdentityFn({ cwd, prBackend, prNumber });
-      if (!repoIdentity?.ok) {
-        throw new Error(`reviewloop_begin: repository identity check failed — ${repoIdentity?.reason ?? 'unknown reason'}`);
-      }
-      repository.name = repoIdentity.nameWithOwner;
-      prHead = await prBackend.getPrHead({ prNumber, cwd });
-      if (!prHead) throw new Error(`reviewloop_begin: cannot resolve HEAD for PR #${prNumber}`);
-      prBaseSha = typeof prBackend.getPrBaseSha === 'function'
-        ? await prBackend.getPrBaseSha({ prNumber, cwd })
-        : null;
-      if (!prBaseSha) throw new Error(`reviewloop_begin: cannot resolve the base SHA for PR #${prNumber}`);
-
-      // The PR Gate runs the same frozen verification plan as a LOCAL target
-      // — but discovered from INSIDE the exact PR HEAD snapshot, never the
-      // ambient user cwd (which may be on a different branch, dirty, or
-      // simply carry a different .reviewloop.json / package.json entirely).
-      // Build the same disposable worktree the review-time Gate itself uses,
-      // discover verification commands inside it, then tear it down — the
-      // frozen plan is bound to the PR's own snapshot from the start.
-      if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the PR verification plan was frozen');
-      try {
-        verificationPlan = await buildPrSnapshotFn(
-          { cwd, baseSha: prBaseSha, headSha: prHead, prNumber },
-          async ({ worktreeDir }) => freezeVerificationPlan(worktreeDir),
+        throw new Error(
+          `reviewloop_begin: the baseline Gate ran but the post-Gate baseline could not be re-captured (${err?.message ?? err}); `
+          + 'refusing to start a loop whose baseline would misattribute the Gate\'s own edits to the Worker',
         );
-      } catch (err) {
-        if (err instanceof PrSnapshotError) {
-          throw new Error(`reviewloop_begin: cannot build the exact PR HEAD snapshot to freeze the verification plan: ${err.message}`);
-        }
-        throw err;
       }
     }
 
@@ -457,8 +385,7 @@ export function createReviewLoopController({
       : (Number.isInteger(envMaxRounds) && envMaxRounds > 0 ? envMaxRounds : undefined);
 
     const objective = createReviewObjective({
-      loopId, goal, repository, mode, prNumber, reviewer, baseline, prHead,
-      prBaseSha, reviewedHeadSha: prHead,
+      loopId, goal, repository, mode, reviewer, baseline,
       constraints, phases, contractText: frozenContractText, evidenceRequirements,
       blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       verificationPlan,
@@ -487,7 +414,7 @@ export function createReviewLoopController({
     // LOCAL attribution check, while it is still free to fix: files untracked at
     // begin make every brand-new Worker file unattributable (D25), so the first
     // review would stop at HUMAN_REQUIRED and the loop could not be recovered.
-    if (mode === REVIEW_MODES.LOCAL && baseline) {
+    if (baseline) {
       const untracked = Object.keys(baseline.untrackedHashes ?? {});
       if (untracked.length) {
         const shown = untracked.slice(0, 5).join(', ');
@@ -511,7 +438,6 @@ export function createReviewLoopController({
     const loopState = initialLoopState(objective);
     loopState.verificationCommands = verificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
-    if (mode === REVIEW_MODES.PR) loopState.lastReviewedPrHead = null;
     await store.save(loopId, loopState);
     onEvent?.({ type: 'REVIEWLOOP_BEGIN', loopId, mode });
 
@@ -520,9 +446,6 @@ export function createReviewLoopController({
       mode,
       status: 'READY',
       baseline: baseline ? compactBaselineSummary(baseline) : null,
-      prHead: prHead ?? null,
-      prBaseSha: prBaseSha ?? null,
-      repository: repository.name ?? null,
       reviewer: objective.reviewer,
       phaseCount: phasesOf(objective).length,
       currentPhase: currentReviewScope(loopState, objective).id,
@@ -535,6 +458,8 @@ export function createReviewLoopController({
     const raw = await store.load(loopId);
     if (!raw) throw new Error(`reviewloop_review: unknown loopId ${loopId}`);
     assertNotLegacyWorkflow(raw);
+    // Old PR sessions are archived in-place, never repurposed as LOCAL.
+    if (raw.objective?.mode === 'PR') throw new Error('ReviewLoop PR session retired; use claude-review-bot. Existing session left unchanged.');
     const objective = rehydrateObjective(raw.objective);
     assertObjectiveNotWeakened(objective, raw.objective);
     raw.objective = objective;
@@ -603,7 +528,6 @@ export function createReviewLoopController({
     loopState.lastSupervisorGuidance = null;
     loopState.lastSupervisorRecommendation = null;
     loopState.lastReviewedFingerprint = null;
-    loopState.lastReviewedPrHead = null;
     loopState.lastGateFingerprint = null;
     loopState.lastReview = null;
     loopState.chunkReviewCheckpoint = null;
@@ -754,7 +678,6 @@ export function createReviewLoopController({
     // completed phase, objective or task-wide spend counter.
     loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
 
-    if (objective.mode === REVIEW_MODES.PR) return reviewPr({ loopState, evidence, signal });
     return reviewLocal({ loopState, evidence, signal });
   }
 
@@ -1828,631 +1751,6 @@ export function createReviewLoopController({
     }
     return { guidance: sup.guidance, reconsideration: recommendation === 'REVIEWER_RECONSIDER' };
   }
-  // One physical provider attempt, shaped for the durable audit. `usage` is
-  // the raw provider envelope (never re-derived/estimated) — null on a
-  // failed/pre-dispatch attempt, present on a settled success.
-  function physicalCallAuditEntry(pc) {
-    return {
-      role: pc.role ?? null,
-      family: pc.family ?? null,
-      provider: pc.provider ?? null,
-      quotaPools: pc.quotaPools ?? null,
-      resolvedModel: pc.resolvedModel ?? null,
-      attempt: pc.attempt ?? null,
-      round: pc.round ?? null,
-      chunkIndex: pc.chunkIndex ?? null,
-      chunkTotal: pc.chunkTotal ?? null,
-      outcome: pc.outcome ?? null,
-      code: pc.code ?? null,
-      usage: pc.usage ?? null,
-    };
-  }
-
-  // ---- durable audit record ------------------------------------------
-  // One recoverable, tamper-evident entry per PR review round. Its fingerprint
-  // covers every load-bearing identity for "which PR snapshot did this round
-  // review": repository, prNumber, baseSha, reviewedHeadSha.
-  function appendAuditRecord({
-    loopState, objective, delta, gate, review, decision, telemetry,
-    observedHeadSha, finalObservedHeadSha, headStillCurrent, result,
-    supervisorPhysicalCalls = [],
-    reviewScope = currentReviewScope(loopState, objective),
-  }) {
-    const target = {
-      type: 'PR',
-      repository: objective.repository?.name ?? null,
-      prNumber: objective.prNumber,
-      baseSha: objective.prBaseSha ?? null,
-      mergeBase: delta?.mergeBase ?? null,
-      reviewedHeadSha: observedHeadSha ?? null,
-      finalObservedHeadSha: finalObservedHeadSha ?? null,
-      headStillCurrent: headStillCurrent === true,
-      // Structural proof the Gate ran against the SAME exact snapshot the
-      // Reviewer's evidence was bound to (prWorktree.js tags this on the
-      // gate result right after it runs inside the isolated worktree).
-      gateRanOnReviewedHead: gate?.reviewedSnapshotHeadSha != null
-        && gate.reviewedSnapshotHeadSha === observedHeadSha,
-    };
-    const record = {
-      loopId: loopState.loopId,
-      round: loopState.round,
-      startedAt: loopState.updatedAt ?? loopState.createdAt ?? null,
-      completedAt: new Date().toISOString(),
-      target,
-      targetFingerprint: sha256Hex(JSON.stringify({
-        repository: target.repository,
-        prNumber: target.prNumber,
-        baseSha: target.baseSha,
-        reviewedHeadSha: target.reviewedHeadSha,
-      })),
-      reviewScope: {
-        type: reviewScope?.type ?? 'task',
-        id: reviewScope?.id ?? 'task',
-        fingerprint: reviewScope?.fingerprint ?? null,
-      },
-      objective: {
-        goal: objective.goal,
-        constraints: objective.constraints ?? [],
-        blockingSeverities: objective.blockingSeverities ?? [],
-        maxReviewRounds: objective.maxReviewRounds,
-        fingerprint: objective.fingerprint,
-      },
-      gate: gate ? {
-        commands: gate.executedCommands ?? objective.verificationPlan?.commands ?? [],
-        commandSource: gate.commandSource ?? null,
-        fingerprint: gate.fingerprint ?? null,
-        verdict: gate.verdict ?? null,
-      } : null,
-      review: review ? {
-        // Logical pool identity — the Worker-facing abstraction never changes.
-        reviewer: 'internal pool',
-        status: review.status,
-        reviewedFingerprint: review.reviewedFingerprint ?? null,
-        reviewedHead: review.reviewedHead ?? null,
-        blockingFindings: review.blockingFindings?.length ?? 0,
-        findingSignatures: review.findingSignatures ?? [],
-        // Every PHYSICAL Reviewer attempt bound to this exact reviewedHeadSha:
-        // role, family, provider, quotaPool, resolvedModel, attempt, round,
-        // chunk index/total, outcome, usage. Never collapsed to one abstract
-        // "internal" entry — a failover/chunked round keeps every attempt.
-        physicalCalls: (review.physicalCalls ?? []).map((pc) => physicalCallAuditEntry(pc)),
-      } : null,
-      supervisor: {
-        invoked: loopState.supervisorInvoked === true,
-        guidance: loopState.lastSupervisorGuidance ?? null,
-        physicalCalls: (supervisorPhysicalCalls ?? []).map((pc) => physicalCallAuditEntry(pc)),
-      },
-      spend: telemetry ?? null,
-      convergence: decision ? { verdict: decision.verdict, reason: decision.reason } : null,
-      result,
-    };
-    loopState.audit = [...(loopState.audit ?? []), record];
-    return record;
-  }
-
-  // Optional audit publication back to the PR. Opt-in via
-  // REVIEWLOOP_PUBLISH_PR_RESULT=1. NEVER changes the verdict — a publication
-  // failure is recorded as a safety event and nothing else.
-  async function maybePublishPrResult({
-    loopState, objective, result, review, headSha, telemetry,
-  }) {
-    if (String(env?.REVIEWLOOP_PUBLISH_PR_RESULT ?? '') !== '1') return;
-    if (!prBackend || typeof prBackend.publishResult !== 'function') return;
-    const body = [
-      `ReviewLoop ${result}`,
-      '',
-      `PR: #${objective.prNumber}`,
-      `Reviewed base: ${objective.prBaseSha ?? '(unknown)'}`,
-      `Reviewed head: ${headSha}`,
-      `Final HEAD check: ${result === 'PASS' ? 'MATCH' : 'see loop state'}`,
-      '',
-      'Reviewer: internal Reviewer pool',
-      `Rounds: ${loopState.round}`,
-      `Blocking findings: ${review?.blockingFindings?.length ?? 0}`,
-      `usageVolume: ${telemetry?.usageVolume ?? 'n/a'}`,
-      '',
-      `ReviewLoop ID: ${loopState.loopId}`,
-    ].join('\n');
-    try {
-      await prBackend.publishResult({ prNumber: objective.prNumber, body });
-    } catch (err) {
-      collectSafetyEvent({
-        code: 'REVIEWLOOP_PR_RESULT_PUBLICATION_FAILED', severity: 'NON_BLOCKING', role: 'pr-target',
-        taskId: loopState.loopId, reason: String(err?.message ?? err),
-        actionTaken: 'result verdict unchanged; publication failure recorded only',
-      });
-    }
-  }
-
-  async function prHumanRequired(loopState, reason) {
-    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason);
-    await saveLoop(loopState);
-    return {
-      status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
-      gateRound: loopState.gateRound ?? loopState.round,
-      reason,
-      blockingFindings: loopState.lastReview?.blockingFindings ?? [],
-      telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-    };
-  }
-
-  // ---- PR mode: ONE unified review engine over the PR base->HEAD delta ----
-  // Snapshot-correctness invariant, asserted right before a PR round is
-  // allowed to PASS. Every one of these must be POSITIVELY known-true; any
-  // UNKNOWN/mismatch refuses PASS (never certifies on a best-effort basis):
-  //   - repository identity was proven at reviewloop_begin
-  //   - the Reviewer's evidence is bound to this exact reviewedHeadSha
-  //   - the Gate ran inside the isolated worktree for this exact HEAD
-  //   - the live PR HEAD, re-read just now, is still this exact HEAD
-  function prPassInvariantFailure({
-    objective, delta, gate, observedHead, finalHead,
-  }) {
-    if (!objective.repository?.name) return 'repository identity is not known (reviewloop_begin should have refused to register this loop)';
-    if (!delta || delta.reviewedHeadSha !== observedHead) return 'Reviewer evidence is not bound to the exact reviewed HEAD';
-    if (!gate || gate.reviewedSnapshotHeadSha !== observedHead) return 'the deterministic Gate did not run inside the exact-HEAD snapshot worktree';
-    if (!finalHead || finalHead !== observedHead) return 'the live PR HEAD does not match the reviewed HEAD';
-    return null;
-  }
-
-  // Build the exact PR snapshot for ONE round and run the Gate + collect the
-  // Reviewer's evidence INSIDE it — Gate execution, the verification-manifest
-  // drift check, and the diff identity all run against the SAME isolated
-  // worktree checked out at `headSha`, never the user's own ambient cwd. The
-  // worktree is guaranteed torn down (success or failure) before this
-  // resolves — see prWorktree.js.
-  async function buildPrRoundEvidence({
-    loopState, objective, cwd, prNumber, headSha, signal,
-  }) {
-    return buildPrSnapshotFn({
-      cwd, baseSha: objective.prBaseSha, headSha, prNumber,
-    }, async ({ worktreeDir, mergeBase }) => {
-      const delta = await collectPrDeltaFn({ cwd: worktreeDir, mergeBase, headSha });
-      if (delta.evidenceComplete === false) {
-        return { kind: 'HUMAN_REQUIRED', reason: `cannot construct a trustworthy PR delta: ${(delta.incompleteReasons ?? []).join('; ')}` };
-      }
-      if (delta.noWorkerChangeYet) return { kind: 'NO_PROGRESS' };
-
-      // The FROZEN deterministic Gate (same plan as a LOCAL target) — but the
-      // drift check compares against THIS worktree, the exact snapshot being
-      // reviewed, never the user's ambient cwd (which may be on another
-      // branch, dirty, or simply irrelevant to this PR).
-      const resolved = resolveGateCommands({
-        cwd: worktreeDir, loopState, objective, reviewScope: currentReviewScope(loopState, objective),
-      });
-      if (resolved.drift) return { kind: 'DRIFT' };
-      const { gateCommands, commandSource } = resolved;
-
-      // Capture the exact worktree state BEFORE the Gate runs. PR evidence
-      // must correspond to the exact commit already pushed — unlike LOCAL,
-      // there is no "adopt the Gate's own edits and re-run until it
-      // stabilises" option here (that would mean certifying bytes that were
-      // never pushed to the PR). If the Gate cannot be proven not to have
-      // mutated this snapshot, the snapshot is not certifiable, full stop.
-      const preGateState = await captureWorktreeSnapshotFn({ worktreeDir });
-      if (!preGateState.ok) {
-        return { kind: 'HUMAN_REQUIRED', reason: `cannot capture the PR snapshot's pre-Gate state: ${preGateState.reason}` };
-      }
-
-      const gate = await runGateFn({
-        cwd: worktreeDir, commands: gateCommands, runner: gateRunner, env, signal,
-      });
-      gate.commandSource = commandSource;
-      gate.executedCommands = [...gateCommands];
-
-      const postGateState = await captureWorktreeSnapshotFn({ worktreeDir });
-      if (!postGateState.ok) {
-        return { kind: 'HUMAN_REQUIRED', reason: `cannot verify the PR snapshot's post-Gate state: ${postGateState.reason}` };
-      }
-      if (worktreeSnapshotMutated(preGateState, postGateState)) {
-        // Gate mutated snapshot => snapshot not certifiable. Never set
-        // reviewedSnapshotHeadSha here — it is NOT proven — and never let the
-        // Reviewer see evidence collected against a tree the Gate then
-        // changed underneath it.
-        return { kind: 'GATE_MUTATED_SNAPSHOT', delta, gate };
-      }
-
-      // Structural proof this Gate ran inside the exact-HEAD snapshot AND
-      // left it byte-identical to that HEAD — asserted ONLY once cleanliness
-      // is proven. The pre-PASS invariant check and the durable audit both
-      // key off this.
-      gate.reviewedSnapshotHeadSha = headSha;
-
-      if (gate.verdict === GATE_VERDICTS.FAIL) return { kind: 'GATE_FAIL', delta, gate };
-      return {
-        kind: 'READY', delta, gate,
-      };
-    });
-  }
-
-  async function reviewPr({ loopState, evidence, signal }) {
-    const objective = loopState.objective;
-    const reviewScope = currentReviewScope(loopState, objective);
-    const cwd = objective.repository?.root;
-    const prNumber = objective.prNumber;
-    const MAX_HEAD_REBIND = 4;
-
-    for (let rebind = 0; rebind < MAX_HEAD_REBIND; rebind += 1) {
-      await assertLeaseHeld(loopState.loopId);
-
-      // 1. Live PR HEAD. FAIL CLOSED — an inability to prove which commit is
-      //    currently HEAD must never fall back to a cached SHA.
-      let observedHead;
-      try {
-        observedHead = await prBackend.getPrHead({ prNumber, cwd });
-      } catch (err) {
-        return prHumanRequired(loopState, `cannot resolve the live PR HEAD: ${err?.message ?? err}`);
-      }
-      if (!observedHead) return prHumanRequired(loopState, `cannot resolve the live HEAD for PR #${prNumber}`);
-
-      // Validate the complete input before any disposable worktree or Gate
-      // execution. This proves only shape/requirement/scope/budget, not runtime
-      // sufficiency or exact-code binding. A bad tail rejects the whole batch.
-      let validatedEvidence;
-      try {
-        validatedEvidence = validateEvidenceSubmissions({ objective, reviewScope, submissions: rebind === 0 ? evidence : [] });
-      } catch (err) {
-        if (!(err instanceof EvidenceValidationError)) throw err;
-        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'PR evidence preflight');
-        return evidenceRework({
-          loopState, head: observedHead, gate: { verdict: 'NOT_RUN', failureIdentities: [] },
-          reason: err.message,
-          receipt: unacceptedEvidence(evidence, 'INVALID_EVIDENCE'),
-        });
-      }
-
-      // 2. Local fix not pushed: HEAD unchanged since a prior actionable review.
-      if (loopState.lastReviewedPrHead === observedHead
-        && loopState.lastReview?.status === 'ACTIONABLE'
-        && !loopState.pendingReviewerReconsideration
-        && validatedEvidence.length === 0) {
-        await saveLoop(loopState);
-        return {
-          status: 'PUSH_REQUIRED', loopId: loopState.loopId, head: observedHead,
-          reason: 'PR HEAD unchanged since the last review; push your fix, then call reviewloop_review',
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
-      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'PR review requested');
-
-      // 3+4. Exact PR snapshot: the Reviewer's diff identity AND the
-      // deterministic Gate both run inside ONE isolated worktree checked out
-      // at `observedHead`, torn down before this resolves.
-      let snap;
-      try {
-        snap = await buildPrRoundEvidence({
-          loopState, objective, cwd, prNumber, headSha: observedHead, signal,
-        });
-      } catch (err) {
-        if (err instanceof PrSnapshotError) {
-          return prHumanRequired(loopState, `cannot build an exact PR snapshot worktree: ${err.message}`);
-        }
-        throw err;
-      }
-
-      if (snap.kind === 'HUMAN_REQUIRED') return prHumanRequired(loopState, snap.reason);
-      if (snap.kind === 'NO_PROGRESS') {
-        await saveLoop(loopState);
-        return {
-          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
-          head: observedHead,
-          reason: 'the PR has no reviewable base->HEAD change',
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-      if (snap.kind === 'DRIFT') {
-        collectSafetyEvent({
-          code: 'VERIFICATION_PLAN_DRIFT', severity: 'BLOCKING', role: 'gate',
-          taskId: loopState.loopId,
-          reason: `the verification config (${objective.verificationPlan?.source}) drifted from the frozen plan in the reviewed PR snapshot`,
-          actionTaken: 'review blocked; frozen Gate cannot be trusted',
-        });
-        loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-        const driftStop = await stopIfGateRepairsExhausted(loopState);
-        if (driftStop) return { ...driftStop, head: observedHead };
-        recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
-        await saveLoop(loopState);
-        return {
-          ...compactReworkPayload({
-            loopState,
-            review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
-            gate: { verdict: 'FAIL', failureIdentities: ['verification-plan-drift'] },
-          }),
-          head: observedHead,
-          reason: 'the verification configuration in the reviewed PR snapshot no longer matches the plan frozen at reviewloop_begin; revert it or start a new reviewloop_begin',
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-      if (snap.kind === 'GATE_MUTATED_SNAPSHOT') {
-        collectSafetyEvent({
-          code: 'GATE_MUTATED_PR_SNAPSHOT', severity: 'BLOCKING', role: 'gate',
-          taskId: loopState.loopId,
-          reason: 'the deterministic Gate modified tracked or untracked files inside the exact reviewed PR '
-            + 'HEAD snapshot (a formatter, codegen step, or snapshot updater ran)',
-          actionTaken: 'review blocked; Reviewer not invoked; reviewedSnapshotHeadSha not asserted for this HEAD',
-        });
-        loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-        const mutationStop = await stopIfGateRepairsExhausted(loopState);
-        if (mutationStop) return { ...mutationStop, head: observedHead };
-        recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate mutated pr snapshot');
-        await saveLoop(loopState);
-        return {
-          ...compactReworkPayload({
-            loopState,
-            review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 },
-            gate: { verdict: 'FAIL', failureIdentities: ['gate-mutated-pr-snapshot'] },
-          }),
-          head: observedHead,
-          reason: 'the deterministic Gate modified files inside the exact reviewed PR snapshot (formatter / '
-            + 'codegen / snapshot updater); run that step yourself, commit its output, and push before '
-            + 'calling reviewloop_review again — a snapshot the Gate itself changed can never be certified'
-            + (validatedEvidence.length ? '; submitted evidence was not accepted and must be recollected against the pushed code' : ''),
-          ...(validatedEvidence.length
-            ? { evidenceSubmission: unacceptedEvidence(validatedEvidence, 'CODE_CHANGED') }
-            : {}),
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
-      const { delta } = snap;
-      let { gate } = snap;
-
-      if (signal?.aborted) {
-        return prHumanRequired(loopState, 'the review was cancelled by the caller before the Reviewer ran');
-      }
-
-      if (snap.kind === 'GATE_FAIL') {
-        const gateFp = reviewFingerprint({
-          deltaFingerprint: delta.fingerprint,
-          gateFingerprint: gate.fingerprint,
-          reviewScopeFingerprint: reviewScope.fingerprint,
-        });
-        if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === gateFp) {
-          await saveLoop(loopState);
-          return {
-            status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
-            head: observedHead,
-            reason: 'submitted PR state is identical to the last review; no Reviewer/Supervisor call made',
-            evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
-            lastReview: compactLastReview(loopState),
-            telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-          };
-        }
-        loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
-        const gateStop = await stopIfGateRepairsExhausted(loopState);
-        if (gateStop) return { ...gateStop, head: observedHead };
-        loopState.lastReviewedFingerprint = gateFp;
-        loopState.lastGateFingerprint = gate.fingerprint;
-        loopState.lastReviewedPrHead = observedHead;
-        recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
-        await saveLoop(loopState);
-        return {
-          ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),
-          head: observedHead,
-          reason: 'deterministic Gate failed with a regression; fix it before the Reviewer runs',
-          evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
-      // Evidence can legitimately change while the PR HEAD stays fixed (for
-      // example, a corrected runtime walkthrough after Reviewer feedback).
-      // Bind it before the no-progress decision and include it in review state.
-      const evidenceCheck = await enforceEvidenceObligations({
-        loopState,
-        objective,
-        reviewScope,
-        delta,
-        gate,
-        // A HEAD rebind makes evidence supplied for the original reviewed SHA
-        // stale. Never silently rebind the same runtime/manual claim to a new
-        // PR HEAD inside this one call.
-        submissions: validatedEvidence,
-        head: observedHead,
-      });
-      if (evidenceCheck.blocked) return evidenceCheck.result;
-
-      const {
-        reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp,
-      } = reviewRoundFingerprints({ loopState, delta, gate, reviewScope, evidenceCheck });
-      if (loopState.lastReviewedFingerprint && loopState.lastReviewedFingerprint === fp) {
-        await saveLoop(loopState);
-        return {
-          status: 'NO_PROGRESS', loopId: loopState.loopId, round: loopState.round,
-          head: observedHead,
-          reason: 'submitted PR code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
-          lastReview: compactLastReview(loopState),
-          telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-        };
-      }
-
-      const spend = spendFor(loopState.loopId, objective);
-      let reviewOut;
-      try {
-        reviewOut = await runReviewerOverEvidence({
-          spend, loopState, objective, delta, gate, reviewScope,
-          evidenceBundle: evidenceCheck.bundle,
-          evidenceProofFingerprint: effectiveEvidenceFingerprint,
-          signal,
-        });
-      } catch (err) {
-        if (err instanceof LeaseLostError) throw err;
-        return spendDenialResult(loopState, err, await spend.telemetry());
-      }
-      const review = reviewOut.review;
-      review.reviewedFingerprint = fp;
-      review.reviewedHead = observedHead;
-      loopState.lastReviewedFingerprint = reconsiderationPending ? canonicalFp : fp;
-      loopState.lastGateFingerprint = gate.fingerprint;
-      loopState.lastReviewedPrHead = observedHead;
-      loopState.lastReview = review;
-      loopState.chunkReviewCheckpoint = null;
-
-      if (review.status === 'FAILED') {
-        recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, review.error?.reason ?? 'pr review failed');
-        await saveLoop(loopState);
-        return {
-          status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round, head: observedHead,
-          reason: `Reviewer did not produce a usable result (${review.error?.reason}): ${review.error?.message ?? ''}`,
-          telemetry: await spend.telemetry(), safetyEvents,
-        };
-      }
-
-      loopState.pendingReviewerReconsideration = null;
-      const decision = decideConvergence({ loopState, review });
-      recordFindingSignatures(loopState, review);
-
-      let supervisorGuidance = null;
-      let supervisorPhysicalCalls = [];
-      if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
-        const sup = await runSupervisor({
-          spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
-        });
-        supervisorPhysicalCalls = sup.physicalCalls ?? [];
-        if (sup.denied) return spendDenialResult(loopState, sup.error, await spend.telemetry());
-        const outcome = await applySupervisorOutcome({
-          sup, loopState, review, spend, escalationReason: decision.reason,
-        });
-        if (outcome.result) {
-          // A Supervisor terminal verdict is still the outcome of THIS exact PR
-          // review round. Persist the same durable PR audit/publication evidence
-          // as every other terminal PR path before returning it to the Worker.
-          const terminalTelemetry = outcome.result.telemetry ?? await spend.telemetry();
-          const terminalDecision = {
-            ...decision,
-            verdict: REVIEW_VERDICTS.HUMAN_REQUIRED,
-            reason: outcome.result.reason ?? loopState.history?.slice(-1)[0]?.reason ?? decision.reason,
-          };
-          appendAuditRecord({
-            loopState, objective, delta, gate, review,
-            decision: terminalDecision,
-            telemetry: terminalTelemetry,
-            supervisorPhysicalCalls,
-            observedHeadSha: observedHead,
-            finalObservedHeadSha: observedHead,
-            headStillCurrent: true,
-            result: 'HUMAN_REQUIRED',
-            reviewScope,
-          });
-          await saveLoop(loopState);
-          await maybePublishPrResult({
-            loopState, objective, result: 'HUMAN_REQUIRED',
-            review, headSha: observedHead, telemetry: terminalTelemetry,
-          });
-          return { ...outcome.result, head: observedHead };
-        }
-        supervisorGuidance = outcome.guidance;
-      }
-
-      const telemetry = await spend.telemetry();
-
-      if (decision.verdict === REVIEW_VERDICTS.PASS) {
-        // 5. Exact-HEAD recheck. Re-read the live PR HEAD; only PASS when it is
-        //    still the exact SHA this round reviewed. A moved HEAD is never
-        //    certified by a stale review — rebind and re-review it (bounded).
-        let finalHead;
-        try {
-          finalHead = await prBackend.getPrHead({ prNumber, cwd });
-        } catch (err) {
-          return prHumanRequired(loopState, `could not re-confirm the live PR HEAD before PASS: ${err?.message ?? err}`);
-        }
-        if (!finalHead) return prHumanRequired(loopState, 'could not re-confirm the live PR HEAD before PASS');
-        if (finalHead !== observedHead) {
-          collectSafetyEvent({
-            code: 'REVIEWLOOP_PR_HEAD_MOVED_DURING_REVIEW', severity: 'NON_BLOCKING', role: 'pr-target',
-            taskId: loopState.loopId,
-            reason: `PR HEAD moved from ${observedHead} to ${finalHead} during the review`,
-            actionTaken: 'stale review not certified; re-reviewing the new HEAD',
-          });
-          appendAuditRecord({
-            loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
-            observedHeadSha: observedHead, finalObservedHeadSha: finalHead,
-            headStillCurrent: false, result: 'REWORK',
-          });
-          loopState.lastReviewedFingerprint = null; // allow a fresh review of the new HEAD
-          await saveLoop(loopState);
-          continue;
-        }
-        // Explicit correctness invariant — every load-bearing fact must be
-        // POSITIVELY known-true, never assumed, right before certifying PASS.
-        const invariantFailure = prPassInvariantFailure({
-          objective, delta, gate, observedHead, finalHead,
-        });
-        if (invariantFailure) {
-          return prHumanRequired(loopState, `PR PASS invariant not satisfied: ${invariantFailure}`);
-        }
-        const isPhasePass = reviewScope.type === 'phase';
-        const passAuditRecord = appendAuditRecord({
-          loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
-          observedHeadSha: observedHead, finalObservedHeadSha: finalHead,
-          headStillCurrent: true, result: isPhasePass ? 'PHASE_PASS' : 'PASS',
-          reviewScope,
-        });
-        if (isPhasePass) {
-          const phaseResult = completeCurrentPhase(loopState, review, telemetry, {
-            head: observedHead,
-            gate,
-            reviewScope,
-            auditRecord: passAuditRecord,
-            evidenceFingerprint: delta.fingerprint,
-          });
-          await saveLoop(loopState);
-          return phaseResult;
-        }
-        loopState.resumePacket = null;
-        recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
-        await saveLoop(loopState);
-        await maybePublishPrResult({
-          loopState, objective, result: 'PASS', review, headSha: observedHead, telemetry,
-        });
-        return passResult(loopState, review, telemetry);
-      }
-
-      if (decision.verdict === REVIEW_VERDICTS.HUMAN_REQUIRED) {
-        loopState.budgetExhausted = true;
-        appendAuditRecord({
-          loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
-          observedHeadSha: observedHead, finalObservedHeadSha: observedHead,
-          headStillCurrent: true, result: 'HUMAN_REQUIRED',
-        });
-        recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason);
-        await saveLoop(loopState);
-        await maybePublishPrResult({
-          loopState, objective, result: 'HUMAN_REQUIRED', review, headSha: observedHead, telemetry,
-        });
-        return humanRequiredResult(loopState, review, telemetry, supervisorGuidance);
-      }
-
-      appendAuditRecord({
-        loopState, objective, delta, gate, review, decision, telemetry, supervisorPhysicalCalls,
-        observedHeadSha: observedHead, finalObservedHeadSha: observedHead,
-        headStillCurrent: true, result: 'REWORK',
-      });
-      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, decision.reason);
-      await saveLoop(loopState);
-      await maybePublishPrResult({
-        loopState, objective, result: 'REWORK', review, headSha: observedHead, telemetry,
-      });
-      return {
-        ...compactReworkPayload({ loopState, review, gate, supervisorGuidance }),
-        head: observedHead,
-        reason: loopState.pendingReviewerReconsideration
-          ? `${decision.reason}; Supervisor requested reconsideration, so re-call reviewloop_review on the same HEAD`
-          : `${decision.reason}; push your fix so ReviewLoop reviews the new HEAD`,
-        telemetry, safetyEvents,
-      };
-    }
-
-    // The PR HEAD kept moving faster than one review round.
-    recordTransition(loopState, REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, 'PR HEAD kept moving');
-    await saveLoop(loopState);
-    return {
-      status: 'WAITING_FOR_REVIEW', loopId: loopState.loopId, round: loopState.round,
-      reason: 'the PR HEAD kept changing during the review; let it settle, then call reviewloop_review again',
-      telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
-    };
-  }
-
   // ---- result shaping ------------------------------------------------
   function passResult(loopState, review, telemetry) {
     return {

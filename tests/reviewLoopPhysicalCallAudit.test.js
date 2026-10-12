@@ -1,16 +1,14 @@
 // P2 — the physicalCalls audit trail must be crash/resume durable. Every
 // physical Reviewer/Supervisor attempt already settles its full accounting
 // record durably BEFORE meteredCall() returns (reviewSpend.js); this
-// reconstructs the controller's audit trail from that existing durable spend
-// log rather than the process-local `physicalCalls` array alone, so a chunk
-// reviewed by an earlier (crashed) process is not silently dropped from the
-// final audit.
+// reconstructs the durable physical-call record from existing spend logs,
+// even when an earlier process has already reviewed a diff chunk.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { reconstructPhysicalCalls } from '../src/reviewloop/reviewSpend.js';
-import { MemoryPersistence, mockPrBackend, prTestFakes } from './helpers/reviewLoopHarness.js';
+import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 function bigDiff() {
   const file = (n) => [
@@ -23,7 +21,7 @@ function bigDiff() {
   return [file(0), file(1)].join('\n');
 }
 
-test('chunk 0 dispatched pre-crash -> resume never re-dispatches it, and the final audit still carries its full physical-call identity', async () => {
+test('chunk 0 dispatched pre-crash -> resume never re-dispatches it, and its physical-call identity remains durable', async () => {
   const persistence = new MemoryPersistence();
   let failChunk1 = true;
   const callsByChunk = {};
@@ -158,55 +156,6 @@ test('a failed attempt followed by a succeeding failover attempt both survive in
   assert.equal(calls[1].family, 'agy:sonnet');
   assert.equal(calls[1].outcome, 'SUCCESS');
   assert.deepEqual(calls[1].usage, { input_tokens: 2, output_tokens: 1 });
-});
-
-test('PR mode: the durable audit record after a crash/resume PASS still carries chunk 0\'s physical-call identity', async () => {
-  const persistence = new MemoryPersistence();
-  const backend = mockPrBackend({ heads: ['H1'] });
-  let failChunk1 = true;
-
-  function build() {
-    return createReviewLoopController({
-      persistence,
-      prBackend: backend,
-      ...prTestFakes(backend),
-      env: { REVIEWLOOP_MAX_REVIEW_DIFF_CHARS: '700', REVIEWLOOP_MAX_REVIEW_CHUNKS: '12' },
-      collectPrDeltaFn: async ({ headSha, mergeBase }) => ({
-        baselineHead: mergeBase, baseSha: mergeBase, mergeBase,
-        currentHead: headSha, reviewedHeadSha: headSha,
-        fingerprint: 'PR_DELTA_FP', diff: bigDiff(), changedFiles: ['file0.js', 'file1.js'],
-        evidenceComplete: true, incompleteReasons: [], noWorkerChangeYet: false,
-      }),
-      discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
-      runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'GATE_FP', failureIdentities: [], results: [] }),
-      reviewerFn: async ({ chunk }) => {
-        if (chunk.index === 1 && failChunk1) {
-          throw Object.assign(new Error('provider blip'), { code: 'PROVIDER_UNAVAILABLE' });
-        }
-        return {
-          value: { findings: [] },
-          usage: { input_tokens: 5, output_tokens: 1 },
-          model: `pr-model-chunk-${chunk.index}`,
-        };
-      },
-    });
-  }
-
-  const { loopId } = await build().begin({ goal: 'g', cwd: '/r', prNumber: 9 });
-  const r1 = await build().review({ loopId });
-  assert.equal(r1.status, 'HUMAN_REQUIRED');
-  failChunk1 = false;
-  const r2 = await build().review({ loopId });
-  assert.equal(r2.status, 'PASS');
-
-  const state = await persistence.readWorkflowState(loopId);
-  const lastAudit = state.reviewLoop.audit.at(-1);
-  const pcs = lastAudit.review.physicalCalls;
-  const chunk0 = pcs.find((p) => p.chunkIndex === 0);
-  assert.ok(chunk0, `chunk 0 must survive into the durable PR audit record; got ${JSON.stringify(pcs)}`);
-  assert.equal(chunk0.resolvedModel, 'pr-model-chunk-0');
-  assert.equal(chunk0.outcome, 'SUCCESS');
-  assert.deepEqual(chunk0.usage, { input_tokens: 5, output_tokens: 1 });
 });
 
 test('a genuine authorization-before-dispatch denial never fabricates a physical call', async () => {

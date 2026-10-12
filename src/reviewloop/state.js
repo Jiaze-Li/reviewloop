@@ -85,7 +85,6 @@ export function initialLoopState(objective) {
     supervisorCalls: 0,
     // deterministic no-new-information tracking
     lastReviewedFingerprint: null,
-    lastReviewedPrHead: null,
     lastGateFingerprint: null,
     // convergence tracking
     // gateRound is the total Reviewer rounds in this gate; epochReviewRound is
@@ -106,9 +105,6 @@ export function initialLoopState(objective) {
     // Set true only when the full automatic convergence strategy is exhausted
     // or the Supervisor explicitly recommends human involvement.
     budgetExhausted: false,
-    // Durable per-round audit trail. One entry per PR review round,
-    // recoverable and tamper-evident. See controller.js `appendAuditRecord`.
-    audit: [],
     lastReview: null, // compact normalized review
     lastSupervisorGuidance: null,
     history: [],

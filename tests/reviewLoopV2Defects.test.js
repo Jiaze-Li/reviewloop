@@ -1,5 +1,4 @@
-// V2 PR-mode correctness/liveness defect regressions + this round's fresh Codex
-// review findings. Deterministic; zero real provider calls, zero network.
+// LOCAL correctness/liveness regression tests. Zero real provider calls.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,17 +6,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import { createGithubReviewBackend } from '../src/reviewloop/githubBackend.js';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
-import { MemoryPersistence, prTestFakes } from './helpers/reviewLoopHarness.js';
+import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 import { terminateProcessTree } from '../src/orchestrator/processTree.js';
 import { runGate, GATE_VERDICTS } from '../src/reviewloop/gatePolicy.js';
 import { checkMcpServerBinding } from '../scripts/doctor.js';
 import { installGlobal } from '../bin/install-plugin.js';
-
-const BOT = 'chatgpt-codex-connector[bot]';
-const HEAD = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const HEAD_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
 
 // ---------------------------------------------------------------------------
@@ -115,32 +109,24 @@ test('terminateProcessTree resolves done() even if the process group never repor
 // ---------------------------------------------------------------------------
 // Round-2 Codex findings on this change.
 // ---------------------------------------------------------------------------
-test('a transient failure to re-confirm the live PR HEAD before PASS fails closed (no stale PASS)', async () => {
-  let headCalls = 0;
-  const be = {
-    async resolveRepo() { return { nameWithOwner: 'o/r' }; },
-    async getPrHead() {
-      headCalls += 1;
-      // begin() + the round's initial HEAD read succeed; the pre-PASS RECHECK fails.
-      if (headCalls <= 2) return HEAD;
-      throw new Error('transient 502 from GitHub');
-    },
-    async getPrBaseSha() { return 'BASE'; },
-    async getPrDiff() { return 'diff --git a/f b/f\n@@ -1 +1 @@\n-a\n+b\n'; },
-    async getPrChangedFiles() { return ['f']; },
-  };
+// PR targets are retired and cannot be silently reinterpreted as LOCAL.
+test('retired PR begin fails before baseline/Gate/model work', async () => {
+  let baselines = 0;
   const controller = createReviewLoopController({
     persistence: new MemoryPersistence(),
-    prBackend: be,
-    ...prTestFakes(be),
-    discoverVerificationCommandsFn: () => ({ source: 'repo-config', commands: ['echo t'], manifestFingerprint: 'mf' }),
-    runGateFn: async () => ({ verdict: 'PASS', pass: true, results: [], fingerprint: 'g1', failureIdentities: [] }),
-    reviewerFn: async () => ({ value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 } }),
+    captureBaselineFn: async () => { baselines += 1; throw new Error('unexpected baseline'); },
   });
-  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', prNumber: 4 });
-  const r = await controller.review({ loopId });
-  assert.notEqual(r.status, 'PASS', 'a clean review is never accepted while the live HEAD cannot be confirmed');
-  assert.equal(r.status, 'HUMAN_REQUIRED');
+  await assert.rejects(() => controller.begin({ goal: 'g', cwd: '/r', prNumber: 5 }), /PR mode has been retired/);
+  assert.equal(baselines, 0);
+});
+
+test('retired persisted PR loop refuses review without changing its durable state', async () => {
+  const persistence = new MemoryPersistence();
+  const saved = { reviewLoop: { loopId: 'old-pr', state: 'READY_FOR_WORK', objective: { mode: 'PR' } } };
+  await persistence.writeWorkflowState('old-pr', saved);
+  const controller = createReviewLoopController({ persistence });
+  await assert.rejects(() => controller.review({ loopId: 'old-pr' }), /PR session retired/);
+  assert.deepEqual(await persistence.readWorkflowState('old-pr'), saved);
 });
 
 test('an ancient orphan .reclaim guard never permanently blocks lease acquisition', async () => {

@@ -39,7 +39,7 @@ async function listSessions() {
       const loop = state.reviewLoop;
       if (!loop) continue;
       found += 1;
-      console.log(`  ${loop.loopId}  ${loop.state}  round=${loop.round ?? 0}  reviewer=${loop.reviewerCalls ?? 0} supervisor=${loop.supervisorCalls ?? 0}`);
+      console.log(`  ${loop.loopId}  ${loop.state}  round=${loop.round ?? 0}  reviewer=${loop.reviewerCalls ?? 0} supervisor=${loop.supervisorCalls ?? 0}${loop.objective?.mode === 'PR' ? '  [RETIRED_PR]' : ''}`);
     } catch { /* skip */ }
   }
   if (!found) console.log('No ReviewLoop sessions found.');
@@ -147,6 +147,10 @@ async function resume(rest) {
     if (candidates.length > 1) {
       console.error(`${candidates.length} unfinished loops here; showing the newest. Others: ${candidates.slice(1).map((l) => l.loopId).join(', ')}`);
     }
+  }
+  if (loop.objective?.mode === 'PR') {
+    console.log(`Loop ${loop.loopId} is a retired PR review. Start a new review via claude-review-bot; the saved record remains unchanged.`);
+    return;
   }
   if (needsReopen(loop)) {
     console.log(`Loop ${loop.loopId} stopped with a spent budget; it needs a human decision first:`);

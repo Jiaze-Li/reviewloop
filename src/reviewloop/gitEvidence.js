@@ -163,11 +163,19 @@ function sha256(value) {
   return createHash('sha256').update(Buffer.isBuffer(value) ? value : String(value)).digest('hex');
 }
 
+// git's human-readable messages (e.g. "Binary files ... differ") are
+// translated by the user's locale. The evidence checks below match that English
+// text, so every git call is pinned to the C locale; otherwise a translated
+// message would silently skip the binary-delta check.
+const GIT_ENV = Object.freeze({ LC_ALL: 'C' });
+
 function runGit(args, cwd, spawn = nodeSpawn) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn('git', args, {
+        cwd, env: { ...process.env, ...GIT_ENV }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
     } catch (err) {
       resolve({ code: 127, stdout: '', stderr: String(err?.message ?? err) });
       return;
