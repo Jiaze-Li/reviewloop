@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:30:46.650Z",
+  "updatedAt": "2026-10-12T06:31:43.803Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
@@ -8,7 +8,7 @@
     "task": "Development branch: refactor/controller-spend-event-isolation-20261012",
     "started": "2026-10-12T14:28:09+08:00",
     "status": "In progress",
-    "current": "test: expose final-gate failure diagnostics for reduced diff regression",
+    "current": "fix: preserve final diff chunk validation import after reviewer extraction",
     "next": "",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-10-12T14:30:34+08:00",
         "text": "test: reproduce cross-loop concurrent safety-event isolation"
+      },
+      {
+        "at": "2026-10-12T14:31:35+08:00",
+        "text": "test: expose final-gate failure diagnostics for reduced diff regression"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "refactor/controller-spend-event-isolation-20261012",
         "timestamp": "2026-10-12T14:30:34+08:00",
         "message": "test: expose final-gate failure diagnostics for reduced diff regression"
+      },
+      {
+        "sha": "d309eeea9e1c0aa163da26c07c7f6b16932bcc27",
+        "branch": "refactor/controller-spend-event-isolation-20261012",
+        "timestamp": "2026-10-12T14:31:35+08:00",
+        "message": "fix: preserve final diff chunk validation import after reviewer extraction"
       }
     ],
     "pr": {
