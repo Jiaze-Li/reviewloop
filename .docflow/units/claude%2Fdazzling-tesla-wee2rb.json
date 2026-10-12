@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T01:44:41.505Z",
+  "updatedAt": "2026-10-12T01:48:05.663Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "Completed",
-    "current": "Update lockfile to clear npm audit findings",
+    "current": "Make RoleRouter tests independent of the host's quota ledger",
     "next": "",
     "history": [
       {
@@ -66,6 +66,10 @@
       {
         "at": "2026-10-12T01:44:30Z",
         "text": "Remove the @claude write-access GitHub workflow"
+      },
+      {
+        "at": "2026-10-12T01:47:54Z",
+        "text": "Update lockfile to clear npm audit findings"
       }
     ],
     "commits": [
@@ -158,6 +162,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-12T01:44:30Z",
         "message": "Update lockfile to clear npm audit findings"
+      },
+      {
+        "sha": "044d0dc23ec7b7a86a3f1588817926338ebd57ef",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-12T01:47:54Z",
+        "message": "Make RoleRouter tests independent of the host's quota ledger"
       }
     ],
     "pr": {
