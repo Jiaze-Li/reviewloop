@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T01:48:05.663Z",
+  "updatedAt": "2026-10-12T01:48:14.006Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
     "title": "claude/dazzling-tesla-wee2rb",
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
-    "status": "Completed",
+    "status": "In progress",
     "current": "Make RoleRouter tests independent of the host's quota ledger",
     "next": "",
     "history": [
@@ -171,16 +171,26 @@
       }
     ],
     "pr": {
-      "number": 18,
-      "state": "closed",
-      "title": "refactor: retire ReviewLoop PR engine and keep LOCAL review only",
-      "url": "https://github.com/Jiaze-Li/reviewloop/pull/18",
-      "merged": true,
-      "mergedAt": "2026-10-12T01:38:51Z",
-      "closedAt": "2026-10-12T01:38:51Z",
-      "updatedAt": "2026-10-12T01:38:51Z"
+      "number": 19,
+      "state": "open",
+      "title": "chore: clear npm audit findings and make routing tests hermetic",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/19",
+      "merged": false,
+      "updatedAt": "2026-10-12T01:48:03Z"
     },
-    "completed": "2026-10-12T01:38:51Z",
-    "outcome": "Merged"
+    "completed": null,
+    "outcome": null,
+    "prs": [
+      {
+        "number": 18,
+        "state": "closed",
+        "title": "refactor: retire ReviewLoop PR engine and keep LOCAL review only",
+        "url": "https://github.com/Jiaze-Li/reviewloop/pull/18",
+        "merged": true,
+        "mergedAt": "2026-10-12T01:38:51Z",
+        "closedAt": "2026-10-12T01:38:51Z",
+        "updatedAt": "2026-10-12T01:38:51Z"
+      }
+    ]
   }
 }
