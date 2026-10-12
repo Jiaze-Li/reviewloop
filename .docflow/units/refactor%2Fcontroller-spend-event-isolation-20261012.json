@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:28:27.981Z",
+  "updatedAt": "2026-10-12T06:28:33.660Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
@@ -8,7 +8,7 @@
     "task": "Development branch: refactor/controller-spend-event-isolation-20261012",
     "started": "2026-10-12T14:28:09+08:00",
     "status": "In progress",
-    "current": "refactor: extract frozen begin, reviewer runner and pure token accounting",
+    "current": "test: reproduce cross-loop concurrent safety-event isolation",
     "next": "",
     "history": [
       {
@@ -25,6 +25,10 @@
       },
       {
         "at": "2026-10-12T14:28:19+08:00",
+        "text": "refactor: extract frozen begin, reviewer runner and pure token accounting"
+      },
+      {
+        "at": "2026-10-12T14:28:22+08:00",
         "text": "refactor: extract frozen begin, reviewer runner and pure token accounting"
       }
     ],
@@ -58,6 +62,12 @@
         "branch": "refactor/controller-spend-event-isolation-20261012",
         "timestamp": "2026-10-12T14:28:19+08:00",
         "message": "refactor: extract frozen begin, reviewer runner and pure token accounting"
+      },
+      {
+        "sha": "70e9ea5634cf48d606eb2c420265106c9a0e6fe5",
+        "branch": "refactor/controller-spend-event-isolation-20261012",
+        "timestamp": "2026-10-12T14:28:22+08:00",
+        "message": "test: reproduce cross-loop concurrent safety-event isolation"
       }
     ],
     "pr": null,
