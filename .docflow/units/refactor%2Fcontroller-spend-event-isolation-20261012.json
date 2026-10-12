@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:31:43.803Z",
+  "updatedAt": "2026-10-12T06:31:47.275Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
@@ -96,7 +96,7 @@
       "title": "refactor: isolate ReviewLoop controller workflows and per-review safety events",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/20",
       "merged": false,
-      "updatedAt": "2026-10-12T06:30:35Z"
+      "updatedAt": "2026-10-12T06:31:36Z"
     },
     "completed": null,
     "outcome": null
