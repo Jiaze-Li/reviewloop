@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T00:47:52.029Z",
+  "updatedAt": "2026-10-12T01:32:56.265Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "Run git in the C locale so the binary-delta check cannot be skipped",
+    "current": "Drop stale PR wording from two comments",
     "next": "",
     "history": [
       {
@@ -54,6 +54,10 @@
       {
         "at": "2026-10-12T00:47:37Z",
         "text": "fix: complete PR bot handoff and remove retired GitHub diagnostic"
+      },
+      {
+        "at": "2026-10-12T01:32:47Z",
+        "text": "Run git in the C locale so the binary-delta check cannot be skipped"
       }
     ],
     "commits": [
@@ -128,6 +132,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-12T00:47:37Z",
         "message": "Run git in the C locale so the binary-delta check cannot be skipped"
+      },
+      {
+        "sha": "b4a208ca1ddf470a61f4a2a505d3890b1922a22a",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-12T01:32:47Z",
+        "message": "Drop stale PR wording from two comments"
       }
     ],
     "pr": {
