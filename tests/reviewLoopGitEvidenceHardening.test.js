@@ -836,3 +836,29 @@ test('P1 regression: parent directory swapped strictly between the pre-open chec
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('git is run in the C locale so the binary-delta check cannot be skipped by a translated message', async () => {
+  const dir = initRepo();
+  const previous = process.env.LC_ALL;
+  process.env.LC_ALL = 'zh_CN.UTF-8';
+  const seenLocales = [];
+  const spawn = (cmd, args, opts) => {
+    seenLocales.push(opts?.env?.LC_ALL);
+    return nodeSpawn(cmd, args, opts);
+  };
+  try {
+    fs.writeFileSync(path.join(dir, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0]));
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-qm', 'add blob'], { cwd: dir });
+    const baseline = await captureBaseline({ cwd: dir, spawn });
+    fs.writeFileSync(path.join(dir, 'blob.bin'), Buffer.from([0, 9, 9, 9, 0]));
+    const delta = await collectWorkerDelta({ cwd: dir, baseline, spawn });
+    assert.equal(delta.evidenceComplete, false, 'a changed binary blob must fail the evidence closed');
+    assert.ok(delta.incompleteReasons.some((r) => /binary file/.test(r)));
+    assert.ok(seenLocales.length > 0);
+    assert.ok(seenLocales.every((l) => l === 'C'), `every git call must run with LC_ALL=C, saw ${[...new Set(seenLocales)]}`);
+  } finally {
+    if (previous === undefined) delete process.env.LC_ALL; else process.env.LC_ALL = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
