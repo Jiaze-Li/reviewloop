@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-11T16:04:42.691Z",
+  "updatedAt": "2026-10-12T00:47:47.725Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
     "status": "In progress",
-    "current": "fix: complete PR bot handoff and remove retired GitHub diagnostic",
+    "current": "Run git in the C locale so the binary-delta check cannot be skipped",
     "next": "",
     "history": [
       {
@@ -50,6 +50,10 @@
       {
         "at": "2026-10-12T00:04:29+08:00",
         "text": "fix: restore executable ReviewLoop CLI"
+      },
+      {
+        "at": "2026-10-12T00:47:37Z",
+        "text": "fix: complete PR bot handoff and remove retired GitHub diagnostic"
       }
     ],
     "commits": [
@@ -118,6 +122,12 @@
         "branch": "claude/dazzling-tesla-wee2rb",
         "timestamp": "2026-10-12T00:04:29+08:00",
         "message": "fix: complete PR bot handoff and remove retired GitHub diagnostic"
+      },
+      {
+        "sha": "ca120579c0297332088ab5c4a295b0de31797d82",
+        "branch": "claude/dazzling-tesla-wee2rb",
+        "timestamp": "2026-10-12T00:47:37Z",
+        "message": "Run git in the C locale so the binary-delta check cannot be skipped"
       }
     ],
     "pr": {
