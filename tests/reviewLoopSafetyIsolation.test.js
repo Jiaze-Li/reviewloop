@@ -61,3 +61,50 @@ test('NO_PROGRESS after a spending round still reports cumulative durable spend'
   assert.equal(r2.telemetry.reviewerCalls, 1, 'cumulative spend is not reset to zero on a terminal / no-progress re-call');
   assert.equal(r2.telemetry.workerUsage, 'external / not observable by ReviewLoop');
 });
+
+// Cross-loop concurrency: one controller handles independent loopIds in parallel.
+// A blocking safety event in loop A must not contaminate loop B's PASS response.
+test('parallel distinct loopIds keep safety event results isolated', async () => {
+  const persistence = new MemoryPersistence();
+  let driftA = false;
+  let markBEntered;
+  const bEntered = new Promise((resolve) => { markBEntered = resolve; });
+  let releaseB;
+  const bMayFinish = new Promise((resolve) => { releaseB = resolve; });
+  const controller = createReviewLoopController({
+    persistence,
+    captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async ({ cwd }) => ({
+      baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true,
+      noWorkerChangeYet: false, changedFiles: ['work.js'],
+      fingerprint: `change-${cwd}`, diff: `+work in ${cwd}`,
+    }),
+    discoverVerificationCommandsFn: ({ cwd }) => ({
+      source: 'mechanical', commands: ['node --version'],
+      manifestFingerprint: cwd === '/a' && driftA ? 'unexpected-change' : 'frozen',
+    }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'gate', failureIdentities: [], results: [] }),
+    reviewerFn: async () => {
+      markBEntered();
+      await bMayFinish;
+      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 } };
+    },
+  });
+
+  const a = await controller.begin({ goal: 'a', cwd: '/a' });
+  const b = await controller.begin({ goal: 'b', cwd: '/b' });
+  const pendingB = controller.review({ loopId: b.loopId });
+  await bEntered; // Loop B is suspended within the paid Reviewer invocation.
+  driftA = true;
+  let aResult;
+  try {
+    aResult = await controller.review({ loopId: a.loopId });
+  } finally {
+    releaseB();
+  }
+  const bResult = await pendingB;
+  assert.equal(aResult.status, 'REWORK');
+  assert.ok(aResult.safetyEvents.some((e) => e.code === 'VERIFICATION_PLAN_DRIFT'));
+  assert.equal(bResult.status, 'PASS');
+  assert.deepEqual(bResult.safetyEvents, [], 'no safety event from loop A leaks into loop B');
+});
