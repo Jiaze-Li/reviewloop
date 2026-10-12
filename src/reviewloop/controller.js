@@ -2,22 +2,21 @@
 // a frozen local baseline, runs the Gate, then Reviewer / Supervisor as needed.
 // GitHub PR review is owned by claude-review-bot.
 
-import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createBeginTask } from './taskBegin.js';
+import { createReviewerRunner } from './reviewerRunner.js';
 import { Persistence } from '../orchestrator/persistence.js';
 import { isAuthorizationFailure } from '../orchestrator/errors.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
 import {
-  createReviewObjective,
   normalizePhasePlan,
   assertResumeTaskDefinitionBound,
   rehydrateObjective,
   assertObjectiveNotWeakened,
   baselineGateEvidenceIdentity,
-  REVIEW_MODES,
 } from './objective.js';
 import {
   REVIEW_LOOP_STATES,
-  initialLoopState,
   recordTransition,
   ReviewLoopStore,
   assertNotLegacyWorkflow,
@@ -27,7 +26,6 @@ import { captureBaseline, collectWorkerDelta } from './gitEvidence.js';
 import { withInProcessLoopLock, acquireLoopFileLease } from './loopLease.js';
 import { discoverVerificationCommands, runGate, GATE_VERDICTS } from './gatePolicy.js';
 import {
-  normalizeReview,
   decideConvergence,
   compactReworkPayload,
   reviewFingerprint,
@@ -47,7 +45,6 @@ import {
   logicalEvidenceFingerprint,
   normalizeSupervisorStrategyText,
   migrateConvergenceState,
-  phasesOf,
   currentReviewScope,
   scopeBoundFingerprint,
   phaseCompletionEvidenceHash,
@@ -58,9 +55,8 @@ import {
   reviewGateCount,
   mergeScopedGateCommands,
 } from './phaseState.js';
-import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
+import { reviewDiffBudget } from './diffChunker.js';
 import {
-  assertContractHandoff,
   EvidenceValidationError,
   normalizeContractText,
   normalizeEvidenceRequirements,
@@ -85,14 +81,6 @@ class LeaseLostError extends Error {
     this.name = 'LeaseLostError';
     this.code = 'REVIEWLOOP_LEASE_LOST';
   }
-}
-
-function compactBaselineSummary(baseline) {
-  return {
-    head: baseline.head,
-    dirtyFileCount: baseline.dirtyFiles?.length ?? 0,
-    evidenceComplete: baseline.evidenceComplete !== false,
-  };
 }
 
 function requireProvider(name) {
@@ -165,9 +153,12 @@ export function createReviewLoopController({
   // leaks one loop's safety events into another loop's result, and never grows
   // unbounded. Durable cumulative spend still comes from spend.telemetry(),
   // which reads the durable per-loop ledger.
-  let safetyEvents = [];
+  // An MCP process handles multiple loopIds. Keep returned safety events scoped to
+  // the asynchronous invocation, not to the shared long-lived controller.
+  const safetyEventScope = new AsyncLocalStorage();
+  const safetyEventsForReview = () => safetyEventScope.getStore() ?? [];
   const collectSafetyEvent = (e) => {
-    safetyEvents.push(e);
+    safetyEventScope.getStore()?.push(e);
     recordSafetyEvent?.(e);
   };
 
@@ -207,7 +198,7 @@ export function createReviewLoopController({
       ...(receipt ? { evidenceSubmission: receipt } : {}),
       nextAction: 'Correct or produce the evidence for this gate, then call reviewloop_review again in this same loop. Submit concise factual summaries and artifact references, not raw logs.',
       telemetry: await durableTelemetry(loopState.loopId),
-      safetyEvents,
+      safetyEvents: safetyEventsForReview(),
     };
   }
 
@@ -255,204 +246,9 @@ export function createReviewLoopController({
     }
   }
 
-  async function begin({
-    goal, cwd, prNumber = null, reviewer = null,
-    verificationCommands = null, blockingSeverities, maxReviewRounds,
-    constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
-  } = {}) {
-    if (prNumber != null) throw new Error('reviewloop_begin: PR mode has been retired; use claude-review-bot for GitHub PR review.');
-    if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
-    if (!cwd) throw new Error('reviewloop_begin: cwd is required');
-    const frozenContractText = assertContractHandoff({
-      goal, contractText, constraints, phases, evidenceRequirements,
-    });
-    // Validate bounded structured phase metadata before baseline/Gate work.
-    // createReviewObjective normalizes again when freezing the objective; this
-    // early pass is deliberately side-effect free and prevents invalid
-    // verificationEvidence from spending repository work first.
-    const preflightPhases = normalizePhasePlan(phases);
-    const preflightEvidenceRequirements = normalizeEvidenceRequirements(
-      evidenceRequirements,
-      preflightPhases.map((phase) => phase.id),
-    );
-    // Verification commands are also copied into resumePacket. The configured
-    // commands are the only part known before repository discovery; validate
-    // the full discovered plan again immediately after discovery below.
-    assertResumeTaskDefinitionBound({
-      goal,
-      constraints,
-      phases: preflightPhases,
-      contractText: frozenContractText,
-      verificationPlan: verificationCommands == null ? null : {
-        source: 'configured-preflight',
-        commands: Array.isArray(verificationCommands) ? verificationCommands.map(String) : [String(verificationCommands)],
-      },
-      evidenceRequirements: preflightEvidenceRequirements,
-    });
-    if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline was captured');
-    const loopId = `rl-${new Date(clock()).toISOString().replace(/[^0-9]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`;
-    const mode = REVIEW_MODES.LOCAL;
-
-    let baseline = null;
-    const repository = { root: cwd, name: null, url: null };
-    let baselineGate = null;
-    let verificationPlan = null;
-
-    // The frozen verification plan is discovered the same way for every
-    // target, but from an explicit `discoverCwd` — LOCAL freezes from the
-    // ambient cwd (there is no other snapshot); PR freezes from inside the
-    // exact-HEAD disposable worktree so the ambient cwd's own branch/config
-    // (which may differ from the PR entirely) can never leak into the frozen
-    // PR Gate plan.
-    const freezeVerificationPlan = (discoverCwd) => {
-      const discovered = discoverVerificationCommandsFn({ cwd: discoverCwd, configured: verificationCommands });
-      const plan = {
-        source: String(discovered.source ?? 'unknown'),
-        commands: (discovered.commands ?? []).map(String),
-        manifestFingerprint: discovered.manifestFingerprint
-          ?? sha256Hex(`fallback::${JSON.stringify(discovered.commands ?? [])}`),
-        frozenAt: new Date(clock()).toISOString(),
-      };
-      assertResumeTaskDefinitionBound({
-        goal,
-        constraints,
-        phases: preflightPhases,
-        contractText: frozenContractText,
-        verificationPlan: plan,
-        evidenceRequirements: preflightEvidenceRequirements,
-      });
-      return plan;
-    };
-
-    baseline = await captureBaselineFn({ cwd });
-
-    // Freeze the verification plan NOW. reviewloop_review always runs these
-    // exact commands; a later edit to .reviewloop.json / package.json's test
-    // script cannot weaken the Gate.
-    verificationPlan = freezeVerificationPlan(cwd);
-
-    // B8 — baseline Gate evidence, 0 model tokens, over the FROZEN plan. Only
-    // when trusted/discoverable verification exists; a failure to run it is
-    // recorded as incomplete coverage, never faked as PASS.
-    if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline Gate ran');
-    let baselineGateRan = false;
-    try {
-      if (verificationPlan.source !== 'mechanical' && verificationPlan.commands.length) {
-        const g = await runGateFn({
-          cwd, commands: verificationPlan.commands, runner: gateRunner, env, signal,
-        });
-        baselineGateRan = true;
-        baselineGate = {
-          evidence: g.evidence ?? { results: g.results ?? [], pass: g.pass },
-          pass: g.pass,
-          capturedAt: new Date().toISOString(),
-          source: verificationPlan.source,
-        };
-      }
-    } catch (err) {
-      // A caller cancellation is NOT "incomplete Gate coverage" — it aborts
-      // reviewloop_begin so no loop is registered for an abandoned request.
-      if (signal?.aborted) {
-        throw new Error(`reviewloop_begin: cancelled by the caller during the baseline Gate (${String(err?.message ?? err)})`);
-      }
-      baselineGate = { coverage: 'INCOMPLETE', reason: String(err?.message ?? err) };
-    }
-    if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller after the baseline Gate ran');
-    // The baseline Gate may itself mutate tracked files (a snapshot test, a
-    // codegen/format check). Re-capture the baseline AFTER it runs so those
-    // Gate-caused edits are part of the baseline and are never later
-    // attributed to the Worker's delta. If this recapture FAILS we must NOT
-    // fall back to the pre-Gate baseline — that reintroduces the exact
-    // misattribution the recapture prevents. Abort reviewloop_begin instead.
-    if (baselineGateRan) {
-      try {
-        baseline = await captureBaselineFn({ cwd });
-      } catch (err) {
-        throw new Error(
-          `reviewloop_begin: the baseline Gate ran but the post-Gate baseline could not be re-captured (${err?.message ?? err}); `
-          + 'refusing to start a loop whose baseline would misattribute the Gate\'s own edits to the Worker',
-        );
-      }
-    }
-
-    // REVIEWLOOP_MAX_REVIEW_ROUNDS is a public tuning knob: an explicit begin
-    // argument wins, otherwise the env value feeds the frozen objective (which
-    // is the value decideConvergence() actually enforces), otherwise the
-    // objective default. Never left resolved-but-ignored.
-    const envMaxRounds = Number(env?.REVIEWLOOP_MAX_REVIEW_ROUNDS);
-    const resolvedMaxRounds = Number.isInteger(maxReviewRounds) && maxReviewRounds > 0
-      ? maxReviewRounds
-      : (Number.isInteger(envMaxRounds) && envMaxRounds > 0 ? envMaxRounds : undefined);
-
-    const objective = createReviewObjective({
-      loopId, goal, repository, mode, reviewer, baseline,
-      constraints, phases, contractText: frozenContractText, evidenceRequirements,
-      blockingSeverities, maxReviewRounds: resolvedMaxRounds,
-      verificationPlan,
-      baselineGateEvidence: baselineGate,
-    });
-
-    // Zero-model plan check. Advisory only: a docs-only task legitimately has
-    // nothing to run, but a phase that only a model can judge is costly and weak.
-    const planWarnings = [];
-    if (!(verificationPlan?.commands?.length)) {
-      for (const phase of preflightPhases) {
-        if (!phase.verificationCommands?.length && !phase.verificationEvidence?.length) {
-          planWarnings.push(`phase ${phase.id} has no verification commands or evidence and no global verification commands are frozen; only the Reviewer can judge it`);
-        }
-      }
-    }
-    // Phases registered without the user's contract: the Reviewer would judge
-    // from the goal and phase bullets only, never seeing the acceptance criteria,
-    // allowed/forbidden changes or evidence rules that live in the contract.
-    if (preflightPhases.length && !frozenContractText) {
-      planWarnings.push(
-        'phases were registered without contractText: the Reviewer will not see the full acceptance criteria and constraints. '
-        + 'Pass the user\'s contract verbatim as contractText and call reviewloop_begin again BEFORE editing.',
-      );
-    }
-    // LOCAL attribution check, while it is still free to fix: files untracked at
-    // begin make every brand-new Worker file unattributable (D25), so the first
-    // review would stop at HUMAN_REQUIRED and the loop could not be recovered.
-    if (baseline) {
-      const untracked = Object.keys(baseline.untrackedHashes ?? {});
-      if (untracked.length) {
-        const shown = untracked.slice(0, 5).join(', ');
-        planWarnings.push(
-          `${untracked.length} untracked file(s) at begin (${shown}${untracked.length > 5 ? ', …' : ''}): `
-          + 'any new file you create will make review stop at HUMAN_REQUIRED. '
-          + 'Commit, delete or .gitignore them (or git stash -u), then call reviewloop_begin again BEFORE editing.',
-        );
-      }
-      if (baseline.evidenceComplete === false) {
-        planWarnings.push(
-          `baseline attribution is already incomplete (${(baseline.incompleteReasons ?? []).slice(0, 2).join('; ')}); `
-          + 'fix the working tree and call reviewloop_begin again BEFORE editing.',
-        );
-      }
-    }
-    if (preflightPhases.length > 8) {
-      planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
-    }
-
-    const loopState = initialLoopState(objective);
-    loopState.verificationCommands = verificationCommands ?? null;
-    loopState.baselineGateEvidence = baselineGate;
-    await store.save(loopId, loopState);
-    onEvent?.({ type: 'REVIEWLOOP_BEGIN', loopId, mode });
-
-    return {
-      loopId,
-      mode,
-      status: 'READY',
-      baseline: baseline ? compactBaselineSummary(baseline) : null,
-      reviewer: objective.reviewer,
-      phaseCount: phasesOf(objective).length,
-      currentPhase: currentReviewScope(loopState, objective).id,
-      objectiveFingerprint: objective.fingerprint,
-      ...(planWarnings.length ? { planWarnings } : {}),
-    };
-  }
+  const begin = createBeginTask({
+    clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent,
+  });
 
   async function loadLoop(loopId) {
     const raw = await store.load(loopId);
@@ -569,7 +365,7 @@ export function createReviewLoopController({
         ? 'All implementation phases passed. Do not report task completion yet; call reviewloop_review again for the final whole-task gate.'
         : `Continue with ${nextScope.id}${nextScope.title ? ` (${nextScope.title}` + ')' : ''}; when that phase is ready, call reviewloop_review again. Do not start a new ReviewLoop.`,
       telemetry: telemetry ?? emptyTelemetry(),
-      safetyEvents,
+      safetyEvents: safetyEventsForReview(),
     };
   }
 
@@ -579,13 +375,12 @@ export function createReviewLoopController({
     // calls run one after another (the second then hits the deterministic
     // NO_PROGRESS guard — one dispatch, no lost update). Cross-process: a live
     // foreign holder makes this call return BUSY without touching any state.
-    return withInProcessLoopLock(loopId, async () => {
+    return safetyEventScope.run([], () => withInProcessLoopLock(loopId, async () => {
       const lease = await acquireLoopFileLease({ runtimeRoot: fileLeaseRoot, loopId });
       if (!lease.ok) {
         // Another reviewloop_review is already running for this loop (another
         // process). Report the in-contract "call again later" state — never run
         // a concurrent Reviewer or clobber the in-flight call's durable state.
-        safetyEvents = [];
         // BUSY is a strictly READ-ONLY outcome: another process owns this loop
         // and is the one entitled to reconcile/settle its reservations. This
         // path must not call durableTelemetry() (it runs reconcileOnResume and
@@ -611,8 +406,7 @@ export function createReviewLoopController({
           // The lease was reclaimed by another owner while this call ran. We
           // stopped before any further paid dispatch or durable write. Return a
           // strictly read-only result — the new owner reconciles state.
-          safetyEvents = [];
-          return {
+            return {
             status: 'WAITING_FOR_REVIEW',
             loopId,
             reason: `${err.message}; wait for the current owner to finish, then call reviewloop_review again`,
@@ -626,12 +420,11 @@ export function createReviewLoopController({
         activeLeaseGuards.delete(loopId);
         await lease.release();
       }
-    });
+    }));
   }
 
   async function reviewInner({ loopId, evidence, signal }) {
     // Per-invocation safety-event isolation: start this call with a clean list.
-    safetyEvents = [];
     const loopState = await loadLoop(loopId);
     const objective = loopState.objective;
 
@@ -682,274 +475,9 @@ export function createReviewLoopController({
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
-  async function runReviewerOverEvidence({
-    spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective),
-    evidenceBundle = null, evidenceProofFingerprint = '', signal,
-  }) {
-    // Every PHYSICAL Reviewer attempt for this call — one entry per failover
-    // retry AND per chunk, success or failure. Never collapsed into a single
-    // abstract "internal" — the durable PR audit (appendAuditRecord) needs to
-    // answer "which physical model reviewed this SHA", including every
-    // attempt a failover/chunking round made along the way.
-    const physicalCalls = [];
-    // Crash/resume durability: reconcile the in-memory `physicalCalls` built
-    // by THIS process against the durable spend log for the round actually
-    // being reviewed. The durable log is a strict superset whenever it has
-    // anything at all — every physical attempt (this process's or an earlier,
-    // crashed one's) settles its accounting record durably BEFORE meteredCall
-    // returns (reviewSpend.js), tagged with the same round/chunkIndex/attempt
-    // identity. A chunk served from `loopState.chunkReviewCheckpoint` (a
-    // prior, possibly crashed, process reviewed it) has NOTHING in this
-    // process's `physicalCalls` array, so without this reconciliation its
-    // physical attempts would silently vanish from the durable audit record.
-    // Falls back to the in-memory list on a durable-read failure or an empty
-    // result (e.g. a persistence-less unit test) — never throws the review
-    // closed over an audit-trail nicety.
-    const withDurablePhysicalCalls = async (inMemory) => {
-      try {
-        const durable = await reconstructPhysicalCalls({
-          persistence, loopId: loopState.loopId, role: 'reviewer', round: loopState.round,
-        });
-        return durable.length ? durable : inMemory;
-      } catch { return inMemory; }
-    };
-    // Global round + gateRound are bound to the LOGICAL review state
-    // (delta + gate fingerprint + review-scope fingerprint),
-    // NOT to how many times reviewloop_review was invoked. A crash/resume that
-    // re-enters with the SAME logical review state — its durable per-chunk
-    // checkpoint is still on record — reuses the round it already assigned and
-    // never consumes another of the objective's max review rounds.
-    const { chunks, oversized, reason } = chunkDiffForReview(delta.diff, { env });
-    if (oversized) {
-      return {
-        review: {
-          status: 'FAILED', reviewer: 'internal', provider: 'internal',
-          blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0,
-          findingSignatures: [], error: { reason: 'REVIEW_TOO_LARGE', message: reason }, physicalCalls,
-        },
-        chunkCount: chunks.length,
-      };
-    }
-
-    // The per-chunk checkpoint identity MUST cover the actual chunk layout, not
-    // just the (delta + gate) fingerprints. `chunkDiffForReview` depends on
-    // REVIEWLOOP_MAX_REVIEW_DIFF_CHARS; a crash/resume under a larger value
-    // re-chunks the same diff into different boundaries. Without the layout in
-    // that key, the stored result for old chunk 0 would be reused for the new,
-    // larger chunk 0 and its added portion never reviewed — yet aggregation
-    // could still return CLEAN/PASS. Any layout change now yields a new
-    // checkpoint key and a full re-review of every chunk.
-    //
-    // The ROUND, however, is bound to the LOGICAL review state alone — the
-    // (delta + gate) fingerprint pair — never to the chunk layout on top of
-    // it. A crash/resume under a different REVIEWLOOP_MAX_REVIEW_DIFF_CHARS
-    // re-chunks the SAME (delta + gate) state; that must invalidate the
-    // per-chunk results (a layout change) but must NOT consume another of the
-    // objective's max review rounds — the Reviewer has not been asked to
-    // reconsider new evidence, only re-chunked old evidence. `deltaGateKey` is
-    // tracked separately from the layout-inclusive `checkpointKey` so round
-    // reuse survives a re-chunk.
-    const reviewStateParts = evidenceProofFingerprint
-      ? [delta.fingerprint, gate.fingerprint, evidenceProofFingerprint]
-      : [delta.fingerprint, gate.fingerprint];
-    const deltaGateKey = scopeBoundFingerprint(reviewStateParts, reviewScope);
-    const chunkLayoutHash = sha256Hex(`${chunks.length}::${chunks.map((c) => c.hash).join('::')}`);
-    const checkpointKey = sha256Hex(`${deltaGateKey}::${chunkLayoutHash}`);
-    const resumeCheckpoint = loopState.chunkReviewCheckpoint;
-    if (resumeCheckpoint && resumeCheckpoint.deltaGateKey === deltaGateKey
-      && Number.isInteger(resumeCheckpoint.round)) {
-      loopState.round = resumeCheckpoint.round;
-      // Backward compatibility: persisted loops/checkpoints from before
-      // gate-local/epoch convergence existed fall back to their paid round
-      // counters instead of silently resetting allowance.
-      loopState.gateRound = Number.isInteger(resumeCheckpoint.gateRound)
-        ? resumeCheckpoint.gateRound
-        : (Number.isInteger(loopState.gateRound)
-          ? loopState.gateRound
-          : resumeCheckpoint.round);
-      loopState.convergenceEpoch = Number.isInteger(resumeCheckpoint.convergenceEpoch)
-        ? resumeCheckpoint.convergenceEpoch
-        : (Number.isInteger(loopState.convergenceEpoch) ? loopState.convergenceEpoch : 0);
-      loopState.epochReviewRound = Number.isInteger(resumeCheckpoint.epochReviewRound)
-        ? resumeCheckpoint.epochReviewRound
-        : (Number.isInteger(loopState.epochReviewRound)
-          ? loopState.epochReviewRound
-          : loopState.gateRound);
-    } else {
-      const priorGateRound = Number.isInteger(loopState.gateRound)
-        ? loopState.gateRound
-        : loopState.round;
-      const priorEpochRound = Number.isInteger(loopState.epochReviewRound)
-        ? loopState.epochReviewRound
-        : priorGateRound;
-      if (!Number.isInteger(loopState.convergenceEpoch)) loopState.convergenceEpoch = 0;
-      loopState.round += 1;
-      loopState.gateRound = priorGateRound + 1;
-      loopState.epochReviewRound = priorEpochRound + 1;
-    }
-
-    // Durable per-chunk checkpoint. Keyed to the exact review state INCLUDING
-    // chunk layout (`checkpointKey`); a changed diff OR a changed chunk layout
-    // invalidates the stored per-chunk results, so a re-chunked round always
-    // re-sends every chunk to the model under the new boundaries — but
-    // `deltaGateKey` alone (above) governs round assignment, so that re-chunk
-    // reuses this logical state's already-assigned round instead of consuming
-    // a fresh one.
-    let checkpoint = loopState.chunkReviewCheckpoint;
-    if (!checkpoint || checkpoint.key !== checkpointKey || checkpoint.chunkTotal !== chunks.length) {
-      checkpoint = {
-        key: checkpointKey,
-        deltaGateKey,
-        chunkTotal: chunks.length,
-        chunks: {},
-        round: loopState.round,
-        gateRound: loopState.gateRound,
-        convergenceEpoch: loopState.convergenceEpoch ?? 0,
-        epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
-        reviewScopeFingerprint: reviewScope.fingerprint,
-      };
-      loopState.chunkReviewCheckpoint = checkpoint;
-    } else if (!Number.isInteger(checkpoint.round)) {
-      checkpoint.round = loopState.round;
-    }
-
-    const perChunk = [];
-    for (const chunk of chunks) {
-      if (signal?.aborted) {
-        // The MCP client cancelled the review. Do NOT start another paid model
-        // dispatch — fail the review closed (never CLEAN/PASS on a cancel).
-        return {
-          review: {
-            status: 'FAILED', reviewer: 'internal', provider: 'internal',
-            blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0,
-            findingSignatures: [], error: { reason: 'REVIEW_CANCELLED', message: 'the review was cancelled by the caller' },
-            physicalCalls: await withDurablePhysicalCalls(physicalCalls),
-          },
-          chunkCount: chunks.length,
-        };
-      }
-      const done = checkpoint.chunks[chunk.index];
-      if (done) {
-        // Resume: this chunk was already reviewed in a prior (crashed) attempt.
-        if (done.status === 'FAILED') {
-          return {
-            review: { ...done, physicalCalls: await withDurablePhysicalCalls(physicalCalls) },
-            chunkCount: chunks.length,
-            failedChunk: chunk.index,
-          };
-        }
-        perChunk.push(done);
-        continue;
-      }
-      const chunkId = `${loopState.loopId}:round-${loopState.round}:chunk-${chunk.index}`;
-      // ONE composite logical review-state evidence per chunk: the diff chunk
-      // AND the gate fingerprint together. A single logical (diff + gate) state
-      // authorizes exactly ONE physical Reviewer dispatch SEQUENCE — bounded
-      // failover retries of that same operation reuse this one claim, and it is
-      // never re-earned by a re-call on identical evidence (crash/resume
-      // included). Multiple evidenceIds no longer multiply dispatch eligibility.
-      // eslint-disable-next-line no-await-in-loop
-      const reviewStateEvidence = await spend.registerEvidence({
-        kind: 'reviewstate',
-        taskId: chunkId,
-        diffHash: scopeBoundFingerprint(
-          evidenceProofFingerprint
-            ? [chunk.hash, gate.fingerprint, evidenceProofFingerprint]
-            : [chunk.hash, gate.fingerprint],
-          reviewScope,
-        ),
-      });
-      // eslint-disable-next-line no-await-in-loop
-      const raw = await meteredWithFailover({
-        spend,
-        role: 'reviewer',
-        routeFn: routeReviewerFn,
-        defaultFamily: 'agy:gpt-oss',
-        defaultProvider: 'agy',
-        operationId: chunkId,
-        workflowId: loopState.loopId,
-        evidenceIds: [reviewStateEvidence.evidenceId],
-        signal,
-        auditContext: { round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total },
-        onAttempt: (a) => physicalCalls.push({
-          role: 'reviewer', round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total,
-          attempt: a.attempt, family: a.family, provider: a.provider, quotaPools: a.quotaPools,
-          resolvedModel: null, usage: null, outcome: a.outcome, code: a.code,
-        }),
-        invoke: ({
-          selection, attempt, family, provider,
-        }) => Promise.resolve(reviewerFn({
-          objective,
-          diff: chunk.text,
-          changedFiles: delta.changedFiles,
-          gate,
-          reviewScope,
-          diffScope: delta.diffScope ?? 'cumulative',
-          round: loopState.round,
-          chunk: { index: chunk.index, total: chunk.total },
-          previousFindings: loopState.lastReview?.blockingFindings ?? [],
-          supervisorGuidance: loopState.pendingReviewerReconsideration?.guidance ?? null,
-          evidence: evidenceBundle,
-          selection,
-          signal,
-        })).then((out) => {
-          // Captured HERE, before meteredCall reduces the result to a bare
-          // business value: the ONE place the actually-resolved model and raw
-          // provider usage for THIS physical attempt are still visible.
-          physicalCalls.push({
-            role: 'reviewer', round: loopState.round, chunkIndex: chunk.index, chunkTotal: chunk.total,
-            attempt, family: selection?.family ?? family ?? null, provider: selection?.provider ?? provider ?? null,
-            quotaPools: selection?.quotaPools ?? null, resolvedModel: out?.model ?? selection?.model ?? null,
-            usage: out?.usage ?? null, outcome: 'SUCCESS', code: null,
-          });
-          return {
-            value: out?.value ?? out, usage: out?.usage ?? null, model: out?.model ?? null, costUsd: out?.costUsd, meta: out?.meta ?? null,
-          };
-        }),
-      });
-      loopState.reviewerCalls += 1;
-      const normalized = normalizeReview({ raw, reviewer: 'internal', provider: 'internal' });
-      // Durable-before-next-chunk: persist this chunk's result so a crash before
-      // the round completes does not re-call the model for it on resume.
-      checkpoint.chunks[chunk.index] = normalized;
-      // eslint-disable-next-line no-await-in-loop
-      await saveLoop(loopState);
-      // Any chunk we could not review successfully fails the whole review closed.
-      if (normalized.status === 'FAILED') {
-        return {
-          review: { ...normalized, physicalCalls: await withDurablePhysicalCalls(physicalCalls) },
-          chunkCount: chunks.length,
-          failedChunk: chunk.index,
-        };
-      }
-      perChunk.push(normalized);
-    }
-
-    // Aggregate: union of findings across every successfully-reviewed chunk.
-    const bySig = new Map();
-    for (const r of perChunk) {
-      for (const f of [...r.blockingFindings, ...r.nonBlockingFindings.map((n) => ({ ...n, signature: `${n.severity}:${n.file ?? ''}:${n.title ?? ''}` }))]) {
-        if (f.signature && !bySig.has(f.signature)) bySig.set(f.signature, f);
-      }
-    }
-    const findings = [...bySig.values()];
-    const blocking = findings.filter((f) => objective.blockingSeverities.includes(f.severity));
-    return {
-      review: {
-        status: blocking.length ? 'ACTIONABLE' : 'CLEAN',
-        reviewer: 'internal',
-        provider: 'internal',
-        reviewedHead: delta.currentHead,
-        blockingFindings: blocking,
-        nonBlockingFindings: findings.filter((f) => !objective.blockingSeverities.includes(f.severity)).slice(0, 8),
-        nonBlockingOmitted: Math.max(0, findings.filter((f) => !objective.blockingSeverities.includes(f.severity)).length - 8),
-        findingSignatures: [...new Set(blocking.map((f) => f.signature).filter(Boolean))].sort(),
-        error: null,
-        physicalCalls: await withDurablePhysicalCalls(physicalCalls),
-      },
-      chunkCount: chunks.length,
-    };
-  }
+  const runReviewerOverEvidence = createReviewerRunner({
+    persistence, env, reviewerFn, routeReviewerFn, meteredWithFailover, saveLoop,
+  });
 
   // Gate commands for one review gate, shared by LOCAL and PR. Uses exactly the
   // plan frozen at begin (never the possibly Worker-edited on-disk config) plus
@@ -1110,7 +638,7 @@ export function createReviewLoopController({
         round: loopState.round,
         reason: 'no Worker change has been made since reviewloop_begin; do the work, then call reviewloop_review',
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1147,7 +675,7 @@ export function createReviewLoopController({
         round: loopState.round,
         reason: `cannot reliably separate Worker changes from pre-existing work: ${(delta.incompleteReasons ?? []).join('; ')}`,
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1180,7 +708,7 @@ export function createReviewLoopController({
           + '.reviewloop.json / the package.json test script to what it was, or start a new '
           + 'reviewloop_begin — ReviewLoop will not run a Gate the Worker can edit mid-loop',
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
     const { gateCommands, commandSource } = resolved;
@@ -1263,7 +791,7 @@ export function createReviewLoopController({
           round: loopState.round,
           reason,
           telemetry: await durableTelemetry(loopState.loopId),
-          safetyEvents,
+          safetyEvents: safetyEventsForReview(),
         };
       };
 
@@ -1304,7 +832,7 @@ export function createReviewLoopController({
             reason: 'the deterministic Gate reverted the Worker delta back to the reviewloop_begin baseline; '
               + 'no Worker change remains to review',
             telemetry: await durableTelemetry(loopState.loopId),
-            safetyEvents,
+            safetyEvents: safetyEventsForReview(),
           };
         }
 
@@ -1352,7 +880,7 @@ export function createReviewLoopController({
         round: loopState.round,
         reason: 'the review was cancelled by the caller before the Reviewer ran',
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1375,7 +903,7 @@ export function createReviewLoopController({
           evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
           lastReview: compactLastReview(loopState),
           telemetry: await durableTelemetry(loopState.loopId),
-          safetyEvents,
+          safetyEvents: safetyEventsForReview(),
         };
       }
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
@@ -1390,7 +918,7 @@ export function createReviewLoopController({
         reason: 'deterministic Gate failed with a new regression; fix it before Reviewer runs',
         evidenceSubmission: unacceptedEvidence(evidence, 'GATE_FAILED'),
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1429,7 +957,7 @@ export function createReviewLoopController({
         reason: 'submitted code/gate/evidence state is identical to the last review; no Reviewer/Supervisor call made',
         lastReview: compactLastReview(loopState),
         telemetry: await durableTelemetry(loopState.loopId),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1480,7 +1008,7 @@ export function createReviewLoopController({
         round: loopState.round,
         reason: `Reviewer did not produce a usable result (${review.error?.reason}): ${review.error?.message ?? ''}`,
         telemetry: await spend.telemetry(),
-        safetyEvents,
+        safetyEvents: safetyEventsForReview(),
       };
     }
 
@@ -1536,7 +1064,7 @@ export function createReviewLoopController({
       ...compactReworkPayload({ loopState, review, gate, supervisorGuidance }),
       reason: decision.reason,
       telemetry: await spend.telemetry(),
-      safetyEvents,
+      safetyEvents: safetyEventsForReview(),
     };
   }
 
@@ -1760,7 +1288,7 @@ export function createReviewLoopController({
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
       evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
-      telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
+      telemetry: telemetry ?? emptyTelemetry(), safetyEvents: safetyEventsForReview(),
     };
   }
   function humanRequiredResult(loopState, review, telemetry, supervisorGuidance) {
@@ -1781,7 +1309,7 @@ export function createReviewLoopController({
       supervisorGuidance: supervisorGuidance ?? loopState.lastSupervisorGuidance ?? null,
       reason: (loopState.history?.slice(-1)[0]?.reason ?? 'review did not converge')
         + (budgetExhausted ? ' — this ReviewLoop budget is spent; report to the user and stop, do not start another loop for this task' : ''),
-      telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
+      telemetry: telemetry ?? emptyTelemetry(), safetyEvents: safetyEventsForReview(),
     };
   }
   // A provider/spend failure that surfaces as HUMAN_REQUIRED MUST also latch the
@@ -1794,7 +1322,7 @@ export function createReviewLoopController({
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
       reason: `ReviewLoop model spend blocked: ${err?.message ?? err}`,
-      telemetry: telemetry ?? emptyTelemetry(), safetyEvents,
+      telemetry: telemetry ?? emptyTelemetry(), safetyEvents: safetyEventsForReview(),
     };
   }
   async function terminalResult(loopState) {
@@ -1809,7 +1337,7 @@ export function createReviewLoopController({
           + 'user and stop; do NOT reviewloop_begin again in this task. A new user instruction starts a fresh loop.'
         : 'loop already terminal',
       lastReview: compactLastReview(loopState),
-      telemetry: await durableTelemetry(loopState.loopId), safetyEvents,
+      telemetry: await durableTelemetry(loopState.loopId), safetyEvents: safetyEventsForReview(),
     };
   }
   function compactLastReview(loopState) {
