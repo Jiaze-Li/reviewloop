@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:28:19.576Z",
+  "updatedAt": "2026-10-12T06:28:23.644Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
@@ -13,6 +13,10 @@
     "history": [
       {
         "at": "2026-10-12T14:28:11+08:00",
+        "text": "refactor: extract frozen begin, reviewer runner and pure token accounting"
+      },
+      {
+        "at": "2026-10-12T14:28:14+08:00",
         "text": "refactor: extract frozen begin, reviewer runner and pure token accounting"
       }
     ],
@@ -27,6 +31,12 @@
         "sha": "1ef9ef5361e18862b5372a98134c3d043b18f421",
         "branch": "refactor/controller-spend-event-isolation-20261012",
         "timestamp": "2026-10-12T14:28:11+08:00",
+        "message": "refactor: extract frozen begin, reviewer runner and pure token accounting"
+      },
+      {
+        "sha": "6f99d2567d40037f92dc6b392e8065e605123be7",
+        "branch": "refactor/controller-spend-event-isolation-20261012",
+        "timestamp": "2026-10-12T14:28:14+08:00",
         "message": "refactor: extract frozen begin, reviewer runner and pure token accounting"
       }
     ],
