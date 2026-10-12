@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T01:48:14.006Z",
+  "updatedAt": "2026-10-12T01:49:14.021Z",
   "task": {
     "id": "claude/dazzling-tesla-wee2rb",
     "branch": "claude/dazzling-tesla-wee2rb",
     "title": "claude/dazzling-tesla-wee2rb",
     "task": "Development branch: claude/dazzling-tesla-wee2rb",
     "started": "2026-10-11T12:46:43Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Make RoleRouter tests independent of the host's quota ledger",
     "next": "",
     "history": [
@@ -172,14 +172,16 @@
     ],
     "pr": {
       "number": 19,
-      "state": "open",
+      "state": "closed",
       "title": "chore: clear npm audit findings and make routing tests hermetic",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/19",
-      "merged": false,
-      "updatedAt": "2026-10-12T01:48:03Z"
+      "merged": true,
+      "mergedAt": "2026-10-12T01:49:03Z",
+      "closedAt": "2026-10-12T01:49:03Z",
+      "updatedAt": "2026-10-12T01:49:04Z"
     },
-    "completed": null,
-    "outcome": null,
+    "completed": "2026-10-12T01:49:03Z",
+    "outcome": "Merged",
     "prs": [
       {
         "number": 18,
