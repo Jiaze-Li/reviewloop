@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:28:46.939Z",
+  "updatedAt": "2026-10-12T06:30:46.650Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
@@ -8,7 +8,7 @@
     "task": "Development branch: refactor/controller-spend-event-isolation-20261012",
     "started": "2026-10-12T14:28:09+08:00",
     "status": "In progress",
-    "current": "test: reproduce cross-loop concurrent safety-event isolation",
+    "current": "test: expose final-gate failure diagnostics for reduced diff regression",
     "next": "",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-10-12T14:28:22+08:00",
         "text": "refactor: extract frozen begin, reviewer runner and pure token accounting"
+      },
+      {
+        "at": "2026-10-12T14:30:34+08:00",
+        "text": "test: reproduce cross-loop concurrent safety-event isolation"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "refactor/controller-spend-event-isolation-20261012",
         "timestamp": "2026-10-12T14:28:22+08:00",
         "message": "test: reproduce cross-loop concurrent safety-event isolation"
+      },
+      {
+        "sha": "5a7fc5ee0bdbdecee034b793958600ce434f376f",
+        "branch": "refactor/controller-spend-event-isolation-20261012",
+        "timestamp": "2026-10-12T14:30:34+08:00",
+        "message": "test: expose final-gate failure diagnostics for reduced diff regression"
       }
     ],
     "pr": {
