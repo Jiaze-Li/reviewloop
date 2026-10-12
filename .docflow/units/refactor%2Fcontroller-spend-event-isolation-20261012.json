@@ -86,7 +86,7 @@
       "title": "refactor: isolate ReviewLoop controller workflows and per-review safety events",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/20",
       "merged": false,
-      "updatedAt": "2026-10-12T06:28:34Z"
+      "updatedAt": "2026-10-12T06:30:35Z"
     },
     "completed": null,
     "outcome": null
