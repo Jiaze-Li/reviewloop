@@ -49,7 +49,7 @@ test('agy:gpt-oss is not Supervisor-eligible and never routes as Supervisor', ()
   });
   const health = new ProviderHealthRegistry();
   for (const f of ['agy:gemini-supervisor', 'codex:default', 'agy:sonnet', 'claude:opus']) health.record(f, 'UNAVAILABLE');
-  assert.equal(new RoleRouter({ providerHealth: health, resolveFamily: resolver }).route('supervisor'), null);
+  assert.equal(new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: health, resolveFamily: resolver }).route('supervisor'), null);
 });
 
 test('agy:gpt-oss is still a Reviewer candidate', () => {

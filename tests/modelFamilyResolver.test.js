@@ -21,7 +21,7 @@ import {
   pickCatalogModel,
   parseAgyModelCatalog,
 } from '../src/orchestrator/modelFamilyResolver.js';
-import { DEFAULT_ROLE_POLICY, RoleRouter } from '../src/orchestrator/roleRouting.js';
+import { DEFAULT_ROLE_POLICY, QuotaPoolRegistry, RoleRouter } from '../src/orchestrator/roleRouting.js';
 import { createReviewLoopProviderPool } from '../src/reviewloop/providerWiring.js';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
@@ -181,6 +181,7 @@ test('6: a resolution change still emits the MODEL_RESOLVED_CHANGED diagnostics 
   const events = [];
   let catalog = ['gemini-3.7-flash-medium'];
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     // Scope to the Supervisor Gemini head so the test observes its
     // resolution-change diagnostics directly.
     rolePolicy: { supervisor: [{ family: 'agy:gemini-supervisor', effort: 'medium' }] },
