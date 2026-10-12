@@ -21,7 +21,7 @@ function sha256(value) {
 // input to FAIL->WARN baseline-diff suppression at review time. `capturedAt` is
 // volatile and excluded; the failure evidence is hashed rather than embedded so
 // a large results payload never bloats the objective fingerprint. Returns null
-// when no baseline Gate ran (PR mode, or no discoverable verification), which
+// when no baseline Gate ran (no discoverable verification), which
 // keeps a pre-existing objective's fingerprint unchanged.
 export function baselineGateEvidenceIdentity(bg) {
   if (!bg || typeof bg !== 'object') return null;

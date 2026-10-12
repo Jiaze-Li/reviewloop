@@ -18,8 +18,8 @@
 // on load and any settled/blocking reservation without a matching spend record
 // is counted conservatively (call counted, usage UNKNOWN).
 //
-// ReviewLoop has ONE review engine — every Reviewer / Supervisor call for both
-// LOCAL and PR targets is metered here.
+// ReviewLoop has ONE review engine — every Reviewer / Supervisor call for a
+// LOCAL task is metered here.
 
 import { ModelSpendAuthority } from '../orchestrator/modelSpendAuthority.js';
 import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../orchestrator/modelSpendReservation.js';
