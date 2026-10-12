@@ -154,7 +154,8 @@ test('end to end: an oversized final diff is reviewed through the cross-phase su
     git('add', '-A');
     assert.equal((await controller.review({ loopId })).status, 'PHASE_PASS');
 
-    assert.equal((await controller.review({ loopId })).status, 'PASS');
+    const finalReview = await controller.review({ loopId });
+    assert.equal(finalReview.status, 'PASS', `final gate result: ${JSON.stringify({ reason: finalReview.reason, gate: finalReview.gate, lastReview: finalReview.lastReview, blockingFindings: finalReview.blockingFindings, safetyEvents: finalReview.safetyEvents })}`);
     const final = seen[seen.length - 1];
     assert.equal(final.diffScope, 'final-cross-phase');
     assert.match(final.diff, /shared\.js/);
