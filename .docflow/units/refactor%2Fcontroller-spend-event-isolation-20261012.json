@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-12T06:31:47.275Z",
+  "updatedAt": "2026-10-12T07:27:01.524Z",
   "task": {
     "id": "refactor/controller-spend-event-isolation-20261012",
     "branch": "refactor/controller-spend-event-isolation-20261012",
     "title": "refactor/controller-spend-event-isolation-20261012",
     "task": "Development branch: refactor/controller-spend-event-isolation-20261012",
     "started": "2026-10-12T14:28:09+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "fix: preserve final diff chunk validation import after reviewer extraction",
     "next": "",
     "history": [
@@ -92,13 +92,15 @@
     ],
     "pr": {
       "number": 20,
-      "state": "open",
+      "state": "closed",
       "title": "refactor: isolate ReviewLoop controller workflows and per-review safety events",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/20",
-      "merged": false,
-      "updatedAt": "2026-10-12T06:31:36Z"
+      "merged": true,
+      "mergedAt": "2026-10-12T07:26:49Z",
+      "closedAt": "2026-10-12T07:26:49Z",
+      "updatedAt": "2026-10-12T07:26:49Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-12T07:26:49Z",
+    "outcome": "Merged"
   }
 }
