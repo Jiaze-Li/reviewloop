@@ -93,7 +93,7 @@ test('every AGY policy family runs through the reviewloop-minimal agent', async 
 
 test('route(): Reviewer traverses all candidates', () => {
   const health = new ProviderHealthRegistry();
-  const pick = () => new RoleRouter({ providerHealth: health, resolveFamily: resolver }).route('reviewer')?.requestedFamily ?? null;
+  const pick = () => new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: health, resolveFamily: resolver }).route('reviewer')?.requestedFamily ?? null;
   for (const expected of REVIEWER_ORDER) {
     assert.equal(pick(), expected);
     health.record(expected, 'UNAVAILABLE');
@@ -103,7 +103,7 @@ test('route(): Reviewer traverses all candidates', () => {
 
 test('route(): Supervisor traverses all candidates; agy:gpt-oss is never one of them', () => {
   const health = new ProviderHealthRegistry();
-  const pick = () => new RoleRouter({ providerHealth: health, resolveFamily: resolver }).route('supervisor');
+  const pick = () => new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: health, resolveFamily: resolver }).route('supervisor');
   for (let i = 0; i < SUPERVISOR_ORDER.length; i += 1) {
     const sel = pick();
     assert.equal(sel.requestedFamily, SUPERVISOR_ORDER[i]);

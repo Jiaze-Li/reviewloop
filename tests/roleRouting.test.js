@@ -74,7 +74,7 @@ test('production capabilities are role-scoped as declared', () => {
 
 test('fixed routing: every candidate is reachable when each earlier one fails', () => {
   const rHealth = new ProviderHealthRegistry();
-  const r = () => new RoleRouter({ providerHealth: rHealth, resolveFamily: resolver }).route('reviewer')?.requestedFamily ?? null;
+  const r = () => new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: rHealth, resolveFamily: resolver }).route('reviewer')?.requestedFamily ?? null;
   for (const expected of REVIEWER_ORDER) {
     assert.equal(r(), expected);
     rHealth.record(expected, 'UNAVAILABLE');
@@ -82,7 +82,7 @@ test('fixed routing: every candidate is reachable when each earlier one fails', 
   assert.equal(r(), null);
 
   const sHealth = new ProviderHealthRegistry();
-  const s = () => new RoleRouter({ providerHealth: sHealth, resolveFamily: resolver }).route('supervisor')?.requestedFamily ?? null;
+  const s = () => new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: sHealth, resolveFamily: resolver }).route('supervisor')?.requestedFamily ?? null;
   for (const expected of SUPERVISOR_ORDER) {
     assert.equal(s(), expected);
     sHealth.record(expected, 'UNAVAILABLE');
@@ -93,7 +93,7 @@ test('fixed routing: every candidate is reachable when each earlier one fails', 
 test('agy:gpt-oss is never routed as Supervisor even when every other family is down', () => {
   const sHealth = new ProviderHealthRegistry();
   for (const f of SUPERVISOR_ORDER) sHealth.record(f, 'UNAVAILABLE');
-  const sel = new RoleRouter({ providerHealth: sHealth, resolveFamily: resolver }).route('supervisor');
+  const sel = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: sHealth, resolveFamily: resolver }).route('supervisor');
   assert.equal(sel, null);
   // but it IS still a Reviewer candidate
   const rHealth = new ProviderHealthRegistry();
@@ -102,7 +102,7 @@ test('agy:gpt-oss is never routed as Supervisor even when every other family is 
   rHealth.record('codex:default', 'UNAVAILABLE');
   rHealth.record('agy:sonnet', 'UNAVAILABLE');
   assert.equal(
-    new RoleRouter({ providerHealth: rHealth, resolveFamily: resolver }).route('reviewer').requestedFamily,
+    new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: rHealth, resolveFamily: resolver }).route('reviewer').requestedFamily,
     'agy:gpt-oss',
   );
 });
@@ -146,7 +146,7 @@ test('reset expiry becomes UNKNOWN', () => {
 
 test('provider health failure removes a family without touching policy', () => {
   const health = new ProviderHealthRegistry();
-  const router = new RoleRouter({ providerHealth: health, resolveFamily: resolver });
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), providerHealth: health, resolveFamily: resolver });
   assert.equal(router.route('reviewer').requestedFamily, 'agy:opus');
   health.record('agy:opus', 'UNAVAILABLE');
   assert.equal(router.route('reviewer').requestedFamily, 'agy:gemini-reviewer');
@@ -162,7 +162,7 @@ test('quota topology no longer references claude:sonnet', () => {
 // ---- durable routing-decision audit --------------------------------------
 
 test('a bare RoleRouter (no routeAudit configured) never touches disk but still records every decision in-memory', () => {
-  const router = new RoleRouter({ resolveFamily: resolver });
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), resolveFamily: resolver });
   const sel = router.route('reviewer');
   assert.equal(sel.requestedFamily, 'agy:opus');
   assert.equal(router.routeAudit.filePath, null);
@@ -174,6 +174,7 @@ test('every pre-dispatch skip is durably persisted with an enumerated reason bef
   const health = new ProviderHealthRegistry();
   health.record('agy:opus', 'UNAVAILABLE', 'PROVIDER_UNAVAILABLE');
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }),
@@ -193,6 +194,7 @@ test('a routing-decision audit that fails to persist makes the router fail close
   health.record('agy:opus', 'UNAVAILABLE', 'PROVIDER_UNAVAILABLE');
   let calls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     routeAudit: new RouteAuditLog({
@@ -211,7 +213,7 @@ test('a routing-decision audit that fails to persist makes the router fail close
 
 test('an unenumerated skip reason is refused before any attempt to persist it', () => {
   const audited = [];
-  const router = new RoleRouter({ resolveFamily: resolver, routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }) });
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), resolveFamily: resolver, routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }) });
   assert.throws(() => router._decide({ type: 'ROLE_ROUTE_SKIPPED', role: 'reviewer', candidate: 'agy:opus', reason: 'made_up_reason' }), (err) => {
     assert.ok(err instanceof RouteAuditError);
     assert.equal(err.code, 'ROUTE_REASON_NOT_ENUMERATED');
@@ -223,7 +225,7 @@ test('an unenumerated skip reason is refused before any attempt to persist it', 
 // ---- primary-first invariant ----------------------------------------------
 
 test('primary-first invariant: whenever agy:opus is READY, the Reviewer first real dispatch selects it', () => {
-  const router = new RoleRouter({ resolveFamily: resolver });
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), resolveFamily: resolver });
   const sel = router.route('reviewer');
   assert.equal(sel.requestedFamily, 'agy:opus');
 });
@@ -263,6 +265,7 @@ test('a stale provider_health skip is revalidated with a zero-token probe and re
   health.record('agy:opus', 'UNAVAILABLE', 'startup isolation probe failed');
   let revalidatorCalls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -286,6 +289,7 @@ test('a stale provider_health skip that revalidation confirms is still down stay
   const audited = [];
   let revalidatorCalls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -312,6 +316,7 @@ test('a fresh (non-stale) provider_health skip is never revalidated even when a 
   health.record('agy:opus', 'UNAVAILABLE', 'just failed');
   let revalidatorCalls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -330,6 +335,7 @@ test('AUTH_FAILED health entries are never auto-revalidated regardless of stalen
   health.record('agy:opus', 'AUTH_FAILED', 'PROVIDER_AUTH_FAILED');
   let revalidatorCalls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -348,6 +354,7 @@ test('a revalidator that throws is treated as still unavailable — never silent
   health.record('agy:opus', 'UNAVAILABLE', 'startup isolation probe failed');
   const audited = [];
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -368,6 +375,7 @@ test('the revalidator sees the full blocking entry (including reasonCode), not j
   health.record('agy:opus', 'UNAVAILABLE', 'timed out', { reasonCode: 'PROVIDER_TIMEOUT' });
   let seenEntry = null;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     now: () => now,
@@ -385,6 +393,7 @@ test('the revalidator sees the full blocking entry (including reasonCode), not j
 test('a family the resolver reports has no wired transport is never selected, regardless of health', () => {
   const health = new ProviderHealthRegistry(); // pristine — health alone would allow agy:opus
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: (family) => ({
       ...resolver(family),
@@ -396,7 +405,7 @@ test('a family the resolver reports has no wired transport is never selected, re
 });
 
 test('a resolver that never declares transportAvailable stays exactly as permissive as before this feature (backward compatible)', () => {
-  const router = new RoleRouter({ resolveFamily: resolver }); // resolver never sets transportAvailable
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), resolveFamily: resolver }); // resolver never sets transportAvailable
   const sel = router.route('reviewer');
   assert.equal(sel.requestedFamily, 'agy:opus');
 });
@@ -407,6 +416,7 @@ test('the transport gate is checked before health — a family with no transport
   health.record('agy:opus', 'UNAVAILABLE', 'x', { reasonCode: 'AGY_PROVISIONING_FAILED' });
   let revalidatorCalls = 0;
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: (family) => ({ ...resolver(family), transportAvailable: family !== 'agy:opus' }),
     now: () => now,
@@ -426,6 +436,7 @@ test('interleaved route() calls with different requestContext never cross-contam
   const health = new ProviderHealthRegistry();
   health.record('agy:opus', 'UNAVAILABLE', 'x', { reasonCode: 'PROVIDER_TIMEOUT' });
   const router = new RoleRouter({
+    quotaRegistry: new QuotaPoolRegistry({ filePath: null }),
     providerHealth: health,
     resolveFamily: resolver,
     routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }),
@@ -450,7 +461,7 @@ test('interleaved route() calls with different requestContext never cross-contam
 
 test('route() with no requestContext attributes null attribution rather than reusing a prior call\'s context', () => {
   const audited = [];
-  const router = new RoleRouter({ resolveFamily: resolver, routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }) });
+  const router = new RoleRouter({ quotaRegistry: new QuotaPoolRegistry({ filePath: null }), resolveFamily: resolver, routeAudit: new RouteAuditLog({ sink: (e) => audited.push(e) }) });
   router.route('reviewer', {}, { loopId: 'loop-A', round: 3 });
   router.route('reviewer'); // no requestContext this time
   const last = audited[audited.length - 1];
