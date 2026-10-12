@@ -55,7 +55,7 @@ import {
   reviewGateCount,
   mergeScopedGateCommands,
 } from './phaseState.js';
-import { reviewDiffBudget } from './diffChunker.js';
+import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 import {
   EvidenceValidationError,
   normalizeContractText,
