@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T07:28:34.700Z",
+  "updatedAt": "2026-10-15T07:31:07.533Z",
   "task": {
     "id": "fix/agy-quota-zero-turn-classification",
     "branch": "fix/agy-quota-zero-turn-classification",
     "title": "fix/agy-quota-zero-turn-classification",
     "task": "Development branch: fix/agy-quota-zero-turn-classification",
     "started": "2026-10-15T15:21:44+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Fix AGY 429 admission quota rejection classification for zero-turn envelopes",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 21,
-      "state": "open",
+      "state": "closed",
       "title": "fix: classify AGY 429 quota admission error as proven zero spend",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/21",
-      "merged": false,
-      "updatedAt": "2026-10-15T07:28:23Z"
+      "merged": true,
+      "mergedAt": "2026-10-15T07:30:57Z",
+      "closedAt": "2026-10-15T07:30:58Z",
+      "updatedAt": "2026-10-15T07:30:58Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-15T07:30:57Z",
+    "outcome": "Merged"
   }
 }
