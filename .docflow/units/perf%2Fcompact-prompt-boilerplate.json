@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T10:17:02.569Z",
+  "updatedAt": "2026-10-15T10:17:04.857Z",
   "task": {
     "id": "perf/compact-prompt-boilerplate",
     "branch": "perf/compact-prompt-boilerplate",
@@ -9,7 +9,7 @@
     "started": "2026-10-15T18:16:49+08:00",
     "status": "In progress",
     "current": "perf: compact prompt mechanical whitespace and boilerplate without dropping context",
-    "next": "",
+    "next": "Discuss Scheme C phase anti-oscillation engineering workflow.",
     "history": [],
     "commits": [
       {
