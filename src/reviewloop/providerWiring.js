@@ -731,6 +731,15 @@ export function changedFilesPrompt(files = []) {
   return compact.length < plain.length ? compact : plain;
 }
 
+export function assembleCompactPrompt(lines = []) {
+  return lines
+    .filter(Boolean)
+    .map((s) => String(s).replace(/[ \t]+$/gm, ''))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function buildReviewerInvoke() {
   return async ({
     objective, diff, changedFiles, gate, reviewScope = null, evidence = null,
@@ -767,7 +776,7 @@ export function buildReviewerInvoke() {
         + 'Return only current findings using the required JSON schema.'
       : '';
 
-    const prompt = [
+    const prefix = assembleCompactPrompt([
       'You are an INDEPENDENT code reviewer.',
       goalText,
       contractText,
@@ -780,10 +789,9 @@ export function buildReviewerInvoke() {
       supervisorText,
       previousFindingsText,
       diffHeader,
-      diffStr,
-      '',
-      instructionsText,
-    ].filter(Boolean).join('\n');
+    ]);
+
+    const prompt = `${prefix}\n${diffStr}\n${instructionsText}`;
 
     const promptComponentStats = {
       goalChars: goalText.length,
@@ -827,7 +835,7 @@ export function buildSupervisorInvoke() {
     priorSignatures = [], priorSupervisorGuidance = null,
     transport, model, signal,
   }) => {
-    const prompt = [
+    const prompt = assembleCompactPrompt([
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
       `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
       objective.contractText
@@ -849,7 +857,7 @@ export function buildSupervisorInvoke() {
       'Choose HUMAN_REQUIRED only for a genuine product/contract ambiguity, conflicting requirement, or when no safe automatic strategy remains.',
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
       'Return JSON: {"guidance":"","recommendation":"REWORK|REVIEWER_RECONSIDER|HUMAN_REQUIRED"}.',
-    ].filter(Boolean).join('\n');
+    ]);
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
     const value = validateSupervisorPayload(parsed, { raw });

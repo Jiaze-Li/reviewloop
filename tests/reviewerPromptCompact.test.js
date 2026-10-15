@@ -71,3 +71,18 @@ test('changed dependency forces re-review of unchanged consumer through compact 
   assert.ok(firstConsumer&&secondConsumer);
   assert.equal(firstConsumer.diff,secondConsumer.diff);
 });
+
+test('assembleCompactPrompt strips trailing line whitespace and collapses blank line bursts', async () => {
+  const { assembleCompactPrompt } = await import('../src/reviewloop/providerWiring.js');
+  const input = [
+    'Header:  \t',
+    'Line with trailing spaces   ',
+    '',
+    '\n\nSubline after blank burst   ',
+    'Footer',
+  ];
+  const output = assembleCompactPrompt(input);
+  assert.equal(output.includes('   '), false);
+  assert.equal(/\n{3,}/.test(output), false);
+  assert.equal(output, 'Header:\nLine with trailing spaces\n\nSubline after blank burst\nFooter');
+});
