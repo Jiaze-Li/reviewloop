@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T08:33:42.181Z",
+  "updatedAt": "2026-10-15T08:33:45.144Z",
   "task": {
     "id": "perf/review-efficiency-and-accounting",
     "branch": "perf/review-efficiency-and-accounting",
@@ -9,7 +9,7 @@
     "started": "2026-10-15T16:33:29+08:00",
     "status": "In progress",
     "current": "perf: track reviewer prompt component sizes and audit accounting telemetry",
-    "next": "",
+    "next": "Wait for review and approval on PR #22 for reviewer prompt tracking and accounting telemetry.",
     "history": [],
     "commits": [
       {
