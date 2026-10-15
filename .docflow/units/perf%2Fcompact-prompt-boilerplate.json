@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T13:14:13.710Z",
+  "updatedAt": "2026-10-15T13:18:50.410Z",
   "task": {
     "id": "perf/compact-prompt-boilerplate",
     "branch": "perf/compact-prompt-boilerplate",
     "title": "perf/compact-prompt-boilerplate",
     "task": "Development branch: perf/compact-prompt-boilerplate",
     "started": "2026-10-15T18:16:49+08:00",
-    "status": "In progress",
+    "status": "Abandoned",
     "current": "fix: preserve exact contract internal formatting and test real prompt token savings",
     "next": "Await PR #25 CI and user authorization.",
     "history": [
@@ -32,13 +32,14 @@
     ],
     "pr": {
       "number": 25,
-      "state": "open",
+      "state": "closed",
       "title": "perf: compact prompt mechanical whitespace and boilerplate without dropping context",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/25",
       "merged": false,
-      "updatedAt": "2026-10-15T13:13:49Z"
+      "closedAt": "2026-10-15T13:18:38Z",
+      "updatedAt": "2026-10-15T13:18:38Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-15T13:18:38Z",
+    "outcome": "Closed without merge"
   }
 }
