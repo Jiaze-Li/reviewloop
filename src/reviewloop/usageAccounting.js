@@ -281,6 +281,9 @@ export function payloadMetaOf(meta) {
     diffChars: n(meta.diffChars),
     reviewPayloadChars: n(meta.reviewPayloadChars ?? meta.promptChars),
     estimatedPayloadTokens: Number.isFinite(promptChars) ? Math.round(promptChars / 4) : null,
+    ...(meta.promptComponentStats && typeof meta.promptComponentStats === 'object'
+      ? { promptComponentStats: meta.promptComponentStats }
+      : {}),
   };
   return out;
 }

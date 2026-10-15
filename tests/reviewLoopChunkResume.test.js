@@ -184,3 +184,86 @@ test('a re-chunk of the SAME (delta + gate) state preserves its assigned round',
   assert.equal(r2.status, 'PASS', 'the re-chunked, unchanged evidence passes without exhausting the round budget');
   assert.equal(r2.round, 1, 'the re-chunk reused round 1 instead of consuming round 2');
 });
+
+// Negative test: a chunk whose diff text is unchanged between REWORK rounds
+// MUST NOT be silently cached as CLEAN across rounds if another chunk (or shared component)
+// was modified, because changes in shared files can introduce cross-module regressions.
+test('negative test: unchanged chunk diff across REWORK rounds is re-reviewed when overall delta changes', async () => {
+  const persistence = new MemoryPersistence();
+  let roundNum = 0;
+  const reviewerCalls = [];
+
+  function makeDiff(sharedContent) {
+    const file0 = [
+      'diff --git a/consumer.js b/consumer.js',
+      '--- a/consumer.js',
+      '+++ b/consumer.js',
+      '@@ -1,1 +1,20 @@',
+      ...Array.from({ length: 18 }, (_, i) => `+  const c_${i} = ${i}; // unchanged consumer chunk`),
+    ].join('\n');
+    const file1 = [
+      'diff --git a/shared.js b/shared.js',
+      '--- a/shared.js',
+      '+++ b/shared.js',
+      '@@ -1,1 +1,20 @@',
+      `+  ${sharedContent}`,
+      ...Array.from({ length: 17 }, (_, i) => `+  const s_${i} = ${i}; // shared component`),
+    ].join('\n');
+    return [file0, file1].join('\n');
+  }
+
+  let currentShared = 'export function util() { return 1; }';
+
+  const ctl = createReviewLoopController({
+    persistence,
+    env: { REVIEWLOOP_MAX_REVIEW_DIFF_CHARS: '700', REVIEWLOOP_MAX_REVIEW_CHUNKS: '12' },
+    captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({
+      baselineHead: 'BASE',
+      currentHead: `HEAD_${roundNum}`,
+      evidenceComplete: true,
+      noWorkerChangeYet: false,
+      changedFiles: ['consumer.js', 'shared.js'],
+      fingerprint: `DELTA_FP_${roundNum}`,
+      diff: makeDiff(currentShared),
+    }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'GATE_FP', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+    reviewerFn: async ({ chunk, round }) => {
+      reviewerCalls.push({ round, chunkIndex: chunk.index, chunkText: chunk.text });
+      // In round 1, chunk 1 (shared.js) has a blocking defect
+      if (round === 1 && chunk.index === 1) {
+        return {
+          value: { findings: [{ severity: 'P1', file: 'shared.js', line: 1, title: 'shared util bug' }] },
+          usage: { input_tokens: 10, output_tokens: 5 },
+        };
+      }
+      return { value: { findings: [] }, usage: { input_tokens: 10, output_tokens: 5 } };
+    },
+  });
+
+  const { loopId } = await ctl.begin({ goal: 'test cross-chunk dependency safety', cwd: '/r' });
+
+  // Round 1: consumer.js is chunk 0, shared.js is chunk 1. Chunk 1 fails with P1.
+  roundNum = 1;
+  const r1 = await ctl.review({ loopId });
+  assert.equal(r1.status, 'REWORK');
+  assert.equal(reviewerCalls.filter((c) => c.round === 1 && c.chunkIndex === 0).length, 1);
+  assert.equal(reviewerCalls.filter((c) => c.round === 1 && c.chunkIndex === 1).length, 1);
+
+  // Round 2: Worker repairs shared.js, but consumer.js diff is 100% IDENTICAL to round 1.
+  roundNum = 2;
+  currentShared = 'export function util() { return 2; } // fixed';
+  const r2 = await ctl.review({ loopId });
+  assert.equal(r2.status, 'PASS');
+
+  // Verify safety invariant: chunk 0 (consumer.js) MUST have been re-reviewed in round 2!
+  // It cannot be skipped merely because its text/hash was identical, since shared.js changed.
+  const round2Chunk0Calls = reviewerCalls.filter((c) => c.round === 2 && c.chunkIndex === 0);
+  assert.equal(
+    round2Chunk0Calls.length,
+    1,
+    'consumer.js (chunk 0) was re-reviewed in round 2 because delta changed; cross-chunk cache bypass is prevented',
+  );
+});
+
