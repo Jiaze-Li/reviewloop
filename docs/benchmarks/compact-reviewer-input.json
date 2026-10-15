@@ -1,0 +1,50 @@
+{
+  "sample": "Read-only replay: real SpinLab phase-1 contract and Git diff, PASS gate, no submitted evidence; not a historical provider bill",
+  "beforeRef": "061a1a9634714d0d340d36c72efc7e998f057f4b",
+  "baseline": "97c39fd17f4625503cadf7d8a16e5c8ee7955485",
+  "head": "cab41f16df70271c8790706d760bb2c70a451ebc",
+  "files": 74,
+  "chunks": 5,
+  "beforeChars": 262298,
+  "afterChars": 250808,
+  "savedChars": 11490,
+  "savedPercent": 4.380513766784344,
+  "estimatedTokens": {
+    "method": "characters / 4 proxy, not tokenizer or provider usage",
+    "before": 65574.5,
+    "after": 62702,
+    "saved": 2872.5
+  },
+  "rows": [
+    {
+      "chunk": 0,
+      "beforeChars": 58695,
+      "afterChars": 56397,
+      "savedChars": 2298
+    },
+    {
+      "chunk": 1,
+      "beforeChars": 58510,
+      "afterChars": 56212,
+      "savedChars": 2298
+    },
+    {
+      "chunk": 2,
+      "beforeChars": 61360,
+      "afterChars": 59062,
+      "savedChars": 2298
+    },
+    {
+      "chunk": 3,
+      "beforeChars": 42701,
+      "afterChars": 40403,
+      "savedChars": 2298
+    },
+    {
+      "chunk": 4,
+      "beforeChars": 41032,
+      "afterChars": 38734,
+      "savedChars": 2298
+    }
+  ]
+}
