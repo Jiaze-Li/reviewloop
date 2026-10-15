@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-15T10:17:02.569Z",
+  "task": {
+    "id": "perf/compact-prompt-boilerplate",
+    "branch": "perf/compact-prompt-boilerplate",
+    "title": "perf/compact-prompt-boilerplate",
+    "task": "Development branch: perf/compact-prompt-boilerplate",
+    "started": "2026-10-15T18:16:49+08:00",
+    "status": "In progress",
+    "current": "perf: compact prompt mechanical whitespace and boilerplate without dropping context",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "47ab937da7cd11c945ff0d39435c69ff5af05b18",
+        "branch": "perf/compact-prompt-boilerplate",
+        "timestamp": "2026-10-15T18:16:49+08:00",
+        "message": "perf: compact prompt mechanical whitespace and boilerplate without dropping context"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
