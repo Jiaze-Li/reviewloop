@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T09:12:29.953Z",
+  "updatedAt": "2026-10-15T09:15:59.531Z",
   "task": {
     "id": "fix/reviewer-rework-context",
     "branch": "fix/reviewer-rework-context",
@@ -9,7 +9,7 @@
     "started": "2026-10-15T17:11:50+08:00",
     "status": "In progress",
     "current": "Pass prior blockers to Reviewer and verify real REWORK input costs",
-    "next": "等待独立审查确认上一轮问题传递修复与真实回放结论。",
+    "next": "",
     "history": [],
     "commits": [
       {
