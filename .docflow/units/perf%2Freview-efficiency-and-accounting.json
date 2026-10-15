@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T10:06:14.744Z",
+  "updatedAt": "2026-10-15T10:09:32.613Z",
   "task": {
     "id": "perf/review-efficiency-and-accounting",
     "branch": "perf/review-efficiency-and-accounting",
     "title": "perf/review-efficiency-and-accounting",
     "task": "Development branch: perf/review-efficiency-and-accounting",
     "started": "2026-10-15T16:33:29+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "perf: track reviewer prompt component sizes and audit accounting telemetry",
     "next": "PR #23 merged into main; PR #22 rebased with prefix compaction and 723 tests passing.",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 22,
-      "state": "open",
+      "state": "closed",
       "title": "perf: track reviewer prompt component sizes and audit accounting telemetry",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/22",
-      "merged": false,
-      "updatedAt": "2026-10-15T10:05:55Z"
+      "merged": true,
+      "mergedAt": "2026-10-15T10:09:21Z",
+      "closedAt": "2026-10-15T10:09:21Z",
+      "updatedAt": "2026-10-15T10:09:21Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-15T10:09:21Z",
+    "outcome": "Merged"
   }
 }
