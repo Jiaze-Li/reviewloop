@@ -1,0 +1,153 @@
+{
+  "kind": "offline input reconstruction, no provider calls and no semantic acceptance",
+  "beforeRef": "061a1a9634714d0d340d36c72efc7e998f057f4b",
+  "loopId": "rl-20261015044936-4bc2bfe8",
+  "baseline": "1b2f978c800996a4f5e117d03b81dbb4c5c9d7dd",
+  "reviewedHead": "5ad03a35b552c5fbcf3c46ee1248f203939ba4b7",
+  "repairedHead": "cab41f16df70271c8790706d760bb2c70a451ebc",
+  "scope": "phase-2",
+  "historicalLedgerMatched": true,
+  "historical": {
+    "chunks": 4,
+    "promptChars": 211823,
+    "diffChars": 142811,
+    "rows": [
+      {
+        "chunk": 0,
+        "promptChars": 57183,
+        "diffChars": 39930
+      },
+      {
+        "chunk": 1,
+        "promptChars": 57959,
+        "diffChars": 40706
+      },
+      {
+        "chunk": 2,
+        "promptChars": 61925,
+        "diffChars": 44672
+      },
+      {
+        "chunk": 3,
+        "promptChars": 34756,
+        "diffChars": 17503
+      }
+    ]
+  },
+  "fullBeforeFix": {
+    "chunks": 4,
+    "promptChars": 218851,
+    "diffChars": 147311,
+    "rows": [
+      {
+        "chunk": 0,
+        "promptChars": 57815,
+        "diffChars": 39930
+      },
+      {
+        "chunk": 1,
+        "promptChars": 58762,
+        "diffChars": 40877
+      },
+      {
+        "chunk": 2,
+        "promptChars": 62640,
+        "diffChars": 44755
+      },
+      {
+        "chunk": 3,
+        "promptChars": 39634,
+        "diffChars": 21749
+      }
+    ]
+  },
+  "fullAfterFix": {
+    "chunks": 4,
+    "promptChars": 231803,
+    "diffChars": 147311,
+    "rows": [
+      {
+        "chunk": 0,
+        "promptChars": 61053,
+        "diffChars": 39930
+      },
+      {
+        "chunk": 1,
+        "promptChars": 62000,
+        "diffChars": 40877
+      },
+      {
+        "chunk": 2,
+        "promptChars": 65878,
+        "diffChars": 44755
+      },
+      {
+        "chunk": 3,
+        "promptChars": 42872,
+        "diffChars": 21749
+      }
+    ]
+  },
+  "repairOnly": {
+    "chunks": 1,
+    "promptChars": 31257,
+    "diffChars": 9899,
+    "rows": [
+      {
+        "chunk": 0,
+        "promptChars": 31257,
+        "diffChars": 9899
+      }
+    ]
+  },
+  "finalAcceptance": {
+    "chunks": 4,
+    "promptChars": 231803,
+    "diffChars": 147311,
+    "rows": [
+      {
+        "chunk": 0,
+        "promptChars": 61053,
+        "diffChars": 39930
+      },
+      {
+        "chunk": 1,
+        "promptChars": 62000,
+        "diffChars": 40877
+      },
+      {
+        "chunk": 2,
+        "promptChars": 65878,
+        "diffChars": 44755
+      },
+      {
+        "chunk": 3,
+        "promptChars": 42872,
+        "diffChars": 21749
+      }
+    ]
+  },
+  "comparison": {
+    "baselineFullChars": 231803,
+    "repairPlusFullChars": 263060,
+    "savedChars": -31257,
+    "additionalChars": 31257,
+    "estimateMethod": "characters / 4; use tokenizer counts separately",
+    "estimatedAdditionalTokens": 7814.25
+  },
+  "coverage": {
+    "completeDiffPreserved": true,
+    "finalInputIdenticalToFullReview": true,
+    "repairCanAuthorizePass": false,
+    "independentCrossChunkSemanticCoverageProven": false,
+    "productionModeEnabled": false
+  },
+  "limitations": [
+    "Only one repair transition has attributable reviewed HEAD, findings and repaired Git snapshot.",
+    "Phase-1 per-round working trees and prior findings are not all retained; nine rounds cannot be replayed exactly.",
+    "Round 11 did not finish in the historical run; its complete input here is reconstructed, not historical billed usage.",
+    "No independent model evaluated the candidate; no evidence that it would reduce repair rounds or preserve detection quality.",
+    "Existing chunk isolation does not itself prove joint cross-file review; do not enable a new acceptance path based on this input comparison."
+  ],
+  "verdict": "For this single available repair transition, repair verification followed by the same full review costs more input. No safe net savings established."
+}

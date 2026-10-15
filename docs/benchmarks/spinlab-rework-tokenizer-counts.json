@@ -1,0 +1,20 @@
+{
+  "cl100k_base": {
+    "historical-full": 67105,
+    "repaired-full-before-fix": 68813,
+    "repaired-full-after-fix": 71601,
+    "repair-only-candidate": 11232,
+    "history_context_added": 2788,
+    "repair_plus_full": 82833,
+    "net_saved_vs_full": -11232
+  },
+  "o200k_base": {
+    "historical-full": 61306,
+    "repaired-full-before-fix": 63033,
+    "repaired-full-after-fix": 65817,
+    "repair-only-candidate": 9799,
+    "history_context_added": 2784,
+    "repair_plus_full": 75616,
+    "net_saved_vs_full": -9799
+  }
+}
