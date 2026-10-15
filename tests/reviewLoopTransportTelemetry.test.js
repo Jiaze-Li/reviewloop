@@ -11,7 +11,7 @@ import {
   payloadMetaOf,
   contextOverheadTokens,
 } from '../src/reviewloop/reviewSpend.js';
-import { createReviewLoopProviderPool, narrowReviewTransportCwd } from '../src/reviewloop/providerWiring.js';
+import { createReviewLoopProviderPool, narrowReviewTransportCwd, buildReviewerInvoke } from '../src/reviewloop/providerWiring.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 test('usageBreakdownOf keeps every field null when unreported (UNKNOWN != 0)', () => {
@@ -92,3 +92,36 @@ test('the narrow agy transport runs from an isolated empty scratch cwd', async (
   assert.equal(seen[0].disableSlashCommands, true);
   assert.equal(seen[0].conversationId, undefined, 'no conversation continuation');
 });
+
+test('reviewer payloadMeta records prompt component breakdown and sha256 without prompt text', async () => {
+  const reviewerInvoke = buildReviewerInvoke();
+  let capturedMeta = null;
+  const res = await reviewerInvoke({
+    objective: {
+      goal: 'Short goal statement.',
+      contractText: 'Frozen specification text.',
+      constraints: ['Constraint 1'],
+    },
+    diff: 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-x\n+y\n',
+    changedFiles: ['a.txt'],
+    gate: { verdict: 'PASS' },
+    transport: async () => ({
+      text: '{"findings":[]}',
+      usage: { input_tokens: 100, output_tokens: 10 },
+      model: 'test-model',
+    }),
+  });
+  capturedMeta = res.meta;
+  assert.ok(capturedMeta.promptComponentStats);
+  assert.ok(Number.isFinite(capturedMeta.promptComponentStats.goalChars));
+  assert.ok(Number.isFinite(capturedMeta.promptComponentStats.contractChars));
+  assert.equal(typeof capturedMeta.promptComponentStats.contractSha256, 'string');
+  assert.equal(capturedMeta.promptComponentStats.contractSha256.length, 64);
+  assert.ok(Number.isFinite(capturedMeta.promptComponentStats.diffChars));
+  assert.ok(Number.isFinite(capturedMeta.promptComponentStats.changedFilesChars));
+  assert.equal(capturedMeta.promptComponentStats.changedFilesCount, 1);
+  // Ensure no sensitive prompt text is persisted in metadata
+  assert.ok(!('promptText' in capturedMeta));
+  assert.ok(!('contractText' in capturedMeta.promptComponentStats));
+});
+
