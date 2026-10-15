@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T13:14:00.665Z",
+  "updatedAt": "2026-10-15T13:14:13.710Z",
   "task": {
     "id": "perf/compact-prompt-boilerplate",
     "branch": "perf/compact-prompt-boilerplate",
@@ -9,7 +9,7 @@
     "started": "2026-10-15T18:16:49+08:00",
     "status": "In progress",
     "current": "fix: preserve exact contract internal formatting and test real prompt token savings",
-    "next": "Discuss Scheme C phase anti-oscillation engineering workflow.",
+    "next": "Await PR #25 CI and user authorization.",
     "history": [
       {
         "at": "2026-10-15T21:13:42+08:00",
