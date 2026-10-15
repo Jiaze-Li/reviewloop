@@ -711,6 +711,25 @@ function reviewScopePromptLines(reviewScope) {
   return [];
 }
 
+// Lossless path-prefix factoring only: every global changed path still reaches
+// every chunk. JSON tuples preserve order, duplicates and unusual path bytes.
+export function changedFilesPrompt(files = []) {
+  const plain = `CHANGED FILES: ${files.join(', ') || '(none)'}`;
+  if (!files.length || files.some((file) => typeof file !== 'string')) return plain;
+  const groups = [];
+  for (const file of files) {
+    const slash = file.lastIndexOf('/');
+    const prefix = file.slice(0, slash + 1);
+    const name = file.slice(slash + 1);
+    const last = groups.at(-1);
+    if (last?.[0] === prefix) last[1].push(name);
+    else groups.push([prefix, [name]]);
+  }
+  const compact = 'CHANGED FILES (JSON [directory prefix, basenames]; concatenate prefix + each basename for EVERY full path):\n'
+    + JSON.stringify(groups);
+  return compact.length < plain.length ? compact : plain;
+}
+
 export function buildReviewerInvoke() {
   return async ({
     objective, diff, changedFiles, gate, reviewScope = null, evidence = null,
@@ -730,7 +749,7 @@ export function buildReviewerInvoke() {
       diffScope === 'final-cross-phase'
         ? 'DIFF SCOPE: the cumulative diff was too large to review whole. It contains every file changed in more than one phase and every change made after the last phase passed; files changed in a single phase were fully reviewed at that phase gate; the ones omitted here are listed in the NOTE line, and some others are included to keep real code in view. Interactions between omitted files are not shown, so rely on the Gate result for those. Judge cross-phase interactions and the task as a whole.'
         : '',
-      `CHANGED FILES: ${(changedFiles ?? []).join(', ') || '(none)'}`,
+      changedFilesPrompt(changedFiles ?? []),
       `DETERMINISTIC GATE: ${gate?.verdict ?? 'n/a'}`,
       ...evidencePromptLines(evidence),
       supervisorGuidance
