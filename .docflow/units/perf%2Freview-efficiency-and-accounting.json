@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T08:33:45.144Z",
+  "updatedAt": "2026-10-15T08:33:50.901Z",
   "task": {
     "id": "perf/review-efficiency-and-accounting",
     "branch": "perf/review-efficiency-and-accounting",
@@ -19,7 +19,14 @@
         "message": "perf: track reviewer prompt component sizes and audit accounting telemetry"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 22,
+      "state": "open",
+      "title": "perf: track reviewer prompt component sizes and audit accounting telemetry",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/22",
+      "merged": false,
+      "updatedAt": "2026-10-15T08:33:40Z"
+    },
     "completed": null,
     "outcome": null
   }
