@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T08:52:39.021Z",
+  "updatedAt": "2026-10-15T10:05:01.837Z",
   "task": {
     "id": "perf/compact-reviewer-input",
     "branch": "perf/compact-reviewer-input",
     "title": "perf/compact-reviewer-input",
     "task": "Development branch: perf/compact-reviewer-input",
     "started": "2026-10-15T16:47:53+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Reduce repeated directory prefixes in every Reviewer input",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 23,
-      "state": "open",
+      "state": "closed",
       "title": "Reduce repeated path prefixes in Reviewer prompts without dropping context",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/23",
-      "merged": false,
-      "updatedAt": "2026-10-15T08:48:15Z"
+      "merged": true,
+      "mergedAt": "2026-10-15T10:04:49Z",
+      "closedAt": "2026-10-15T10:04:49Z",
+      "updatedAt": "2026-10-15T10:04:50Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-10-15T10:04:49Z",
+    "outcome": "Merged"
   }
 }
