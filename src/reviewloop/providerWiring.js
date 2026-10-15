@@ -779,7 +779,9 @@ export function buildReviewerInvoke() {
     const prefix = assembleCompactPrompt([
       'You are an INDEPENDENT code reviewer.',
       goalText,
-      contractText,
+    ]);
+
+    const contextMiddle = assembleCompactPrompt([
       constraintsText,
       ...scopeLines,
       diffScopeText,
@@ -791,7 +793,13 @@ export function buildReviewerInvoke() {
       diffHeader,
     ]);
 
-    const prompt = `${prefix}\n${diffStr}\n${instructionsText}`;
+    const prompt = [
+      prefix,
+      contractText,
+      contextMiddle,
+      diffStr,
+      instructionsText,
+    ].filter(Boolean).join('\n');
 
     const promptComponentStats = {
       goalChars: goalText.length,
@@ -835,12 +843,16 @@ export function buildSupervisorInvoke() {
     priorSignatures = [], priorSupervisorGuidance = null,
     transport, model, signal,
   }) => {
-    const prompt = assembleCompactPrompt([
+    const prefix = assembleCompactPrompt([
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
       `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
-      objective.contractText
-        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
-        : '',
+    ]);
+
+    const contractText = objective.contractText
+      ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
+      : '';
+
+    const suffix = assembleCompactPrompt([
       ...reviewScopePromptLines(reviewScope),
       ...evidencePromptLines(evidence),
       `CURRENT GLOBAL REVIEW ROUND: ${round ?? 'unknown'}; CONVERGENCE EPOCH: ${convergenceEpoch}; PRIOR SUPERVISOR ESCALATIONS: ${supervisorEscalationCount}`,
@@ -858,6 +870,8 @@ export function buildSupervisorInvoke() {
       'Do not broaden the task or redesign later phases unless a current blocking finding requires it.',
       'Return JSON: {"guidance":"","recommendation":"REWORK|REVIEWER_RECONSIDER|HUMAN_REQUIRED"}.',
     ]);
+
+    const prompt = [prefix, contractText, suffix].filter(Boolean).join('\n');
     const res = await transport(prompt, { signal });
     const { parsed, raw } = parseJsonish(res);
     const value = validateSupervisorPayload(parsed, { raw });
