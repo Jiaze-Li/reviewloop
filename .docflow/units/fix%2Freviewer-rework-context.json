@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T09:12:24.823Z",
+  "updatedAt": "2026-10-15T09:12:29.953Z",
   "task": {
     "id": "fix/reviewer-rework-context",
     "branch": "fix/reviewer-rework-context",
@@ -19,7 +19,14 @@
         "message": "Pass prior blockers to Reviewer and verify real REWORK input costs"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 24,
+      "state": "open",
+      "title": "Restore prior findings in Reviewer prompts and audit REWORK savings",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/24",
+      "merged": false,
+      "updatedAt": "2026-10-15T09:12:17Z"
+    },
     "completed": null,
     "outcome": null
   }
