@@ -5,8 +5,9 @@ import { agyObjectCarriesUsageEvidence, agyStderrCarriesUsageEvidence } from './
 // A quota rejection is zero-consumption only with sufficient evidence that
 // the provider denied admission before generation. Accept either:
 //  A) empty stdout, absent usage, explicit quota wording; OR
-//  B) structured ERROR stdout with zero model turns, no response/session,
-//     a complete all-zero usage envelope, and explicit quota wording.
+//  B) structured ERROR stdout with no generated response text, complete
+//     all-zero usage counters, at most 1 turn (admission failure turn),
+//     and explicit quota wording.
 // A bare RESOURCE_EXHAUSTED or zero token counters by themselves are NOT proof.
 // All other errors remain UNRESOLVED; UNKNOWN != ZERO.
 // Duration is deliberately never consulted.
@@ -62,8 +63,7 @@ function isExplicitZeroTurnQuotaError(err) {
     && err?.usageEvidenceState === 'present'
     && envelope?.status === 'ERROR'
     && envelope?.responseWasEmpty === true
-    && envelope?.numTurns === 0
-    && envelope?.hasConversationId === false
+    && (envelope?.numTurns === 0 || envelope?.numTurns === 1)
     && envelope?.explicitZeroUsage === true;
 }
 
