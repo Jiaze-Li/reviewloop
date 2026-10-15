@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T10:17:04.857Z",
+  "updatedAt": "2026-10-15T10:17:13.106Z",
   "task": {
     "id": "perf/compact-prompt-boilerplate",
     "branch": "perf/compact-prompt-boilerplate",
@@ -19,7 +19,14 @@
         "message": "perf: compact prompt mechanical whitespace and boilerplate without dropping context"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 25,
+      "state": "open",
+      "title": "perf: compact prompt mechanical whitespace and boilerplate without dropping context",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/25",
+      "merged": false,
+      "updatedAt": "2026-10-15T10:17:00Z"
+    },
     "completed": null,
     "outcome": null
   }
