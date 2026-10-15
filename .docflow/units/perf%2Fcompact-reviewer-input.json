@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-15T08:48:23.973Z",
+  "updatedAt": "2026-10-15T08:48:57.283Z",
   "task": {
     "id": "perf/compact-reviewer-input",
     "branch": "perf/compact-reviewer-input",
@@ -9,7 +9,7 @@
     "started": "2026-10-15T16:47:53+08:00",
     "status": "In progress",
     "current": "Reduce repeated directory prefixes in every Reviewer input",
-    "next": "",
+    "next": "等待独立 PR 审查，并与统计改进 PR 协调合入。",
     "history": [],
     "commits": [
       {
