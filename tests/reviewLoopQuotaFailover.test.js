@@ -110,11 +110,28 @@ test('structured AGY quota ERROR with complete zero-turn usage is a proven admis
   assert.equal(verdict.retryAfterMs, (72 * 3600 + 6 * 60 + 38) * 1000);
 });
 
+test('structured AGY 429 quota admission error with numTurns=1 and conversationId is a proven admission rejection', () => {
+  const error = realQuotaShell({
+    num_turns: 1,
+    conversation_id: 'conv-session-123',
+    quotaError: true,
+  });
+  assert.equal(error.code, 'AGY_NONZERO_EXIT');
+  assert.equal(error.stdoutWasEmpty, false);
+  assert.equal(error.usageEvidenceState, 'present');
+  assert.equal(error.envelope.explicitZeroUsage, true);
+  assert.equal(error.envelope.responseWasEmpty, true);
+  assert.equal(error.envelope.numTurns, 1);
+  assert.equal(error.envelope.hasConversationId, true);
+  const verdict = classifyAgyQuotaRejection(error);
+  assert.equal(verdict.proven, true);
+  assert.equal(verdict.retryAfterMs, (72 * 3600 + 6 * 60 + 38) * 1000);
+});
+
 test('structured nonzero/missing/partial usage cannot manufacture zero-spend failover', () => {
   const cases = [
-    { num_turns: 1 },
+    { num_turns: 2 },
     { response: 'partial reviewer output' },
-    { conversation_id: 'active-session-id' },
     { usage: { input_tokens: 0, output_tokens: 1, total_tokens: 1 } },
     { usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, unknown_usage_field: 'maybe' } },
     { usage: { input_tokens: 0, output_tokens: 0 } },
@@ -467,4 +484,142 @@ test('authorization backstop: an excluded family can never be dispatched even if
     call: async () => { dispatched += 1; return { value: {}, usage: { input_tokens: 1, output_tokens: 1 } }; },
   }), (err) => err.code === 'FAMILY_EXCLUDED_BY_HUMAN');
   assert.equal(dispatched, 0);
+});
+
+test('regression: abnormal exit without quota wording remains UNRESOLVED and does not manufacture zero spend', async () => {
+  const persistence = new MemoryPersistence();
+  const w = makeWorld({
+    agyBehavior: async () => {
+      // Abnormal crash exit code 137 (OOM / SIGKILL) with no quota wording
+      throw new AgyExitError(137, 'Killed: 9', { stdout: '', durationMs: 1200 });
+    },
+    persistence,
+  });
+  const { loopId } = await w.controller.begin({ goal: 'g', cwd: '/r' });
+  const result = await w.controller.review({ loopId });
+  assert.equal(result.status, 'HUMAN_REQUIRED');
+  const state = await persistence.readWorkflowState(loopId);
+  const [resv] = Object.values(state.modelSpendReservations);
+  assert.equal(resv.status, 'UNRESOLVED');
+  assert.equal(resv.settlementReason, 'AGY_NONZERO_EXIT');
+});
+
+test('regression: 429 with nonzero or unknown usage fails closed as UNRESOLVED', async () => {
+  const persistence = new MemoryPersistence();
+  const w = makeWorld({
+    agyBehavior: async () => {
+      // 429 error but with non-zero usage tokens reported
+      throw realQuotaShell({
+        usage: { input_tokens: 150, output_tokens: 0, total_tokens: 150 },
+      });
+    },
+    persistence,
+  });
+  const { loopId } = await w.controller.begin({ goal: 'g', cwd: '/r' });
+  const result = await w.controller.review({ loopId });
+  assert.equal(result.status, 'HUMAN_REQUIRED');
+  const state = await persistence.readWorkflowState(loopId);
+  const [resv] = Object.values(state.modelSpendReservations);
+  assert.equal(resv.status, 'UNRESOLVED');
+});
+
+test('regression: repeated recovery calls on the same reservation are idempotent and do not duplicate spend records', async () => {
+  const persistence = new MemoryPersistence();
+  const w = makeWorld({ agyBehavior: async () => { throw unknownExit(); }, persistence });
+  const { loopId } = await w.controller.begin({ goal: 'g', cwd: '/r' });
+  await w.controller.review({ loopId });
+  const [first] = Object.values((await persistence.readWorkflowState(loopId)).modelSpendReservations);
+
+  const res1 = await acknowledgeUnresolvedSpend({ persistence, loopId, reservationId: first.reservationId, reason: 'first ack' });
+  assert.equal(res1.alreadyAcknowledged, false);
+
+  const res2 = await acknowledgeUnresolvedSpend({ persistence, loopId, reservationId: first.reservationId, reason: 'second ack duplicate' });
+  assert.equal(res2.alreadyAcknowledged, true);
+  assert.equal(res2.acknowledgementId, res1.acknowledgementId);
+
+  const state = await persistence.readWorkflowState(loopId);
+  const matchingRecords = state.reviewLoopSpend.records.filter((r) => r.reservationId === first.reservationId);
+  assert.equal(matchingRecords.length, 1, 'exactly one spend record kept');
+});
+
+test('regression: process restart after recovery preserves existing chunk checkpoints and only reviews the failed chunk', async () => {
+  const persistence = new MemoryPersistence();
+  const threeChunkDiff = [
+    'diff --git a/file0.js b/file0.js\n--- a/file0.js\n+++ b/file0.js\n@@ -1 +1 @@\n+' + 'a'.repeat(600),
+    'diff --git a/file1.js b/file1.js\n--- a/file1.js\n+++ b/file1.js\n@@ -1 +1 @@\n+' + 'b'.repeat(600),
+    'diff --git a/file2.js b/file2.js\n--- a/file2.js\n+++ b/file2.js\n@@ -1 +1 @@\n+' + 'c'.repeat(600),
+  ].join('\n');
+
+  const reviewedChunks = [];
+  let shouldFailChunk2 = true;
+
+  const buildController = () => {
+    const quotaRegistry = new QuotaPoolRegistry({ filePath: null });
+    const pool = createReviewLoopProviderPool({
+      callAgy: async (opts) => okReply,
+      quotaRegistry,
+      provisionMinimalAgent: () => ({ name: 'reviewloop-minimal', path: '/tmp/reviewloop-minimal.md' }),
+      agyGeminiDir: '/tmp/reviewloop-test-gemini',
+      customAgentSupport: null,
+      transportRuntime: RUNTIME_DOWN,
+    });
+    return createReviewLoopController({
+      persistence,
+      env: { REVIEWLOOP_MAX_REVIEW_DIFF_CHARS: '700', REVIEWLOOP_MAX_REVIEW_CHUNKS: '12' },
+      routeReviewerFn: pool.route.bind(null, 'reviewer'),
+      recordProviderFailure: pool.recordFailure,
+      captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
+      collectWorkerDeltaFn: async () => ({
+        baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true, noWorkerChangeYet: false,
+        changedFiles: ['file0.js', 'file1.js', 'file2.js'], fingerprint: 'DELTA_FP', diff: threeChunkDiff,
+      }),
+      runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'GATE_FP', failureIdentities: [], results: [] }),
+      discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+      reviewerFn: async ({ chunk, selection }) => {
+        reviewedChunks.push({ chunk: chunk.index, family: selection?.family });
+        if (chunk.index === 2 && shouldFailChunk2) {
+          throw unknownExit();
+        }
+        return { value: { findings: [] }, usage: { input_tokens: 10, output_tokens: 5 }, model: 'test-model' };
+      },
+    });
+  };
+
+  const ctl1 = buildController();
+  const { loopId } = await ctl1.begin({ goal: 'chunk recovery test', cwd: '/r' });
+  const r1 = await ctl1.review({ loopId });
+  assert.equal(r1.status, 'HUMAN_REQUIRED');
+
+  // Verify checkpoint has chunks 0 and 1
+  let state = await persistence.readWorkflowState(loopId);
+  assert.ok(state.reviewLoop.chunkReviewCheckpoint.chunks['0']);
+  assert.ok(state.reviewLoop.chunkReviewCheckpoint.chunks['1']);
+  assert.equal(state.reviewLoop.chunkReviewCheckpoint.chunks['2'], undefined);
+
+  // Find unresolved reservation for chunk 2
+  const unres = Object.values(state.modelSpendReservations).find((r) => r.status === 'UNRESOLVED');
+  assert.ok(unres);
+
+  // Human acknowledges unresolved spend
+  await acknowledgeUnresolvedSpend({
+    persistence,
+    loopId,
+    reservationId: unres.reservationId,
+    reason: 'quota reset, retry chunk 2',
+  });
+
+  // Restart controller instance (simulating process restart)
+  shouldFailChunk2 = false;
+  reviewedChunks.length = 0;
+  const ctl2 = buildController();
+  const r2 = await ctl2.review({ loopId });
+
+  assert.equal(r2.status, 'PASS');
+  // Chunks 0 and 1 must NOT have been re-reviewed!
+  assert.deepEqual(reviewedChunks.map((c) => c.chunk), [2], 'only failed chunk-2 was reviewed on restart');
+
+  // Verify full state integrity
+  state = await persistence.readWorkflowState(loopId);
+  assert.equal(state.reviewLoop.state, 'PASS');
+  assert.equal(state.reviewLoop.lastReview.status, 'CLEAN');
 });
