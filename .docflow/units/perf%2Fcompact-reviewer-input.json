@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-15T08:48:04.624Z",
+  "task": {
+    "id": "perf/compact-reviewer-input",
+    "branch": "perf/compact-reviewer-input",
+    "title": "perf/compact-reviewer-input",
+    "task": "Development branch: perf/compact-reviewer-input",
+    "started": "2026-10-15T16:47:53+08:00",
+    "status": "In progress",
+    "current": "Reduce repeated directory prefixes in every Reviewer input",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "78d033f7bf42db22d25ce5071d10df1f933330c5",
+        "branch": "perf/compact-reviewer-input",
+        "timestamp": "2026-10-15T16:47:53+08:00",
+        "message": "Reduce repeated directory prefixes in every Reviewer input"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
