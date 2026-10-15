@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-15T08:33:42.181Z",
+  "task": {
+    "id": "perf/review-efficiency-and-accounting",
+    "branch": "perf/review-efficiency-and-accounting",
+    "title": "perf/review-efficiency-and-accounting",
+    "task": "Development branch: perf/review-efficiency-and-accounting",
+    "started": "2026-10-15T16:33:29+08:00",
+    "status": "In progress",
+    "current": "perf: track reviewer prompt component sizes and audit accounting telemetry",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "a0510999f2a743d380b57df9b3997c50348fb8c6",
+        "branch": "perf/review-efficiency-and-accounting",
+        "timestamp": "2026-10-15T16:33:29+08:00",
+        "message": "perf: track reviewer prompt component sizes and audit accounting telemetry"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
