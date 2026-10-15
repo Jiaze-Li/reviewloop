@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-15T07:22:23.409Z",
+  "task": {
+    "id": "fix/agy-quota-zero-turn-classification",
+    "branch": "fix/agy-quota-zero-turn-classification",
+    "title": "fix/agy-quota-zero-turn-classification",
+    "task": "Development branch: fix/agy-quota-zero-turn-classification",
+    "started": "2026-10-15T15:21:44+08:00",
+    "status": "In progress",
+    "current": "Fix AGY 429 admission quota rejection classification for zero-turn envelopes",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "6ac8a3b6b6b7ec0651a47df57121f615b4e6c22f",
+        "branch": "fix/agy-quota-zero-turn-classification",
+        "timestamp": "2026-10-15T15:21:44+08:00",
+        "message": "Fix AGY 429 admission quota rejection classification for zero-turn envelopes"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
