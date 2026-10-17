@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-10-17T07:51:25.944Z",
+  "updatedAt": "2026-10-17T07:51:59.297Z",
   "task": {
     "id": "test/prompt-integrity-regression",
     "branch": "test/prompt-integrity-regression",
@@ -19,7 +19,14 @@
         "message": "test: protect frozen contract and diff integrity in reviewer prompts"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 26,
+      "state": "open",
+      "title": "test: guard frozen contract and diff integrity",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/26",
+      "merged": false,
+      "updatedAt": "2026-10-17T07:51:48Z"
+    },
     "completed": null,
     "outcome": null
   }
