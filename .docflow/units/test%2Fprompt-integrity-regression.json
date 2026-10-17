@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-17T07:51:25.944Z",
+  "task": {
+    "id": "test/prompt-integrity-regression",
+    "branch": "test/prompt-integrity-regression",
+    "title": "test/prompt-integrity-regression",
+    "task": "Development branch: test/prompt-integrity-regression",
+    "started": "2026-10-17T15:51:17+08:00",
+    "status": "In progress",
+    "current": "test: protect frozen contract and diff integrity in reviewer prompts",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "618c365237dd3b8a0f57a54a26a28da4c26956f8",
+        "branch": "test/prompt-integrity-regression",
+        "timestamp": "2026-10-17T15:51:17+08:00",
+        "message": "test: protect frozen contract and diff integrity in reviewer prompts"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
