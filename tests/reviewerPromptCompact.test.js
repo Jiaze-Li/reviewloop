@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { changedFilesPrompt, buildReviewerInvoke } from '../src/reviewloop/providerWiring.js';
+import { createHash } from 'node:crypto';
+import { changedFilesPrompt, buildReviewerInvoke, buildSupervisorInvoke } from '../src/reviewloop/providerWiring.js';
 
 function decode(text) {
   return JSON.parse(text.slice(text.indexOf('\n') + 1))
@@ -70,4 +71,86 @@ test('changed dependency forces re-review of unchanged consumer through compact 
   const secondConsumer=seen.find(c=>c.revision===2&&c.diff.includes('b/'+files[0]));
   assert.ok(firstConsumer&&secondConsumer);
   assert.equal(firstConsumer.diff,secondConsumer.diff);
+});
+
+
+test('reviewer and supervisor preserve frozen-contract internal whitespace verbatim', async () => {
+  const contract = [
+    'Frozen requirements',
+    'Markdown hard break  ',
+    '',
+    '',
+    '',
+    '    indented literal with trailing spaces   ',
+    'Final requirement',
+  ].join('\n');
+  const contractSection = 'FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n' + contract;
+  const objective = { goal: 'Keep obligations intact', contractText: contract };
+  let reviewerPrompt;
+  let supervisorPrompt;
+
+  const reviewer = await buildReviewerInvoke()({
+    objective,
+    diff: 'diff --git a/file b/file\n+change',
+    changedFiles: ['file'],
+    gate: { verdict: 'PASS' },
+    transport: async (prompt) => {
+      reviewerPrompt = prompt;
+      return { text: '{"findings":[]}' };
+    },
+  });
+  const supervisor = await buildSupervisorInvoke()({
+    objective,
+    blockingFindings: [{ severity: 'P2', file: 'file', line: 1, title: 'example' }],
+    transport: async (prompt) => {
+      supervisorPrompt = prompt;
+      return { text: '{"guidance":"recheck","recommendation":"REWORK"}' };
+    },
+  });
+
+  for (const prompt of [reviewerPrompt, supervisorPrompt]) {
+    assert.ok(prompt.includes(contractSection), 'Frozen contract bytes were modified or omitted');
+    assert.equal(prompt.split(contractSection).length, 2, 'Frozen contract must appear exactly once');
+  }
+  assert.equal(reviewer.meta.promptComponentStats.contractChars, contractSection.length);
+  assert.equal(
+    reviewer.meta.promptComponentStats.contractSha256,
+    createHash('sha256').update(contractSection).digest('hex'),
+  );
+  assert.equal(reviewer.meta.promptChars, reviewerPrompt.length);
+  assert.equal(supervisor.meta.promptChars, supervisorPrompt.length);
+});
+
+test('reviewer preserves diff whitespace and reports the actual transmitted lengths', async () => {
+  const diff = [
+    'diff --git a/file.txt b/file.txt',
+    '--- a/file.txt',
+    '+++ b/file.txt',
+    '@@ -1 +1 @@',
+    '-old line   ',
+    '+new line  \t',
+    '',
+    '',
+    ' ',
+  ].join('\n');
+  let prompt;
+  const result = await buildReviewerInvoke()({
+    objective: { goal: 'Preserve diff evidence' },
+    diff,
+    changedFiles: ['file.txt'],
+    gate: { verdict: 'PASS' },
+    transport: async (text) => {
+      prompt = text;
+      return { text: '{"findings":[]}' };
+    },
+  });
+
+  assert.ok(
+    prompt.includes('GIT DIFF (primary evidence):\n' + diff + '\nReturn JSON:'),
+    'Diff must be transmitted byte-for-byte, including trailing whitespace and blank lines',
+  );
+  assert.equal(result.meta.diffChars, diff.length);
+  assert.equal(result.meta.promptComponentStats.diffChars, diff.length);
+  assert.equal(result.meta.promptChars, prompt.length);
+  assert.equal(result.meta.reviewPayloadChars, prompt.length);
 });
