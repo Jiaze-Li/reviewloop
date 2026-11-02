@@ -148,8 +148,11 @@ async function overrideBudget(rest) {
     console.log(`  audit: override #${result.overridesCount} durably recorded`);
     if (result.stateRestored) {
       console.log(`  state: restored from HUMAN_REQUIRED to ${result.loopState}`);
+      console.log('Next: tell the Worker to call reviewloop_review again with the same loopId.');
+    } else {
+      console.log(`  state: retained as ${result.loopState}`);
+      console.log('Note: budget ceilings updated, but loop state was not restored (e.g. convergence rounds exhausted; use reviewloop reopen-gate if needed).');
     }
-    console.log('Next: tell the Worker to call reviewloop_review again with the same loopId.');
   } finally {
     await lease.release();
   }

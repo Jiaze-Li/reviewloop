@@ -45,6 +45,8 @@ export async function overrideLoopBudget({
     throw new Error('ReviewLoop PR session retired; cannot override budget; use claude-review-bot');
   }
 
+  const expectedUpdatedAt = loop.updatedAt;
+
   if (workflow?.[ANOMALY_KEY]?.tripped) {
     throw new Error('the Token Sentinel tripped for this loop; that safety stop needs its own review and cannot be overridden by budget expansion');
   }
@@ -201,6 +203,15 @@ export async function overrideLoopBudget({
         stateRestored = true;
       }
     }
+  }
+
+  // Guard against lost updates if another actor modified the loop concurrently
+  const freshWorkflow = await persistence.readWorkflowState(loopId);
+  const freshLoop = freshWorkflow?.[STATE_KEY];
+  if (freshLoop && expectedUpdatedAt && freshLoop.updatedAt !== expectedUpdatedAt) {
+    throw new Error(
+      `concurrent modification detected in loop ${loopId} (state changed while preparing budget override)`,
+    );
   }
 
   await persistence.updateWorkflowState(loopId, {

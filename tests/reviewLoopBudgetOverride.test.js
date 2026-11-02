@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import { REVIEW_LOOP_STATES } from '../src/reviewloop/state.js';
+import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 
 class MockPersistence {
   constructor(initial = {}) {
@@ -565,4 +569,71 @@ test('overrideLoopBudget refuses to restore conflicting state where budgetExhaus
   const updated = await p.readWorkflowState('conflicting-state-loop');
   assert.equal(updated.reviewLoop.state, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
   assert.equal(updated.reviewLoop.budgetExhausted, true);
+});
+
+test('overrideLoopBudget throws when concurrent modification changes loop state between read and write', async () => {
+  const p = new MockPersistence({
+    'concurrent-loop': {
+      reviewLoop: {
+        loopId: 'concurrent-loop',
+        state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        round: 2,
+        updatedAt: '2026-11-02T12:00:00.000Z',
+      },
+      reviewLoopSpend: {
+        records: [{ usageVolume: 100000, costUsd: 1.0 }],
+      },
+    },
+  });
+
+  // Intercept second read to simulate concurrent actor updating the loop
+  let readCount = 0;
+  const originalRead = p.readWorkflowState.bind(p);
+  p.readWorkflowState = async (id) => {
+    readCount++;
+    const data = await originalRead(id);
+    if (readCount === 2 && data?.reviewLoop) {
+      data.reviewLoop.updatedAt = '2026-11-02T12:00:05.000Z';
+      data.reviewLoop.round = 3;
+    }
+    return data;
+  };
+
+  await assert.rejects(
+    () => overrideLoopBudget({
+      persistence: p,
+      loopId: 'concurrent-loop',
+      maxUsage: 500000,
+      reason: 'Testing concurrency',
+    }),
+    /concurrent modification detected in loop concurrent-loop/,
+  );
+});
+
+test('acquireLoopFileLease guards against concurrent override-budget while worker holds lease', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'rl-override-lease-'));
+  try {
+    const loopId = 'test-concurrent-override-loop';
+    // Worker / controller process acquires the loop file lease
+    const workerLease = await acquireLoopFileLease({ runtimeRoot: root, loopId });
+    assert.equal(workerLease.ok, true);
+
+    // Concurrent override-budget CLI contender tries to acquire the lease
+    const contenderLease = await acquireLoopFileLease({ runtimeRoot: root, loopId });
+    assert.equal(contenderLease.ok, false);
+    assert.match(
+      contenderLease.heldBy?.reason ?? 'another process holds the loop lease',
+      /another process holds the loop lease|active/i,
+    );
+
+    // Release worker lease
+    await workerLease.release();
+
+    // Now override-budget can acquire safely
+    const overrideLease = await acquireLoopFileLease({ runtimeRoot: root, loopId });
+    assert.equal(overrideLease.ok, true);
+    await overrideLease.release();
+  } finally {
+    await rm(root, { recursive: true, force: true }).catch(() => {});
+  }
 });
