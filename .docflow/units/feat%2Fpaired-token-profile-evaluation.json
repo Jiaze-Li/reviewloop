@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:24:14.734Z",
+  "updatedAt": "2026-11-02T15:26:06.577Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "test: compare measured percentage with floating-point tolerance",
+    "current": "fix: require matching actual provider identity in paired Token usage evidence",
     "next": "",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-11-02T23:24:01+08:00",
         "text": "docs: add fail-closed paired token evaluation reproduction steps"
+      },
+      {
+        "at": "2026-11-02T23:25:56+08:00",
+        "text": "test: compare measured percentage with floating-point tolerance"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:24:01+08:00",
         "message": "test: compare measured percentage with floating-point tolerance"
+      },
+      {
+        "sha": "fce4b23e8c784f6f6bfeea45570c025c0973d42e",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:25:56+08:00",
+        "message": "fix: require matching actual provider identity in paired Token usage evidence"
       }
     ],
     "pr": {
