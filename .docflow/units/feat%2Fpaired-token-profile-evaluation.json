@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:20:51.628Z",
+  "updatedAt": "2026-11-02T15:21:19.546Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "feat: add read-only CLI for independently verifiable paired profile comparison",
+    "current": "test: forbid invalid empirical token savings claims and verify read-only paired CLI",
     "next": "",
     "history": [
       {
         "at": "2026-11-02T23:20:36+08:00",
         "text": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs"
+      },
+      {
+        "at": "2026-11-02T23:21:10+08:00",
+        "text": "feat: add read-only CLI for independently verifiable paired profile comparison"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:20:36+08:00",
         "message": "feat: add read-only CLI for independently verifiable paired profile comparison"
+      },
+      {
+        "sha": "58b5cc56c05c85348f6936a46ff81c6aed98d4aa",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:21:10+08:00",
+        "message": "test: forbid invalid empirical token savings claims and verify read-only paired CLI"
       }
     ],
     "pr": null,
