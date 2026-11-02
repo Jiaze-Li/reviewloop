@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:10:03.864Z",
+  "updatedAt": "2026-11-02T14:29:03.164Z",
   "task": {
     "id": "feat/evidence-legacy-compat",
     "branch": "feat/evidence-legacy-compat",
     "title": "feat/evidence-legacy-compat",
     "task": "Development branch: feat/evidence-legacy-compat",
     "started": "2026-11-02T22:09:08+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "test: preserve legacy persisted evidence without weakening fresh proof rejection",
     "next": "",
     "history": [
@@ -32,13 +32,15 @@
     ],
     "pr": {
       "number": 28,
-      "state": "open",
+      "state": "closed",
       "title": "fix: preserve legacy persisted evidence across hollow-pointer policy upgrades",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/28",
-      "merged": false,
-      "updatedAt": "2026-11-02T14:09:53Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T14:28:52Z",
+      "closedAt": "2026-11-02T14:28:52Z",
+      "updatedAt": "2026-11-02T14:28:53Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T14:28:52Z",
+    "outcome": "Merged"
   }
 }
