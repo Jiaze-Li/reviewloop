@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:14:14.596Z",
+  "updatedAt": "2026-11-02T14:15:05.037Z",
   "task": {
     "id": "feat/token-profiling-cli",
     "branch": "feat/token-profiling-cli",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/token-profiling-cli",
     "started": "2026-11-02T22:13:30+08:00",
     "status": "In progress",
-    "current": "feat: expose zero-token reviewloop profile CLI with JSON output",
+    "current": "test: cover durable token profile accounting, unknowns and read-only CLI",
     "next": "",
     "history": [
       {
         "at": "2026-11-02T22:13:54+08:00",
         "text": "feat: add read-only per-call and per-round token profile projection"
+      },
+      {
+        "at": "2026-11-02T22:14:44+08:00",
+        "text": "feat: expose zero-token reviewloop profile CLI with JSON output"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/token-profiling-cli",
         "timestamp": "2026-11-02T22:13:54+08:00",
         "message": "feat: expose zero-token reviewloop profile CLI with JSON output"
+      },
+      {
+        "sha": "ee9620de73dc59df4d07a05f5a4ed64822e67396",
+        "branch": "feat/token-profiling-cli",
+        "timestamp": "2026-11-02T22:14:44+08:00",
+        "message": "test: cover durable token profile accounting, unknowns and read-only CLI"
       }
     ],
     "pr": null,
