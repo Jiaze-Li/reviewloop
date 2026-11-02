@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T12:44:55.859Z",
+  "updatedAt": "2026-11-02T12:58:52.796Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/evidence-protocol-budget-override",
     "started": "2026-11-02T20:25:14+08:00",
     "status": "In progress",
-    "current": "feat: add per-loop budget override CLI and integrate with spend authority",
+    "current": "fix: enforce monotonic budget override and isolate convergence limits",
     "next": "Create a pull request for the evidence protocol and budget override improvements",
     "history": [
       {
         "at": "2026-11-02T20:42:34+08:00",
         "text": "feat: reject hollow evidence pointers in pre-validation and clarify Worker contract"
+      },
+      {
+        "at": "2026-11-02T20:58:28+08:00",
+        "text": "feat: add per-loop budget override CLI and integrate with spend authority"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/evidence-protocol-budget-override",
         "timestamp": "2026-11-02T20:42:34+08:00",
         "message": "feat: add per-loop budget override CLI and integrate with spend authority"
+      },
+      {
+        "sha": "11172b8dba3518d6ab152116ae6b7c4d388dcab1",
+        "branch": "feat/evidence-protocol-budget-override",
+        "timestamp": "2026-11-02T20:58:28+08:00",
+        "message": "fix: enforce monotonic budget override and isolate convergence limits"
       }
     ],
     "pr": null,
