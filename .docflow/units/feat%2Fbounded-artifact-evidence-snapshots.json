@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:19:24.205Z",
+  "updatedAt": "2026-11-02T15:28:47.918Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "test: accept canonicalized explicit runtime root symlink without opening arbitrary symlink files",
+    "current": "docs: clarify canonical runtime symlink versus forbidden nested symlink hops",
     "next": "",
     "history": [
       {
@@ -50,6 +50,10 @@
       {
         "at": "2026-11-02T23:19:11+08:00",
         "text": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs"
+      },
+      {
+        "at": "2026-11-02T23:28:35+08:00",
+        "text": "test: accept canonicalized explicit runtime root symlink without opening arbitrary symlink files"
       }
     ],
     "commits": [
@@ -118,6 +122,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:19:11+08:00",
         "message": "test: accept canonicalized explicit runtime root symlink without opening arbitrary symlink files"
+      },
+      {
+        "sha": "d51b31f28f251b2674d97dbf3f118811573e80e9",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:28:35+08:00",
+        "message": "docs: clarify canonical runtime symlink versus forbidden nested symlink hops"
       }
     ],
     "pr": {
