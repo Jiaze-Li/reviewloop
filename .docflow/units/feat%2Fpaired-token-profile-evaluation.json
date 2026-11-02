@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T15:20:33.244Z",
+  "task": {
+    "id": "feat/paired-token-profile-evaluation",
+    "branch": "feat/paired-token-profile-evaluation",
+    "title": "feat/paired-token-profile-evaluation",
+    "task": "Development branch: feat/paired-token-profile-evaluation",
+    "started": "2026-11-02T23:20:18+08:00",
+    "status": "In progress",
+    "current": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "c8e00a19f6ca7779d7781997a36b6e75d62e2193",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:20:18+08:00",
+        "message": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
