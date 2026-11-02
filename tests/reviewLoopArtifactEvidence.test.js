@@ -89,6 +89,17 @@ test('captures exact bounded UTF-8 data and binds its SHA to the fingerprint', a
     // The original bundle remains an immutable detached snapshot, not a
     // lazily opened file handle or a pointer the model can dereference.
     assert.equal(captured.artifactSnapshots[0].text, text);
+
+    // TextDecoder defaults strip UTF-8 BOM. Snapshot decoding must preserve
+    // BOM so the emitted text, byte count and original-byte SHA stay consistent.
+    const bomBytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]);
+    await writeFile(t.file('proof.txt'), bomBytes);
+    const bom = await captureArtifactSnapshots({ bundle: plain, runtimeRoot: t.root, loopId: t.loopId });
+    assert.equal(bom.artifactSnapshots[0].bytes, bomBytes.length);
+    assert.equal(Buffer.byteLength(bom.artifactSnapshots[0].text), bomBytes.length);
+    assert.equal(bom.artifactSnapshots[0].sha256, createHash('sha256').update(bomBytes).digest('hex'));
+    assert.ok(bom.artifactSnapshots[0].text.startsWith('\uFEFF'));
+    assert.doesNotThrow(() => evidencePromptLines(bom));
   } finally {
     await t.cleanup();
   }
