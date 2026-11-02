@@ -148,8 +148,8 @@ export function createReviewLoopMcpServer({
         loopId: z.string().min(1).describe('the loopId from reviewloop_begin'),
         evidence: z.array(z.object({
           requirementId: z.string().min(1),
-          summary: z.string().min(1),
-          artifactRef: z.string().min(1).optional(),
+          summary: z.string().min(1).describe('self-contained inline factual verification proof (e.g. metrics, command outputs, PID, test results). Reviewer has no file tools and cannot read local files or external documents; never submit a bare file pointer or "See file.md"'),
+          artifactRef: z.string().min(1).optional().describe('optional file path or identifier for human disk archival only; not read by Reviewer'),
         })).optional().describe('non-command evidence produced for the current gate; ReviewLoop binds it to the exact current code/review scope'),
       },
       outputSchema: {

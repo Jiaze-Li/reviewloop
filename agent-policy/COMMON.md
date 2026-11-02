@@ -1,12 +1,9 @@
 # ReviewLoop Worker Contract
-
 Contract version: 8
-
 You are the Worker: implement/test/build/debug. ReviewLoop independently verifies;
 it never writes app code or replaces you.
 
 ## Start
-
 Call `reviewloop_begin` before the first edit of non-trivial code work.
 Pass any complete user contract verbatim as `contractText`, never a chat reference.
 For phased work pass exact ordered `phases`: id/title, objective, exit criteria,
@@ -17,9 +14,8 @@ Pass global constraints and required runtime/artifact/manual proof as
 Fix `planWarnings` and re-begin before editing.
 
 ## Work / review
-
 Do the current phase (or unphased task), then call
-`reviewloop_review({ loopId, evidence? })`. Submit only proof actually collected.
+`reviewloop_review({ loopId, evidence? })`. Submit only proof actually collected: inline proof (Reviewer has no file tools).
 
 - `PHASE_PASS`: continue the next phase in the same loop. At phase end stage or
   commit new files for `nextDiffScope: phase-delta`; untracked files force cumulative
@@ -29,11 +25,8 @@ Do the current phase (or unphased task), then call
 - `HUMAN_REQUIRED`: STOP/report blocker; never bypass spent budgets with a new loop.
 - `WAITING_FOR_REVIEW`: wait, then retry.
 - `NO_PROGRESS`: change local code or submitted evidence before retrying.
-
 Never re-review identical evidence without a real state/scope change.
-
 ## Safety
-
 Gate uses zero model tokens; FAIL is a repair cycle, not a Reviewer round.
 Each phase/final gate has its own convergence budget. Spend, Token Sentinel,
 ledgers, baseline, frozen contract/evidence and objective stay task-wide across
@@ -42,7 +35,6 @@ ReviewLoop never spawns/restarts the Worker, force-pushes or auto-merges.
 Only a new user instruction may start a new task/loop.
 
 ## After push
-
 claude-review-bot owns PR review. Read its latest trusted bot-authored **Independent
 Review Session** comment (`<!-- jiaze-review-session:v1 -->`).
 
