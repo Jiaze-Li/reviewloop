@@ -110,7 +110,9 @@ async function readSafeSnapshot({ runtimeRoot, loopId, name }) {
     const bytes = buf.subarray(0, got);
     let text;
     try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      // Preserve UTF-8 BOM as U+FEFF so the decoded string re-encodes to
+      // the exact original bytes; otherwise byte-length and SHA binding diverge.
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     } catch {
       throw new ArtifactEvidenceError('artifact must contain valid UTF-8 text');
     }
