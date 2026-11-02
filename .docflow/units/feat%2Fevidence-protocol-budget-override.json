@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T13:25:21.814Z",
+  "updatedAt": "2026-11-02T13:30:24.787Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/evidence-protocol-budget-override",
     "started": "2026-11-02T20:25:14+08:00",
     "status": "In progress",
-    "current": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message",
+    "current": "fix: enforce optimistic concurrency check and clarify un-restored state output",
     "next": "Create a pull request for the evidence protocol and budget override improvements",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-02T21:24:16+08:00",
         "text": "fix: enforce monotonic budget override and isolate convergence limits"
+      },
+      {
+        "at": "2026-11-02T21:30:05+08:00",
+        "text": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "feat/evidence-protocol-budget-override",
         "timestamp": "2026-11-02T21:24:16+08:00",
         "message": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message"
+      },
+      {
+        "sha": "61ef9d0728a2c0b1d8b998e635008f5fb0a22c93",
+        "branch": "feat/evidence-protocol-budget-override",
+        "timestamp": "2026-11-02T21:30:05+08:00",
+        "message": "fix: enforce optimistic concurrency check and clarify un-restored state output"
       }
     ],
     "pr": {
