@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T14:09:27.573Z",
+  "task": {
+    "id": "feat/evidence-legacy-compat",
+    "branch": "feat/evidence-legacy-compat",
+    "title": "feat/evidence-legacy-compat",
+    "task": "Development branch: feat/evidence-legacy-compat",
+    "started": "2026-11-02T22:09:08+08:00",
+    "status": "In progress",
+    "current": "fix: apply hollow evidence preflight only to new submissions",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "5cdc9b21ec29923fc28b19d33a84b93470e46391",
+        "branch": "feat/evidence-legacy-compat",
+        "timestamp": "2026-11-02T22:09:08+08:00",
+        "message": "fix: apply hollow evidence preflight only to new submissions"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
