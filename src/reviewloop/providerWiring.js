@@ -712,8 +712,10 @@ function reviewScopePromptLines(reviewScope) {
   return [];
 }
 
-// Lossless path-prefix factoring only: every global changed path still reaches
-// every chunk. JSON tuples preserve order, duplicates and unusual path bytes.
+// Lossless changed-path factoring only: every global changed path still reaches
+// every chunk. Choose the shortest of plain text, adjacent-directory groups,
+// and an indexed directory dictionary. All encodings preserve order, duplicates
+// and unusual path bytes; no changed files or cross-file context are omitted.
 export function changedFilesPrompt(files = []) {
   const plain = `CHANGED FILES: ${files.join(', ') || '(none)'}`;
   if (!files.length || files.some((file) => typeof file !== 'string')) return plain;
@@ -728,7 +730,27 @@ export function changedFilesPrompt(files = []) {
   }
   const compact = 'CHANGED FILES (JSON [directory prefix, basenames]; concatenate prefix + each basename for EVERY full path):\n'
     + JSON.stringify(groups);
-  return compact.length < plain.length ? compact : plain;
+  // An index dictionary beats adjacent groups when long directory prefixes
+  // recur non-consecutively (e.g. A/file1, B/file2, A/file3, B/file4).
+  // JSON string escaping retains names with punctuation, newlines and Unicode.
+  const directories = [];
+  const dictionaryIndex = new Map();
+  const entries = [];
+  for (const file of files) {
+    const slash = file.lastIndexOf('/');
+    const prefix = file.slice(0, slash + 1);
+    const basename = file.slice(slash + 1);
+    if (!dictionaryIndex.has(prefix)) {
+      dictionaryIndex.set(prefix, directories.length);
+      directories.push(prefix);
+    }
+    entries.push([dictionaryIndex.get(prefix), basename]);
+  }
+  const indexed = 'CHANGED FILES (JSON [directories, ordered [directoryIndex, basename] entries]; path=directory+basename):\n'
+    + JSON.stringify([directories, entries]);
+  return [compact, indexed].reduce((shortest, candidate) => (
+    candidate.length < shortest.length ? candidate : shortest
+  ), plain);
 }
 
 export function buildReviewerInvoke() {
@@ -837,12 +859,12 @@ export function buildSupervisorInvoke() {
       ...evidencePromptLines(evidence),
       `CURRENT GLOBAL REVIEW ROUND: ${round ?? 'unknown'}; CONVERGENCE EPOCH: ${convergenceEpoch}; PRIOR SUPERVISOR ESCALATIONS: ${supervisorEscalationCount}`,
       priorSignatures?.length
-        ? `RECENT CONVERGENCE HISTORY (signatures only):\n${JSON.stringify(priorSignatures.slice(-6), null, 2)}`
+        ? `RECENT CONVERGENCE HISTORY (signatures only):\n${JSON.stringify(priorSignatures.slice(-6))}`
         : '',
       priorSupervisorGuidance
         ? `PRIOR SUPERVISOR GUIDANCE:\n${priorSupervisorGuidance}`
         : '',
-      `CURRENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings, null, 2)}`,
+      `CURRENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings)}`,
       'Diagnose WHY Reviewer/Worker repair has not converged. Do not merely repeat the latest Reviewer finding.',
       'Choose REWORK when the blocker is valid but the Worker needs a genuinely new repair strategy.',
       'Choose REVIEWER_RECONSIDER when the implementation should be independently re-reviewed without requiring a code change because the blocker is out of scope, already satisfied, or based on a mistaken invariant.',
