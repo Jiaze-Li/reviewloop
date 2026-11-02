@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:15:37.961Z",
+  "updatedAt": "2026-11-02T14:29:43.633Z",
   "task": {
     "id": "feat/token-profiling-cli",
     "branch": "feat/token-profiling-cli",
     "title": "feat/token-profiling-cli",
     "task": "Development branch: feat/token-profiling-cli",
     "started": "2026-11-02T22:13:30+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "docs: document token profiling CLI and accounting limitations",
     "next": "",
     "history": [
@@ -52,13 +52,15 @@
     ],
     "pr": {
       "number": 29,
-      "state": "open",
+      "state": "closed",
       "title": "feat: add read-only per-loop token profiling CLI",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/29",
-      "merged": false,
-      "updatedAt": "2026-11-02T14:15:25Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T14:29:26Z",
+      "closedAt": "2026-11-02T14:29:26Z",
+      "updatedAt": "2026-11-02T14:29:26Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T14:29:26Z",
+    "outcome": "Merged"
   }
 }
