@@ -45,6 +45,13 @@ next frozen phase in the same loop), `PASS` (final whole-task certification),
 Full Worker contract: [`agent-policy/COMMON.md`](agent-policy/COMMON.md).
 
 
+Optional `reviewloop-artifact:<filename>` references for frozen
+`type:"artifact"` requirements can carry a bounded, SHA-256-bound UTF-8
+snapshot from the current loop's runtime artifact directory into the isolated
+Reviewer. These bytes are **untrusted Worker-authored data**, not proof of
+genuine execution; normal legacy artifact paths are never opened. See
+[Artifact Evidence Protocol](docs/ARTIFACT_EVIDENCE.md).
+
 ## Phase-aware large tasks
 
 Large task contracts may supply an ordered frozen phase plan at

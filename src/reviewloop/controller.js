@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { evidenceBlockerRequirementIds } from './evidenceConvergence.js';
+import { ArtifactEvidenceError, captureArtifactSnapshots, artifactSnapshotsStillMatch } from './artifactEvidence.js';
 import { Persistence } from '../orchestrator/persistence.js';
 import { isAuthorizationFailure } from '../orchestrator/errors.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
@@ -68,6 +69,7 @@ import {
   evidenceStatusForScope,
   reviewerEvidenceBundle,
   evidenceBundleFingerprint,
+  evidencePromptLines,
   buildResumePacket,
 } from './contractEvidence.js';
 
@@ -214,8 +216,14 @@ export function createReviewLoopController({
     try {
       // Binding validates the whole batch and prospective aggregate before
       // changing records. Invalid input cannot persist an accepted prefix.
+      // Stage the complete batch first: an invalid artifact may not make
+      // earlier entries in the same submission durable before model spend.
+      const stagedState = {
+        ...loopState,
+        evidenceRecords: [...(loopState.evidenceRecords ?? [])],
+      };
       bindEvidenceSubmissions({
-        loopState,
+        loopState: stagedState,
         objective,
         reviewScope,
         submissions,
@@ -224,23 +232,35 @@ export function createReviewLoopController({
         now: new Date(clock()).toISOString(),
       });
       // Includes persisted records: upgrading/reloading cannot bypass limits.
-      const bundle = reviewerEvidenceBundle({
-        loopState, objective, reviewScope, evidenceFingerprint,
+      const plainBundle = reviewerEvidenceBundle({
+        loopState: stagedState, objective, reviewScope, evidenceFingerprint,
       });
       const status = evidenceStatusForScope({
-        loopState, objective, reviewScope, evidenceFingerprint,
+        loopState: stagedState, objective, reviewScope, evidenceFingerprint,
       });
       if (status.missing.length) {
+        // Partial, otherwise valid submissions remain usable on the next call.
+        loopState.evidenceRecords = stagedState.evidenceRecords;
         const ids = status.missing.map((r) => r.id);
         return rework(`required evidence missing for ${reviewScope.id}: ${ids.join(', ')}`, status.missing);
       }
+      // Only explicitly namespaced refs are opened. Every other artifactRef
+      // retains legacy human-only semantics. The Reviewer receives the exact
+      // bounded UTF-8 byte snapshot, never filesystem tools or a bare path.
+      const bundle = await captureArtifactSnapshots({
+        bundle: plainBundle, runtimeRoot, loopId: loopState.loopId,
+      });
+      // Account for the full snapshot content in the existing prompt limit,
+      // before accepting the staged evidence or authorizing a model call.
+      evidencePromptLines(bundle);
+      loopState.evidenceRecords = stagedState.evidenceRecords;
       return {
         blocked: false,
         bundle,
         proofFingerprint: evidenceBundleFingerprint(bundle),
       };
     } catch (err) {
-      if (!(err instanceof EvidenceValidationError)) throw err;
+      if (!(err instanceof EvidenceValidationError) && !(err instanceof ArtifactEvidenceError)) throw err;
       // Deterministic input rejection consumes no Reviewer/Supervisor round,
       // does not latch no-progress, and never echoes the rejected raw proof.
       return rework(err.message, [], unacceptedEvidence(submissions, 'INVALID_EVIDENCE'));
@@ -998,6 +1018,20 @@ export function createReviewLoopController({
       return spendDenialResult(loopState, err, await spend.telemetry());
     }
     const review = reviewOut.review;
+    // The Worker can update its artifact file while chunks are being reviewed.
+    // A PASS must not certify bytes other than those sent to the Reviewer.
+    if (!(await artifactSnapshotsStillMatch({
+      bundle: evidenceCheck.bundle, runtimeRoot, loopId: loopState.loopId,
+    }))) {
+      loopState.chunkReviewCheckpoint = null;
+      loopState.lastReviewedFingerprint = null;
+      loopState.lastReview = null;
+      return evidenceRework({
+        loopState, gate, head: delta.currentHead ?? null,
+        reason: 'artifact evidence changed or became unavailable while the Reviewer was running; recapture stable evidence and re-review (no PASS authorized)',
+        receipt: unacceptedEvidence(evidence, 'ARTIFACT_CHANGED'),
+      });
+    }
     review.reviewedFingerprint = fp;
     // The Reviewer audit identity includes one-shot Supervisor adjudication,
     // but once that adjudication is consumed, future NO_PROGRESS checks must
