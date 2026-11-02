@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T13:36:25.770Z",
+  "updatedAt": "2026-11-02T13:41:58.912Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
     "title": "feat/evidence-protocol-budget-override",
     "task": "Development branch: feat/evidence-protocol-budget-override",
     "started": "2026-11-02T20:25:14+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "fix: enforce optimistic concurrency check and clarify un-restored state output",
     "next": "Await human authorization to merge PR #27",
     "history": [
@@ -62,13 +62,15 @@
     ],
     "pr": {
       "number": 27,
-      "state": "open",
+      "state": "closed",
       "title": "feat: reject hollow evidence pointers and add per-loop budget override CLI",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/27",
-      "merged": false,
-      "updatedAt": "2026-11-02T13:30:16Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T13:41:47Z",
+      "closedAt": "2026-11-02T13:41:48Z",
+      "updatedAt": "2026-11-02T13:41:48Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T13:41:47Z",
+    "outcome": "Merged"
   }
 }
