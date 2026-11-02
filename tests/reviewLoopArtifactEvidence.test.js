@@ -70,6 +70,12 @@ test('captures exact bounded UTF-8 data and binds its SHA to the fingerprint', a
     const plain = bundle();
     const before = evidenceBundleFingerprint(plain);
     const captured = await captureArtifactSnapshots({ bundle: plain, runtimeRoot: t.root, loopId: t.loopId });
+    // User-configured runtime root aliases may be symlinks after canonicalizing
+    // the root; only Worker-controlled subdirectories/files must be real.
+    const rootAlias = path.join(t.root, 'runtime-alias');
+    await symlink(t.root, rootAlias, 'dir');
+    const viaAlias = await captureArtifactSnapshots({ bundle: plain, runtimeRoot: rootAlias, loopId: t.loopId });
+    assert.equal(viaAlias.artifactSnapshots[0].sha256, captured.artifactSnapshots[0].sha256);
     const proof = captured.artifactSnapshots[0];
     assert.equal(proof.text, text);
     assert.equal(proof.bytes, Buffer.byteLength(text));
