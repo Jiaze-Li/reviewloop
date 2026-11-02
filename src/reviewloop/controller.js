@@ -5,6 +5,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
+import { evidenceBlockerRequirementIds } from './evidenceConvergence.js';
 import { Persistence } from '../orchestrator/persistence.js';
 import { isAuthorizationFailure } from '../orchestrator/errors.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from './runtimeDir.js';
@@ -531,7 +532,7 @@ export function createReviewLoopController({
     return { reconsiderationPending, canonicalFp, effectiveEvidenceFingerprint, fp };
   }
 
-  function recordFindingSignatures(loopState, review) {
+  function recordFindingSignatures(loopState, review, reviewScope) {
     loopState.findingSignatureHistory = [
       ...(loopState.findingSignatureHistory ?? []),
       {
@@ -540,6 +541,12 @@ export function createReviewLoopController({
         epoch: loopState.convergenceEpoch ?? 0,
         epochReviewRound: loopState.epochReviewRound ?? loopState.gateRound,
         signatures: review.findingSignatures,
+        blockingCount: review.blockingFindings.length,
+        // Deterministic diagnostic identities, not a replacement for findings.
+        // Missing/ambiguous IDs are intentionally not inferred or persisted.
+        evidenceBlockerRequirementIds: evidenceBlockerRequirementIds({
+          review, objective: loopState.objective, reviewScope,
+        }),
       },
     ];
   }
@@ -1019,8 +1026,8 @@ export function createReviewLoopController({
     // A valid reconsideration has now been consumed by this Reviewer result.
     // Failed/cancelled reviews above leave it pending for safe retry.
     loopState.pendingReviewerReconsideration = null;
-    const decision = decideConvergence({ loopState, review });
-    recordFindingSignatures(loopState, review);
+    const decision = decideConvergence({ loopState, review, reviewScope });
+    recordFindingSignatures(loopState, review, reviewScope);
 
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
