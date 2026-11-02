@@ -134,7 +134,7 @@ test('overrideLoopBudget durably records audit trail and restores SPEND_DENIED l
         state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
         round: 8,
         currentPhaseIndex: 1,
-        budgetExhausted: true,
+        budgetExhausted: false,
         reason: 'ReviewLoop model spend blocked: SPEND_DENIED',
       },
       reviewLoopSpend: {
@@ -523,6 +523,46 @@ test('overrideLoopBudget refuses to restore loop with non-spend-denied round cei
   assert.equal(res.loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
 
   const updated = await p.readWorkflowState('round-ceiling-loop');
+  assert.equal(updated.reviewLoop.state, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+  assert.equal(updated.reviewLoop.budgetExhausted, true);
+});
+
+test('overrideLoopBudget refuses to restore conflicting state where budgetExhausted === true and SPEND_DENIED are both present', async () => {
+  const p = new MockPersistence({
+    'conflicting-state-loop': {
+      reviewLoop: {
+        loopId: 'conflicting-state-loop',
+        state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        round: 8,
+        budgetExhausted: true,
+        reason: 'ReviewLoop model spend blocked: SPEND_DENIED (ReviewLoop usage-volume ceiling (400000) reached)',
+        history: [
+          { from: 'REVIEWING', to: REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason: 'model spend blocked: SPEND_DENIED' },
+        ],
+      },
+      reviewLoopSpend: {
+        records: [{ usageVolume: 403165, costUsd: 1.0 }],
+      },
+    },
+  });
+
+  const res = await overrideLoopBudget({
+    persistence: p,
+    loopId: 'conflicting-state-loop',
+    maxUsage: 480000,
+    reason: 'Trying to restore loop with conflicting budgetExhausted=true and SPEND_DENIED',
+  });
+
+  // Limit expansion is recorded and audited...
+  assert.equal(res.previousLimit, 400000);
+  assert.equal(res.newLimit, 480000);
+  assert.equal(res.overridesCount, 1);
+  // ...but state is NOT restored because budgetExhausted === true strictly denotes
+  // convergence exhaustion and takes precedence over SPEND_DENIED in error messages.
+  assert.equal(res.stateRestored, false);
+  assert.equal(res.loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+
+  const updated = await p.readWorkflowState('conflicting-state-loop');
   assert.equal(updated.reviewLoop.state, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
   assert.equal(updated.reviewLoop.budgetExhausted, true);
 });

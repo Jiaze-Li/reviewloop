@@ -159,22 +159,19 @@ export async function overrideLoopBudget({
       || /supervisor\s+call\s+ceiling/i.test(denialReason);
     const isCallCeilingDenial = reviewerCallsExhausted || supervisorCallsExhausted;
 
-    // Explicit SPEND_DENIED stop code from spend authority / controller
-    const hasSpendDeniedCode = /(?:^|[^a-z0-9_])SPEND_DENIED(?:[^a-z0-9_]|$)/i.test(denialReason);
-
     // Convergence exhaustion is exclusively managed by reopenExhaustedGate (reopen-gate).
-    // A loop is convergence-exhausted if budgetExhausted === true without an explicit SPEND_DENIED stop,
-    // or if the reason indicates review round/convergence failure.
-    const isConvergenceExhausted = !hasSpendDeniedCode && (
-      loop.budgetExhausted === true
-      || /convergence|review did not converge|round ceiling|round.*reached/i.test(denialReason)
-    );
+    // The durable state flag budgetExhausted === true strictly denotes that automatic convergence
+    // is spent and takes precedence over any error message. If budgetExhausted === true (or if the
+    // reason indicates convergence failure), override-budget NEVER restores state to REWORK.
+    const isConvergenceExhausted = loop.budgetExhausted === true
+      || /convergence|review did not converge/i.test(denialReason);
+
+    // Explicit SPEND_DENIED stop code or volume/cost ceiling from spend authority
+    const isSpendCeilingReason = /(?:^|[^a-z0-9_])SPEND_DENIED(?:[^a-z0-9_]|$)/i.test(denialReason)
+      || /(?:usage-volume|cost|usage)\s*ceiling/i.test(denialReason);
 
     // A real volume/cost ceiling denial must have SPEND_DENIED or specific volume/cost ceiling,
     // and must NOT be convergence exhaustion, call ceiling, or non-ceiling stop.
-    const isSpendCeilingReason = hasSpendDeniedCode
-      || /(?:usage-volume|cost|usage)\s*ceiling/i.test(denialReason);
-
     const isSpendCeilingDenial = !isNonCeilingStop
       && !isCallCeilingDenial
       && !isConvergenceExhausted
