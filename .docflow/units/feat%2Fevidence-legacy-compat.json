@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:09:27.573Z",
+  "updatedAt": "2026-11-02T14:09:48.483Z",
   "task": {
     "id": "feat/evidence-legacy-compat",
     "branch": "feat/evidence-legacy-compat",
@@ -8,15 +8,26 @@
     "task": "Development branch: feat/evidence-legacy-compat",
     "started": "2026-11-02T22:09:08+08:00",
     "status": "In progress",
-    "current": "fix: apply hollow evidence preflight only to new submissions",
+    "current": "test: preserve legacy persisted evidence without weakening fresh proof rejection",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-02T22:09:36+08:00",
+        "text": "fix: apply hollow evidence preflight only to new submissions"
+      }
+    ],
     "commits": [
       {
         "sha": "5cdc9b21ec29923fc28b19d33a84b93470e46391",
         "branch": "feat/evidence-legacy-compat",
         "timestamp": "2026-11-02T22:09:08+08:00",
         "message": "fix: apply hollow evidence preflight only to new submissions"
+      },
+      {
+        "sha": "a14b32e3c20ff3b8c5c6252ceceb4dbc08b13d12",
+        "branch": "feat/evidence-legacy-compat",
+        "timestamp": "2026-11-02T22:09:36+08:00",
+        "message": "test: preserve legacy persisted evidence without weakening fresh proof rejection"
       }
     ],
     "pr": null,
