@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:43:52.184Z",
+  "updatedAt": "2026-11-02T14:44:35.124Z",
   "task": {
     "id": "perf/lossless-reviewer-prompt-compaction",
     "branch": "perf/lossless-reviewer-prompt-compaction",
@@ -60,7 +60,14 @@
         "message": "test: prove lossless cross-chunk paths and Supervisor prompt compaction"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 31,
+      "state": "open",
+      "title": "perf: lossless Reviewer file-list factoring and compact Supervisor context",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/31",
+      "merged": false,
+      "updatedAt": "2026-11-02T14:44:19Z"
+    },
     "completed": null,
     "outcome": null
   }
