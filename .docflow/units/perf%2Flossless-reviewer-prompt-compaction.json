@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T14:41:15.310Z",
+  "task": {
+    "id": "perf/lossless-reviewer-prompt-compaction",
+    "branch": "perf/lossless-reviewer-prompt-compaction",
+    "title": "perf/lossless-reviewer-prompt-compaction",
+    "task": "Development branch: perf/lossless-reviewer-prompt-compaction",
+    "started": "2026-11-02T22:41:05+08:00",
+    "status": "In progress",
+    "current": "perf: losslessly factor interleaved changed paths and minify Supervisor JSON",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "9fc165709ff26bdbc14e8df5add470d132dbe0f7",
+        "branch": "perf/lossless-reviewer-prompt-compaction",
+        "timestamp": "2026-11-02T22:41:05+08:00",
+        "message": "perf: losslessly factor interleaved changed paths and minify Supervisor JSON"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
