@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T15:11:32.731Z",
+  "task": {
+    "id": "feat/bounded-artifact-evidence-snapshots",
+    "branch": "feat/bounded-artifact-evidence-snapshots",
+    "title": "feat/bounded-artifact-evidence-snapshots",
+    "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
+    "started": "2026-11-02T23:11:23+08:00",
+    "status": "In progress",
+    "current": "feat: securely capture bounded untrusted per-loop text artifact snapshots",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "bc62a5f88a4cea798a06fa485174fce97d02ca22",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:11:23+08:00",
+        "message": "feat: securely capture bounded untrusted per-loop text artifact snapshots"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
