@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:42:50.917Z",
+  "updatedAt": "2026-11-02T14:43:52.184Z",
   "task": {
     "id": "perf/lossless-reviewer-prompt-compaction",
     "branch": "perf/lossless-reviewer-prompt-compaction",
@@ -8,7 +8,7 @@
     "task": "Development branch: perf/lossless-reviewer-prompt-compaction",
     "started": "2026-11-02T22:41:05+08:00",
     "status": "In progress",
-    "current": "refactor: use exact Supervisor prompt sections for transmitted text and profiling",
+    "current": "test: prove lossless cross-chunk paths and Supervisor prompt compaction",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-02T22:42:40+08:00",
         "text": "feat: include Supervisor history and blockers in token profile character metrics"
+      },
+      {
+        "at": "2026-11-02T22:43:38+08:00",
+        "text": "refactor: use exact Supervisor prompt sections for transmitted text and profiling"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "perf/lossless-reviewer-prompt-compaction",
         "timestamp": "2026-11-02T22:42:40+08:00",
         "message": "refactor: use exact Supervisor prompt sections for transmitted text and profiling"
+      },
+      {
+        "sha": "7faf765a0b4daddc1acf33e76417d291bd4788f2",
+        "branch": "perf/lossless-reviewer-prompt-compaction",
+        "timestamp": "2026-11-02T22:43:38+08:00",
+        "message": "test: prove lossless cross-chunk paths and Supervisor prompt compaction"
       }
     ],
     "pr": null,
