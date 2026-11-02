@@ -9,7 +9,7 @@
 
 import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 export const ARTIFACT_REF_PREFIX = 'reviewloop-artifact:';
@@ -61,9 +61,18 @@ async function readSafeSnapshot({ runtimeRoot, loopId, name }) {
     throw new ArtifactEvidenceError('invalid runtime root or loop identity');
   }
 
-  const loopDir = path.join(runtimeRoot, loopId);
+  // A symlinked runtime ROOT is an explicit user configuration and is safe
+  // after canonicalization. The per-loop and artifacts subdirectories must
+  // still be real directories: Worker-created symlink hops are never followed.
+  let canonicalRoot;
+  try {
+    canonicalRoot = await realpath(runtimeRoot);
+  } catch {
+    throw new ArtifactEvidenceError('the configured runtime root is unavailable');
+  }
+  await safeDirectory(canonicalRoot);
+  const loopDir = path.join(canonicalRoot, loopId);
   const artifactsDir = path.join(loopDir, 'artifacts');
-  await safeDirectory(runtimeRoot);
   await safeDirectory(loopDir);
   await safeDirectory(artifactsDir);
   const file = path.join(artifactsDir, name);
