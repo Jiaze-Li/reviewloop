@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:26:11.368Z",
+  "updatedAt": "2026-11-02T15:26:17.724Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "fix: require matching actual provider identity in paired Token usage evidence",
+    "current": "test: forbid cross-provider Token savings comparisons",
     "next": "",
     "history": [
       {
@@ -38,6 +38,10 @@
       {
         "at": "2026-11-02T23:25:56+08:00",
         "text": "test: compare measured percentage with floating-point tolerance"
+      },
+      {
+        "at": "2026-11-02T23:26:07+08:00",
+        "text": "fix: require matching actual provider identity in paired Token usage evidence"
       }
     ],
     "commits": [
@@ -88,6 +92,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:25:56+08:00",
         "message": "fix: require matching actual provider identity in paired Token usage evidence"
+      },
+      {
+        "sha": "e92886dc1dba4f70835377a6b77f5a4b35f445da",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:26:07+08:00",
+        "message": "test: forbid cross-provider Token savings comparisons"
       }
     ],
     "pr": {
