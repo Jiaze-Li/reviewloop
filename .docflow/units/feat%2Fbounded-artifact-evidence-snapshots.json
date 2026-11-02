@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:28:47.918Z",
+  "updatedAt": "2026-11-02T15:34:06.474Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
     "title": "feat/bounded-artifact-evidence-snapshots",
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "docs: clarify canonical runtime symlink versus forbidden nested symlink hops",
     "next": "",
     "history": [
@@ -132,13 +132,15 @@
     ],
     "pr": {
       "number": 33,
-      "state": "open",
+      "state": "closed",
       "title": "feat: inspect bounded untrusted artifact evidence with content-bound Reviewer snapshots",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/33",
-      "merged": false,
-      "updatedAt": "2026-11-02T15:28:37Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T15:33:44Z",
+      "closedAt": "2026-11-02T15:33:44Z",
+      "updatedAt": "2026-11-02T15:33:44Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T15:33:44Z",
+    "outcome": "Merged"
   }
 }
