@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:14:41.267Z",
+  "updatedAt": "2026-11-02T15:15:30.552Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "test: validate safe artifact snapshot capture, hashing, model binding and mid-review invalidation",
+    "current": "docs: specify safe opt-in local artifact evidence snapshot protocol",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-02T23:14:32+08:00",
         "text": "feat: stage and bind artifact snapshots after stable Gate; fail closed on in-flight changes"
+      },
+      {
+        "at": "2026-11-02T23:15:12+08:00",
+        "text": "test: validate safe artifact snapshot capture, hashing, model binding and mid-review invalidation"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:14:32+08:00",
         "message": "test: validate safe artifact snapshot capture, hashing, model binding and mid-review invalidation"
+      },
+      {
+        "sha": "f7dcb5e566b6531369b35d6ec6b3c2f16fe3b439",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:15:12+08:00",
+        "message": "docs: specify safe opt-in local artifact evidence snapshot protocol"
       }
     ],
     "pr": null,
