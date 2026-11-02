@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T12:44:09.718Z",
+  "task": {
+    "id": "feat/evidence-protocol-budget-override",
+    "branch": "feat/evidence-protocol-budget-override",
+    "title": "feat/evidence-protocol-budget-override",
+    "task": "Development branch: feat/evidence-protocol-budget-override",
+    "started": "2026-11-02T20:25:14+08:00",
+    "status": "In progress",
+    "current": "feat: add per-loop budget override CLI and integrate with spend authority",
+    "next": "",
+    "history": [
+      {
+        "at": "2026-11-02T20:42:34+08:00",
+        "text": "feat: reject hollow evidence pointers in pre-validation and clarify Worker contract"
+      }
+    ],
+    "commits": [
+      {
+        "sha": "f7a2b8ea80c0e55d50b466393d5140590cef0004",
+        "branch": "feat/evidence-protocol-budget-override",
+        "timestamp": "2026-11-02T20:25:14+08:00",
+        "message": "feat: reject hollow evidence pointers in pre-validation and clarify Worker contract"
+      },
+      {
+        "sha": "8bc95049c198ebad9d619d918e576594d65a339e",
+        "branch": "feat/evidence-protocol-budget-override",
+        "timestamp": "2026-11-02T20:42:34+08:00",
+        "message": "feat: add per-loop budget override CLI and integrate with spend authority"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
