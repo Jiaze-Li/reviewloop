@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T15:08:46.606Z",
+  "task": {
+    "id": "test/override-budget-cli-concurrency",
+    "branch": "test/override-budget-cli-concurrency",
+    "title": "test/override-budget-cli-concurrency",
+    "task": "Development branch: test/override-budget-cli-concurrency",
+    "started": "2026-11-02T23:08:34+08:00",
+    "status": "In progress",
+    "current": "test: exercise override-budget CLI against real competing process lease and persisted state",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "e1a7c60f159e5f05e6b0156106e54ea871f63f6d",
+        "branch": "test/override-budget-cli-concurrency",
+        "timestamp": "2026-11-02T23:08:34+08:00",
+        "message": "test: exercise override-budget CLI against real competing process lease and persisted state"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
