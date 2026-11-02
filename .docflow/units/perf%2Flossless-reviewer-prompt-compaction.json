@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:42:14.249Z",
+  "updatedAt": "2026-11-02T14:42:17.765Z",
   "task": {
     "id": "perf/lossless-reviewer-prompt-compaction",
     "branch": "perf/lossless-reviewer-prompt-compaction",
@@ -8,12 +8,16 @@
     "task": "Development branch: perf/lossless-reviewer-prompt-compaction",
     "started": "2026-11-02T22:41:05+08:00",
     "status": "In progress",
-    "current": "feat: record Supervisor prompt component lengths without storing text",
+    "current": "feat: include Supervisor history and blockers in token profile character metrics",
     "next": "",
     "history": [
       {
         "at": "2026-11-02T22:41:54+08:00",
         "text": "perf: losslessly factor interleaved changed paths and minify Supervisor JSON"
+      },
+      {
+        "at": "2026-11-02T22:42:05+08:00",
+        "text": "feat: record Supervisor prompt component lengths without storing text"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "perf/lossless-reviewer-prompt-compaction",
         "timestamp": "2026-11-02T22:41:54+08:00",
         "message": "feat: record Supervisor prompt component lengths without storing text"
+      },
+      {
+        "sha": "5baa32b3b404dd0cc054ae1aff72c7106c966c9f",
+        "branch": "perf/lossless-reviewer-prompt-compaction",
+        "timestamp": "2026-11-02T22:42:05+08:00",
+        "message": "feat: include Supervisor history and blockers in token profile character metrics"
       }
     ],
     "pr": null,
