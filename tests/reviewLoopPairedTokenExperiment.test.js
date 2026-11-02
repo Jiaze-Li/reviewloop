@@ -24,7 +24,7 @@ function workflow(loopId, volumes, {
     },
     reviewLoopSpend: {
       records: volumes.map((usageVolume, i) => ({
-        role: 'reviewer', round: i + 1, family: 'agy:reviewer',
+        role: 'reviewer', round: i + 1, family: 'agy:reviewer', provider: 'agy',
         model, usageVolume,
         usageKnown: !unknown,
         costKnown: !unknownCost,
@@ -72,6 +72,10 @@ test('UNKNOWN usage, mismatched provider or unfinished runs cannot produce a sav
   for (const changed of [
     workflow('after', [10], { unknown: true }),
     workflow('after', [10], { model: 'different-model' }),
+    {
+      ...workflow('after', [10]),
+      reviewLoopSpend: { records: [{ ...workflow('after', [10]).reviewLoopSpend.records[0], provider: 'other-provider' }] },
+    },
     workflow('after', [10], { state: 'REWORK' }),
     { reviewLoop: { loopId: 'after', objective: { mode: 'LOCAL', fingerprint: before.reviewLoop.objective.fingerprint },
       lastReviewedFingerprint: before.reviewLoop.lastReviewedFingerprint, state: 'PASS' } },
