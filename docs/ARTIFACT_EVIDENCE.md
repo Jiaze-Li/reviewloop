@@ -47,9 +47,10 @@ A prefixed ref requires `type:"artifact"`.
 
 - Flat, nonhidden names only; `.txt`, `.md`, `.json`, `.log`, `.csv`.
   No separators, absolute paths, `..`, directories or prefix escapes.
-- Only under `<runtimeRoot>/<loopId>/artifacts`; directories must not be
-  symlinks. Files must be regular, single-linked and opened without following a
-  symlink. Devices, hardlinks, binary/invalid UTF-8 and terminal-control text
+- Only under `<runtimeRoot>/<loopId>/artifacts`; an explicitly configured
+  symlinked runtime root is canonicalized, but the loop and artifacts
+  subdirectories must not be symlinks. Files must be regular, single-linked
+  and opened without following a symlink. Devices, hardlinks, binary/invalid UTF-8 and terminal-control text
   are refused.
 - Per file **8 KiB**, combined **16 KiB**, at most **8 files**. The existing
   **24 KiB** combined evidence prompt budget is still enforced on the bytes
