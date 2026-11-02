@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:39:14.573Z",
+  "updatedAt": "2026-11-02T14:39:37.665Z",
   "task": {
     "id": "feat/evidence-convergence-diagnostics",
     "branch": "feat/evidence-convergence-diagnostics",
@@ -50,7 +50,14 @@
         "message": "test: prove conservative obligation-stall escalation and no false early Supervisor"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 30,
+      "state": "open",
+      "title": "feat: escalate repeated unsatisfied evidence requirements without weakening review gates",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/30",
+      "merged": false,
+      "updatedAt": "2026-11-02T14:39:26Z"
+    },
     "completed": null,
     "outcome": null
   }
