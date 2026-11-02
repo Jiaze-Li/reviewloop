@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:09:05.038Z",
+  "updatedAt": "2026-11-02T15:33:32.653Z",
   "task": {
     "id": "test/override-budget-cli-concurrency",
     "branch": "test/override-budget-cli-concurrency",
     "title": "test/override-budget-cli-concurrency",
     "task": "Development branch: test/override-budget-cli-concurrency",
     "started": "2026-11-02T23:08:34+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "test: exercise override-budget CLI against real competing process lease and persisted state",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 32,
-      "state": "open",
+      "state": "closed",
       "title": "test: verify override-budget CLI lease exclusion with real subprocesses",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/32",
-      "merged": false,
-      "updatedAt": "2026-11-02T15:08:52Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T15:33:22Z",
+      "closedAt": "2026-11-02T15:33:22Z",
+      "updatedAt": "2026-11-02T15:33:22Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T15:33:22Z",
+    "outcome": "Merged"
   }
 }
