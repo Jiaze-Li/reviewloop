@@ -849,6 +849,21 @@ export function buildSupervisorInvoke() {
     priorSignatures = [], priorSupervisorGuidance = null,
     transport, model, signal,
   }) => {
+    // Metadata-only duplication of the exact transmitted sections: no raw
+    // prompt or user text is persisted in the physical spend ledger.
+    const goalText = `ORIGINAL TASK GOAL (always binding): ${objective.goal}`;
+    const contractText = objective.contractText
+      ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
+      : '';
+    const scopeLines = reviewScopePromptLines(reviewScope);
+    const evidenceLines = evidencePromptLines(evidence);
+    const historyText = priorSignatures?.length
+      ? `RECENT CONVERGENCE HISTORY (signatures only):\n${JSON.stringify(priorSignatures.slice(-6))}`
+      : '';
+    const blockingText = `CURRENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings)}`;
+    const priorGuidanceText = priorSupervisorGuidance
+      ? `PRIOR SUPERVISOR GUIDANCE:\n${priorSupervisorGuidance}`
+      : '';
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
       `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
@@ -883,6 +898,16 @@ export function buildSupervisorInvoke() {
         promptChars: prompt.length,
         diffChars: 0,
         reviewPayloadChars: prompt.length,
+        promptComponentStats: {
+          goalChars: goalText.length,
+          contractChars: contractText.length,
+          contractSha256: contractText ? createHash('sha256').update(contractText).digest('hex') : null,
+          scopeChars: scopeLines.join('\n').length,
+          evidenceChars: evidenceLines.join('\n').length,
+          supervisorHistoryChars: historyText.length,
+          blockingFindingsChars: blockingText.length,
+          priorSupervisorGuidanceChars: priorGuidanceText.length,
+        },
         ...(res?.meta ?? {}),
       },
     };
