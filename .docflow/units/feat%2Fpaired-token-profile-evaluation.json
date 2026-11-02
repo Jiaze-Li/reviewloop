@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:26:21.264Z",
+  "updatedAt": "2026-11-02T15:34:16.119Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
     "title": "feat/paired-token-profile-evaluation",
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "test: forbid cross-provider Token savings comparisons",
     "next": "",
     "history": [
@@ -102,13 +102,15 @@
     ],
     "pr": {
       "number": 34,
-      "state": "open",
+      "state": "closed",
       "title": "feat: fail-closed matched-pair evaluation of ReviewLoop physical Token spend",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/34",
-      "merged": false,
-      "updatedAt": "2026-11-02T15:26:09Z"
+      "merged": true,
+      "mergedAt": "2026-11-02T15:34:05Z",
+      "closedAt": "2026-11-02T15:34:05Z",
+      "updatedAt": "2026-11-02T15:34:06Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-02T15:34:05Z",
+    "outcome": "Merged"
   }
 }
