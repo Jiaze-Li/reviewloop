@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T12:58:52.796Z",
+  "updatedAt": "2026-11-02T13:24:30.615Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/evidence-protocol-budget-override",
     "started": "2026-11-02T20:25:14+08:00",
     "status": "In progress",
-    "current": "fix: enforce monotonic budget override and isolate convergence limits",
+    "current": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message",
     "next": "Create a pull request for the evidence protocol and budget override improvements",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-02T20:58:28+08:00",
         "text": "feat: add per-loop budget override CLI and integrate with spend authority"
+      },
+      {
+        "at": "2026-11-02T21:24:16+08:00",
+        "text": "fix: enforce monotonic budget override and isolate convergence limits"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "feat/evidence-protocol-budget-override",
         "timestamp": "2026-11-02T20:58:28+08:00",
         "message": "fix: enforce monotonic budget override and isolate convergence limits"
+      },
+      {
+        "sha": "0e08c18e542ba5ce9f0f2675cdc7392bc36868e9",
+        "branch": "feat/evidence-protocol-budget-override",
+        "timestamp": "2026-11-02T21:24:16+08:00",
+        "message": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message"
       }
     ],
     "pr": null,
