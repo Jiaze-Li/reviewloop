@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T13:24:30.615Z",
+  "updatedAt": "2026-11-02T13:25:21.814Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
@@ -50,7 +50,14 @@
         "message": "fix: fail closed on budgetExhausted regardless of SPEND_DENIED message"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 27,
+      "state": "open",
+      "title": "feat: reject hollow evidence pointers and add per-loop budget override CLI",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/27",
+      "merged": false,
+      "updatedAt": "2026-11-02T13:24:58Z"
+    },
     "completed": null,
     "outcome": null
   }
