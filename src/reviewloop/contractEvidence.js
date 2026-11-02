@@ -429,7 +429,8 @@ export function normalizeEvidenceSubmissions(raw = []) {
     }
     assertEvidenceText(entry.requirementId, `${label} requirementId`, EVIDENCE_LIMITS.idBytes);
     assertEvidenceText(entry.summary, `${label} summary`, EVIDENCE_LIMITS.summaryBytes);
-    assertSubstantiveEvidenceSummary(entry.summary, `${label} summary`);
+    // Shape/size normalization is also used for historical persisted proof.
+    // Hollow-pointer policy applies only when the Worker submits NEW evidence.
     assertEvidenceText(entry.artifactRef, `${label} artifactRef`, EVIDENCE_LIMITS.artifactRefBytes, { optional: true });
     const requirementId = entry.requirementId.trim();
     if (seen.has(requirementId)) throw new EvidenceValidationError(`${label} duplicates a requirementId in this batch`);
@@ -474,6 +475,9 @@ export function validateEvidenceSubmissions({ objective, reviewScope, submission
     if (!gateMatches(requirement, reviewScope)) {
       throw new EvidenceValidationError(`evidence "${item.requirementId}" does not belong to the current gate`);
     }
+    // Only fresh submissions are subject to the new hollow-pointer policy.
+    // Previously accepted proof remains readable, bounded and Reviewer-judged.
+    assertSubstantiveEvidenceSummary(item.summary, `evidence "${item.requirementId}" summary`);
   }
   const ids = new Set(normalized.map((item) => item.requirementId));
   evidencePromptLines({
