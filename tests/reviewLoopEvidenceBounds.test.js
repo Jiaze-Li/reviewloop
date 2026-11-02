@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   EVIDENCE_LIMITS, EvidenceValidationError, normalizeEvidenceRequirements,
-  normalizeEvidenceSubmissions, bindEvidenceSubmissions, reviewerEvidenceBundle,
+  normalizeEvidenceSubmissions, validateEvidenceSubmissions, bindEvidenceSubmissions, reviewerEvidenceBundle,
   evidencePromptLines, evidenceBundleFingerprint, buildResumePacket,
 } from '../src/reviewloop/contractEvidence.js';
 
@@ -161,7 +161,11 @@ test('evidence summary rejects hollow pointers to local files and requires inlin
 
   for (const hollow of hollowExamples) {
     assert.throws(
-      () => normalizeEvidenceSubmissions([proof('r', hollow)]),
+      () => validateEvidenceSubmissions({
+        objective: { evidenceRequirements: [requirement('r')] },
+        reviewScope: scope,
+        submissions: [proof('r', hollow)],
+      }),
       (err) => {
         assert.ok(err instanceof EvidenceValidationError);
         assert.match(err.message, /contains an external file pointer without inline proof/);
@@ -182,5 +186,50 @@ test('evidence summary rejects hollow pointers to local files and requires inlin
   for (const valid of substantiveExamples) {
     const normalized = normalizeEvidenceSubmissions([proof('r', valid)]);
     assert.equal(normalized[0].summary, valid.trim());
+    assert.equal(validateEvidenceSubmissions({
+      objective: { evidenceRequirements: [requirement('r')] },
+      reviewScope: scope,
+      submissions: [proof('r', valid)],
+    })[0].summary, valid.trim());
   }
+});
+
+test('legacy hollow-pointer evidence survives reload without bypassing new-submission preflight', () => {
+  const requirements = [requirement('r')];
+  for (const historicalSummary of ['See LEGACY_PROOF.md', 'done', 'passed.']) {
+    const state = {
+      evidenceRecords: [{
+        requirementId: 'r',
+        type: 'runtime',
+        gate: 'task',
+        reviewScopeFingerprint: scope.fingerprint,
+        evidenceFingerprint: 'code-1',
+        head: 'H1',
+        summary: historicalSummary,
+        artifactRef: 'LEGACY_PROOF.md',
+        recordedAt: '2026-10-01T00:00:00.000Z',
+      }],
+    };
+    const before = structuredClone(state);
+    const oldBundle = bundle(state, requirements);
+    assert.equal(oldBundle.submissions[0].summary, historicalSummary);
+    assert.match(evidencePromptLines(oldBundle).join('\n'), /LEGACY_PROOF\.md/);
+    const oldHash = evidenceBundleFingerprint(oldBundle);
+    assert.throws(
+      () => bind(state, requirements, [proof('r', historicalSummary)]),
+      /contains an external file pointer without inline proof/,
+      'a legacy pointer may be read, but cannot be freshly resubmitted',
+    );
+    assert.deepEqual(state, before, 'rejected fresh proof must not alter persisted records');
+    assert.equal(evidenceBundleFingerprint(bundle(state, requirements)), oldHash);
+    bind(state, requirements, [proof('r', 'Executed integration test: 18 passed, 0 failed, exit code 0.')]);
+    assert.match(bundle(state, requirements).submissions[0].summary, /18 passed/);
+  }
+
+  // Compatibility does not disable existing structural and aggregate size guards.
+  const oversized = {
+    requirements,
+    submissions: [proof('r', 'x'.repeat(EVIDENCE_LIMITS.summaryBytes + 1))],
+  };
+  assert.throws(() => evidencePromptLines(oversized), /summary exceeds/);
 });
