@@ -203,11 +203,21 @@ for inspection; it is neither deleted nor reinterpreted.
 ```
 reviewloop doctor        zero-token prerequisite + repo-invariant check
 reviewloop status        list local ReviewLoop sessions
+reviewloop profile --loop <id> [--json]   read-only physical-call/token breakdown (zero model calls)
 reviewloop reopen-gate    human override: fresh convergence budget for ONE stuck gate (--loop, --reason)
 reviewloop resume         print a prompt that lets a FRESH Worker session continue the unfinished loop of this project directory (--loop to pick one)
 npm run install-global   install/refresh the global policy + MCP for present agents
 npm run doctor
 ```
+
+The `profile` command reads durable `workflow.json` spend records without
+mutating the loop or dispatching Reviewer/Supervisor calls. It reports budget
+`usageVolume`, physical calls by review round/Chunk, known-cost subtotals,
+unknown usage/cost coverage and raw cache-read/creation counters. It also shows
+prompt component **character** counts and an estimated transport-overhead proxy.
+Cache fields are provider-specific and **must not be added** to `usageVolume`;
+character counts are not exact tokens. `--json` emits the same read-only
+measurements in a machine-readable format.
 
 ## Docs
 

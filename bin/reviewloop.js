@@ -3,6 +3,7 @@
 //
 //   reviewloop doctor       zero-token prerequisite + repo-invariant check
 //   reviewloop status       list local ReviewLoop sessions and their state
+//   reviewloop profile      read-only per-loop physical-call/token breakdown
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
 //   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
@@ -21,6 +22,7 @@ import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
+import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenProfile.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 
@@ -158,6 +160,15 @@ async function overrideBudget(rest) {
   }
 }
 
+async function profile(rest) {
+  const loopId = flagValue(rest, '--loop');
+  if (!loopId) throw new Error('usage: reviewloop profile --loop <loopId> [--json]');
+  const workflow = await new Persistence(REVIEWLOOP_RUNTIME_ROOT).readWorkflowState(loopId);
+  if (!workflow?.reviewLoop) throw new Error(`unknown ReviewLoop session: ${loopId}`);
+  const report = buildTokenProfile({ loopId, workflow });
+  console.log(rest.includes('--json') ? JSON.stringify(report, null, 2) : formatTokenProfile(report));
+}
+
 async function readLoops() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
   if (!existsSync(root)) return [];
@@ -221,6 +232,9 @@ async function main() {
     case 'status':
       await listSessions();
       break;
+    case 'profile':
+      await profile(rest);
+      break;
     case 'acknowledge-spend':
       await acknowledgeSpend(rest);
       break;
@@ -246,7 +260,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);
