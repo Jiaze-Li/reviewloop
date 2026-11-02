@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:24:11.995Z",
+  "updatedAt": "2026-11-02T15:24:14.734Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -86,7 +86,7 @@
       "title": "feat: fail-closed matched-pair evaluation of ReviewLoop physical Token spend",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/34",
       "merged": false,
-      "updatedAt": "2026-11-02T15:22:39Z"
+      "updatedAt": "2026-11-02T15:24:02Z"
     },
     "completed": null,
     "outcome": null
