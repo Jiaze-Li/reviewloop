@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:22:49.133Z",
+  "updatedAt": "2026-11-02T15:24:11.995Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "docs: add fail-closed paired token evaluation reproduction steps",
+    "current": "test: compare measured percentage with floating-point tolerance",
     "next": "",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-11-02T23:22:23+08:00",
         "text": "docs: record honest ReviewLoop-only token evaluation evidence and paired live experiment protocol"
+      },
+      {
+        "at": "2026-11-02T23:24:01+08:00",
+        "text": "docs: add fail-closed paired token evaluation reproduction steps"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:22:23+08:00",
         "message": "docs: add fail-closed paired token evaluation reproduction steps"
+      },
+      {
+        "sha": "37f4e8c1dbed59eac63e697cf5faebf6d12fed66",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:24:01+08:00",
+        "message": "test: compare measured percentage with floating-point tolerance"
       }
     ],
     "pr": {
