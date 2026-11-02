@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:19:00.673Z",
+  "updatedAt": "2026-11-02T15:19:09.669Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "docs: render artifact protocol code examples as Markdown inline code",
+    "current": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs",
     "next": "",
     "history": [
       {
@@ -42,6 +42,10 @@
       {
         "at": "2026-11-02T23:18:48+08:00",
         "text": "test: preserve UTF-8 BOM raw bytes through artifact hash and Reviewer prompt"
+      },
+      {
+        "at": "2026-11-02T23:18:59+08:00",
+        "text": "docs: render artifact protocol code examples as Markdown inline code"
       }
     ],
     "commits": [
@@ -98,6 +102,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:18:48+08:00",
         "message": "docs: render artifact protocol code examples as Markdown inline code"
+      },
+      {
+        "sha": "766d9872614d985a5855c5e0f460032e86ddb8ee",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:18:59+08:00",
+        "message": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs"
       }
     ],
     "pr": {
