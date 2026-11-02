@@ -14,6 +14,7 @@
 //   Waiting/polling never consumes a round.
 
 import { createHash } from 'node:crypto';
+import { evidenceBlockerRequirementIds } from './evidenceConvergence.js';
 import {
   normalizeProviderReview,
   blockingSignatures as blockingSigs,
@@ -102,7 +103,7 @@ export function normalizeReview({ raw, reviewer, provider, head } = {}) {
 
 // Deterministic decision given a fresh normalized review and the loop state.
 // Returns { verdict, reason, invokeSupervisor: boolean }.
-export function decideConvergence({ loopState, review }) {
+export function decideConvergence({ loopState, review, reviewScope = null }) {
   const objective = loopState.objective;
   const initialBudget = objective?.maxReviewRounds ?? 3;
   const epoch = Number.isInteger(loopState.convergenceEpoch) ? loopState.convergenceEpoch : 0;
@@ -145,14 +146,31 @@ export function decideConvergence({ loopState, review }) {
     && signaturesEqual(prevPrev.signatures, review.findingSignatures)
   );
 
+  // A second independent review may describe the SAME unsatisfied frozen
+  // evidence obligations with different titles. Do not classify generic code
+  // findings, guesses without an exact requirement ID, partially resolved
+  // findings, or legacy history lacking this diagnostic signal.
+  const evidenceIds = evidenceBlockerRequirementIds({
+    review, objective, reviewScope,
+  });
+  const sameUnresolvedEvidence = Boolean(
+    prev && evidenceIds.length === blockingCount
+    && prev.blockingCount === blockingCount
+    && Array.isArray(prev.evidenceBlockerRequirementIds)
+    && prev.evidenceBlockerRequirementIds.length === blockingCount
+    && signaturesEqual(prev.evidenceBlockerRequirementIds, evidenceIds)
+  );
+
   const canEscalate = escalationCount < CONVERGENCE_DEFAULTS.MAX_SUPERVISOR_ESCALATIONS;
   const epochExhausted = epochRound >= epochBudget;
-  if (canEscalate && (sameAsPrev || oscillating || epochExhausted)) {
+  if (canEscalate && (sameAsPrev || oscillating || sameUnresolvedEvidence || epochExhausted)) {
     const trigger = sameAsPrev
       ? 'same blocking finding persists after a genuine changed review state'
       : oscillating
         ? 'blocking findings are oscillating across repair rounds'
-        : `convergence epoch ${epoch} exhausted its ${epochBudget} Reviewer round budget`;
+        : sameUnresolvedEvidence
+          ? 'same frozen evidence requirements remain insufficient across changed reviews'
+          : `convergence epoch ${epoch} exhausted its ${epochBudget} Reviewer round budget`;
     return {
       verdict: REVIEW_VERDICTS.REWORK,
       reason: `${trigger}; escalate to Supervisor before more repair/review cycles`,
