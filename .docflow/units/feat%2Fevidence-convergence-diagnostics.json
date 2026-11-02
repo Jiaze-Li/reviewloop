@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:38:22.198Z",
+  "updatedAt": "2026-11-02T14:39:14.573Z",
   "task": {
     "id": "feat/evidence-convergence-diagnostics",
     "branch": "feat/evidence-convergence-diagnostics",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/evidence-convergence-diagnostics",
     "started": "2026-11-02T22:37:18+08:00",
     "status": "In progress",
-    "current": "feat: persist scoped evidence-convergence diagnostics per review round",
+    "current": "test: prove conservative obligation-stall escalation and no false early Supervisor",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-02T22:37:52+08:00",
         "text": "feat: escalate repeated insufficiency of identical frozen evidence obligations"
+      },
+      {
+        "at": "2026-11-02T22:39:06+08:00",
+        "text": "feat: persist scoped evidence-convergence diagnostics per review round"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "feat/evidence-convergence-diagnostics",
         "timestamp": "2026-11-02T22:37:52+08:00",
         "message": "feat: persist scoped evidence-convergence diagnostics per review round"
+      },
+      {
+        "sha": "b9188768d3fd8758daf1a287bfedbe97d9073aab",
+        "branch": "feat/evidence-convergence-diagnostics",
+        "timestamp": "2026-11-02T22:39:06+08:00",
+        "message": "test: prove conservative obligation-stall escalation and no false early Supervisor"
       }
     ],
     "pr": null,
