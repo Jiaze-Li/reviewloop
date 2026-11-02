@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:21:46.771Z",
+  "updatedAt": "2026-11-02T15:22:30.203Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "test: compare non-integer measured USD totals with floating-point tolerance",
+    "current": "docs: record honest ReviewLoop-only token evaluation evidence and paired live experiment protocol",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-02T23:21:36+08:00",
         "text": "test: forbid invalid empirical token savings claims and verify read-only paired CLI"
+      },
+      {
+        "at": "2026-11-02T23:22:11+08:00",
+        "text": "test: compare non-integer measured USD totals with floating-point tolerance"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:21:36+08:00",
         "message": "test: compare non-integer measured USD totals with floating-point tolerance"
+      },
+      {
+        "sha": "1bdc70addfff3a57a4339d52b27ea0d7b8dd127a",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:22:11+08:00",
+        "message": "docs: record honest ReviewLoop-only token evaluation evidence and paired live experiment protocol"
       }
     ],
     "pr": null,
