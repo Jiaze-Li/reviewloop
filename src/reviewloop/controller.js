@@ -264,12 +264,13 @@ export function createReviewLoopController({
     return raw;
   }
 
-  function spendFor(loopId, objective = null) {
+  function spendFor(loopId, objective = null, budgetOverrides = null) {
     return createReviewLoopSpend({
       loopId,
       persistence,
       env,
       gateCount: reviewGateCount(objective),
+      budgetOverrides,
       onEvent,
       recordSafetyEvent: collectSafetyEvent,
     });
@@ -969,7 +970,10 @@ export function createReviewLoopController({
         delta.diffScope = 'final-cross-phase';
       }
     }
-    const spend = spendFor(loopState.loopId, objective);
+    const spend = spendFor(loopState.loopId, objective, {
+      maxUsageVolume: loopState?.maxUsageVolumeOverride,
+      maxCostUsd: loopState?.maxCostUsdOverride,
+    });
     // The fresh-round increment now lives in runReviewerOverEvidence, bound to
     // the logical (delta + gate) review state so a crash/resume of the same
     // review never consumes an extra round.
@@ -1317,7 +1321,10 @@ export function createReviewLoopController({
   // state can never disagree. (Before this, the caller was told HUMAN_REQUIRED
   // while the loop stayed at REVIEWING on disk.)
   async function spendDenialResult(loopState, err, telemetry) {
-    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${err?.code ?? err?.message ?? err}`);
+    const detail = err?.code && err?.message && err.code !== err.message
+      ? `${err.code} (${err.message})`
+      : (err?.code ?? err?.message ?? err);
+    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${detail}`);
     try { await saveLoop(loopState); } catch { /* best effort; the returned status still reflects intent */ }
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,

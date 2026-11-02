@@ -20,6 +20,7 @@ import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
+import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 
@@ -116,6 +117,44 @@ async function reopenGate(rest) {
   }
 }
 
+async function overrideBudget(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const maxUsage = flagValue(rest, '--max-usage');
+  const maxCost = flagValue(rest, '--max-cost');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason || (!maxUsage && !maxCost)) {
+    throw new Error('usage: reviewloop override-budget --loop <loopId> --reason "<explanation>" [--max-usage <tokens>] [--max-cost <usd>]');
+  }
+  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+  if (!lease.ok) {
+    throw new Error(`cannot override budget while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`);
+  }
+  try {
+    const result = await overrideLoopBudget({
+      persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT),
+      loopId,
+      maxUsage,
+      maxCost,
+      reason,
+    });
+    console.log('Per-loop budget successfully expanded.');
+    console.log(`  loop: ${result.loopId}`);
+    if (result.previousUsageLimit !== result.newUsageLimit || maxUsage) {
+      console.log(`  usage limit: ${result.previousUsageLimit} -> ${result.newUsageLimit} tokens (currently used: ${result.currentUsage})`);
+    }
+    if (result.previousCostLimit !== result.newCostLimit || maxCost) {
+      console.log(`  cost limit: $${result.previousCostLimit} -> $${result.newCostLimit} (currently used: $${result.currentCost.toFixed(2)})`);
+    }
+    console.log(`  audit: override #${result.overridesCount} durably recorded`);
+    if (result.stateRestored) {
+      console.log(`  state: restored from HUMAN_REQUIRED to ${result.loopState}`);
+    }
+    console.log('Next: tell the Worker to call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
 async function readLoops() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
   if (!existsSync(root)) return [];
@@ -185,6 +224,9 @@ async function main() {
     case 'reopen-gate':
       await reopenGate(rest);
       break;
+    case 'override-budget':
+      await overrideBudget(rest);
+      break;
     case 'resume':
       await resume(rest);
       break;
@@ -201,7 +243,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|resume|acknowledge-spend|reopen-gate|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);
