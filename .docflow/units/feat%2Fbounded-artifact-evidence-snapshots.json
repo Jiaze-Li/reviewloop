@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:18:34.248Z",
+  "updatedAt": "2026-11-02T15:18:58.353Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "test: preserve UTF-8 BOM raw bytes through artifact hash and Reviewer prompt",
+    "current": "docs: render artifact protocol code examples as Markdown inline code",
     "next": "",
     "history": [
       {
@@ -38,6 +38,10 @@
       {
         "at": "2026-11-02T23:18:18+08:00",
         "text": "fix: preserve UTF-8 BOM in artifact bytes and bound hash"
+      },
+      {
+        "at": "2026-11-02T23:18:48+08:00",
+        "text": "test: preserve UTF-8 BOM raw bytes through artifact hash and Reviewer prompt"
       }
     ],
     "commits": [
@@ -88,6 +92,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:18:18+08:00",
         "message": "test: preserve UTF-8 BOM raw bytes through artifact hash and Reviewer prompt"
+      },
+      {
+        "sha": "8d7071fe294881e77a56d31320140de5dcf8f12a",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:18:48+08:00",
+        "message": "docs: render artifact protocol code examples as Markdown inline code"
       }
     ],
     "pr": {
