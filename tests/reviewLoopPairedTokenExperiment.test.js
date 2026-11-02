@@ -43,8 +43,11 @@ test('matched frozen objective, reviewed state and model permit one measured phy
   const result = evaluatePairedTokenProfiles({ beforeWorkflow: before, afterWorkflow: after });
   assert.equal(result.comparable, true);
   assert.equal(result.status, 'MATCHED_PAIR_OBSERVATION');
-  assert.deepEqual(result.usageVolume, { before: 300, after: 110,
-    change: -190, changePercent: (-190 / 300) * 100 });
+  assert.equal(result.usageVolume.before, 300);
+  assert.equal(result.usageVolume.after, 110);
+  assert.equal(result.usageVolume.change, -190);
+  assert.ok(Math.abs(result.usageVolume.changePercent - (-190 / 300) * 100) < 1e-10,
+    'fractional percent differences are evaluated with floating-point tolerance');
   assert.equal(result.physicalCalls.change, -1);
   assert.ok(Math.abs(result.knownCostUsd.change + 0.0019) < 1e-12);
   assert.equal(JSON.stringify(result).includes('CONFIDENTIAL-DO-NOT-EXPORT'), false);
