@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:18:58.353Z",
+  "updatedAt": "2026-11-02T15:19:00.673Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -106,7 +106,7 @@
       "title": "feat: inspect bounded untrusted artifact evidence with content-bound Reviewer snapshots",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/33",
       "merged": false,
-      "updatedAt": "2026-11-02T15:18:19Z"
+      "updatedAt": "2026-11-02T15:18:50Z"
     },
     "completed": null,
     "outcome": null
