@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:16:05.523Z",
+  "updatedAt": "2026-11-02T15:18:11.835Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "docs: link bounded opt-in artifact snapshot protocol from README",
+    "current": "fix: preserve UTF-8 BOM in artifact bytes and bound hash",
     "next": "",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-11-02T23:15:25+08:00",
         "text": "docs: specify safe opt-in local artifact evidence snapshot protocol"
+      },
+      {
+        "at": "2026-11-02T23:18:00+08:00",
+        "text": "docs: link bounded opt-in artifact snapshot protocol from README"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:15:25+08:00",
         "message": "docs: link bounded opt-in artifact snapshot protocol from README"
+      },
+      {
+        "sha": "36b21e7d515839f4ef16dad943bcaaf42394915e",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:18:00+08:00",
+        "message": "fix: preserve UTF-8 BOM in artifact bytes and bound hash"
       }
     ],
     "pr": {
