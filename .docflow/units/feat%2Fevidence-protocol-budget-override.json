@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T12:44:09.718Z",
+  "updatedAt": "2026-11-02T12:44:55.859Z",
   "task": {
     "id": "feat/evidence-protocol-budget-override",
     "branch": "feat/evidence-protocol-budget-override",
@@ -9,7 +9,7 @@
     "started": "2026-11-02T20:25:14+08:00",
     "status": "In progress",
     "current": "feat: add per-loop budget override CLI and integrate with spend authority",
-    "next": "",
+    "next": "Create a pull request for the evidence protocol and budget override improvements",
     "history": [
       {
         "at": "2026-11-02T20:42:34+08:00",
