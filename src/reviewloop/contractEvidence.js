@@ -38,6 +38,32 @@ export class EvidenceValidationError extends Error {
 
 const bytes = (value) => Buffer.byteLength(String(value), 'utf8');
 
+const HOLLOW_POINTER_PATTERNS = [
+  // Verb + [optional target noun] + [optional path/name]
+  // Matches "Refer to file", "refer to the file", "see readme", "check the log", "see file.md", "Please inspect attached report.txt"
+  /^(?:please\s+)?(?:see|refer\s+to|look\s+at|check(?:\s+out)?|view|inspect)\s+(?:the\s+)?(?:attached\s+|external\s+|local\s+|artifact\s+)?(?:file|doc|document|log|logs|proof|markdown|readme|report|artifactRef|artifact)?(?:\s*:?\s*['"]?(?:(?:~|\.{1,2})?\/)?[a-zA-Z0-9_./-]+(?:\.[a-zA-Z0-9_]+)?['"]?)?[.!]?$/i,
+  // "Details / results / evidence in <filename or path or phrase>"
+  /^(?:details|results?|evidence|proof|logs?|report|findings?)\s+(?:can\s+be\s+found\s+|are\s+recorded\s+|recorded\s+|available\s+|located\s+|saved\s+)?(?:in|at)\s+(?:the\s+)?(?:attached\s+|external\s+|local\s+|artifact\s+)?(?:file|doc|document|log|logs|proof|markdown|readme|report|artifactRef|artifact)?(?:\s*:?\s*['"]?(?:(?:~|\.{1,2})?\/)?[a-zA-Z0-9_./-]+(?:\.[a-zA-Z0-9_]+)?['"]?)?[.!]?$/i,
+  // Bare file path alone (with or without quotes / path prefix)
+  /^['"]?(?:(?:~|\.{1,2})?\/)?[a-zA-Z0-9_./-]+\.(?:md|markdown|txt|log|json|pdf|png|csv|out)['"]?$/i,
+  // Bare absolute or relative path
+  /^['"]?(?:~|\.{1,2})\/[a-zA-Z0-9_./-]+['"]?$/i,
+  // Evasive tautologies / single words
+  /^(?:see\s+(?:the\s+)?(?:artifactRef|artifact|above|below|attached|file)|artifactRef|as\s+above|done|passed|verified|tested)[.!]?$/i,
+];
+
+function assertSubstantiveEvidenceSummary(value, label) {
+  if (typeof value !== 'string') return;
+  const trimmed = value.trim();
+  for (const pattern of HOLLOW_POINTER_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      throw new EvidenceValidationError(
+        `${label} contains an external file pointer without inline proof; submit self-contained factual verification data (e.g. test metrics, PID, command outputs, exit codes). Reviewer operates in an isolated sandbox without file tools and cannot read external files or artifact references`,
+      );
+    }
+  }
+}
+
 function assertEvidenceText(value, label, limit, { optional = false } = {}) {
   if (optional && (value == null || (typeof value === 'string' && !value.trim()))) return;
   if (typeof value !== 'string' || !value.trim()) {
@@ -403,6 +429,7 @@ export function normalizeEvidenceSubmissions(raw = []) {
     }
     assertEvidenceText(entry.requirementId, `${label} requirementId`, EVIDENCE_LIMITS.idBytes);
     assertEvidenceText(entry.summary, `${label} summary`, EVIDENCE_LIMITS.summaryBytes);
+    assertSubstantiveEvidenceSummary(entry.summary, `${label} summary`);
     assertEvidenceText(entry.artifactRef, `${label} artifactRef`, EVIDENCE_LIMITS.artifactRefBytes, { optional: true });
     const requirementId = entry.requirementId.trim();
     if (seen.has(requirementId)) throw new EvidenceValidationError(`${label} duplicates a requirementId in this batch`);

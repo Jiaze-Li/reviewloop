@@ -131,3 +131,56 @@ test('resume retains final acceptance criteria without contractText and never ra
   assert.equal(packet.evidenceRecordCount, 1);
   assert.equal(JSON.stringify(packet).includes('RAW-LOG'), false);
 });
+
+test('evidence summary rejects hollow pointers to local files and requires inline factual proof', () => {
+  const hollowExamples = [
+    'Refer to file',
+    'refer to file',
+    'refer to the file',
+    'see readme',
+    'check the log',
+    'See PHASE_2_UI_INTERACTION_PROOF.md',
+    'see proof.md',
+    'Please see attached report.txt.',
+    'Refer to audit.log',
+    'refer to attached file: test_results.json',
+    'Check out /tmp/verification.log',
+    'view evidence.markdown',
+    'Details in PHASE_2_UI_INTERACTION_PROOF.md',
+    'results are recorded in /Users/jack/test.log',
+    'proof available at report.txt',
+    'PHASE_2_UI_INTERACTION_PROOF.md',
+    '/Users/jack/workspace/evidence.log',
+    './test_output.txt',
+    'see artifactRef',
+    'see artifact',
+    'done',
+    'passed.',
+    'verified',
+  ];
+
+  for (const hollow of hollowExamples) {
+    assert.throws(
+      () => normalizeEvidenceSubmissions([proof('r', hollow)]),
+      (err) => {
+        assert.ok(err instanceof EvidenceValidationError);
+        assert.match(err.message, /contains an external file pointer without inline proof/);
+        return true;
+      },
+      `failed to reject hollow pointer: ${hollow}`,
+    );
+  }
+
+  const substantiveExamples = [
+    'Verified Phase 2 UI interaction proof on running binary PID 91989 (Footprint 3.8MB, RSS 13.9MB); see transcript in artifactRef.',
+    'Completed real-library reconciliation: 209 references, 201 unique charts, all 4 tests green.',
+    'Executed check_required_actions.sh with exit code 0; app binary built cleanly in 4.2s.',
+    'Attached the diagnostic trace.',
+    'Observed the production state transition.',
+  ];
+
+  for (const valid of substantiveExamples) {
+    const normalized = normalizeEvidenceSubmissions([proof('r', valid)]);
+    assert.equal(normalized[0].summary, valid.trim());
+  }
+});

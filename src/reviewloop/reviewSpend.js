@@ -147,9 +147,9 @@ function boundedThreshold(env, key, fallback, hardCap) {
   return Math.min(n, hardCap);
 }
 
-export function resolveReviewLoopLimits(env = process.env, { gateCount = 1 } = {}) {
+export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budgetOverrides = null } = {}) {
   const gates = Number.isInteger(gateCount) && gateCount > 0 ? gateCount : 1;
-  return {
+  const resolved = {
     // Cost / aggregate usage remain TASK-WIDE across all phase gates.
     maxCostUsd: num(env, REVIEWLOOP_ENV.MAX_COST_USD, REVIEWLOOP_DEFAULTS.MAX_COST_USD),
     maxUsageVolume: num(env, REVIEWLOOP_ENV.MAX_USAGE_VOLUME, REVIEWLOOP_DEFAULTS.MAX_USAGE_VOLUME),
@@ -178,6 +178,15 @@ export function resolveReviewLoopLimits(env = process.env, { gateCount = 1 } = {
       REVIEWLOOP_DEFAULTS.MAX_CONTEXT_OVERHEAD_TOKENS, TOKEN_SENTINEL_HARD_CAPS.MAX_CONTEXT_OVERHEAD_TOKENS,
     ),
   };
+  if (budgetOverrides && typeof budgetOverrides === 'object') {
+    if (Number.isFinite(budgetOverrides.maxUsageVolume) && budgetOverrides.maxUsageVolume > 0) {
+      resolved.maxUsageVolume = budgetOverrides.maxUsageVolume;
+    }
+    if (Number.isFinite(budgetOverrides.maxCostUsd) && budgetOverrides.maxCostUsd > 0) {
+      resolved.maxCostUsd = budgetOverrides.maxCostUsd;
+    }
+  }
+  return resolved;
 }
 
 // Durable append-only spend log over the existing workflow-state snapshot,
@@ -192,6 +201,22 @@ export class ReviewLoopSpendStore {
     const state = await this._persistence.readWorkflowState(loopId);
     const raw = state?.[SPEND_STATE_KEY];
     return Array.isArray(raw?.records) ? raw.records : [];
+  }
+
+  async loadBudgetOverrides(loopId) {
+    if (!loopId || !this._persistence || typeof this._persistence.readWorkflowState !== 'function') return null;
+    const state = await this._persistence.readWorkflowState(loopId);
+    const fromRoot = state?.budgetOverrides;
+    const fromLoop = state?.reviewLoop;
+    const maxUsageVolume = fromRoot?.maxUsageVolume ?? fromLoop?.maxUsageVolumeOverride ?? null;
+    const maxCostUsd = fromRoot?.maxCostUsd ?? fromLoop?.maxCostUsdOverride ?? null;
+    if (maxUsageVolume != null || maxCostUsd != null) {
+      return {
+        ...(maxUsageVolume != null ? { maxUsageVolume: Number(maxUsageVolume) } : {}),
+        ...(maxCostUsd != null ? { maxCostUsd: Number(maxCostUsd) } : {}),
+      };
+    }
+    return null;
   }
 
   async append(loopId, record) {
@@ -349,12 +374,24 @@ export function createReviewLoopSpend({
   persistence = null,
   env = process.env,
   gateCount = 1,
+  budgetOverrides = null,
   onEvent,
   recordSafetyEvent,
 } = {}) {
-  const limits = resolveReviewLoopLimits(env, { gateCount });
+  let limits = resolveReviewLoopLimits(env, { gateCount, budgetOverrides });
   const spendStore = new ReviewLoopSpendStore(persistence);
   const anomalyStore = new ReviewLoopTokenAnomalyStore(persistence);
+
+  const resolveCurrentLimits = async () => {
+    let durable = null;
+    try {
+      durable = await spendStore.loadBudgetOverrides(loopId);
+    } catch { /* best effort */ }
+    return resolveReviewLoopLimits(env, {
+      gateCount,
+      budgetOverrides: durable ?? budgetOverrides,
+    });
+  };
 
   // Post-settlement Token Sentinel latch. Once tripped it is cached (a latch
   // never un-trips), and it is also set in-process the moment settleRecord
@@ -572,6 +609,7 @@ export function createReviewLoopSpend({
 
   async function currentTotals() {
     const prior = await loadPriorRecords();
+    limits = await resolveCurrentLimits();
     return {
       ...foldTotals([...prior, ...sessionRecords]),
       unaccountedSpendCalls: cachedUnaccounted,
