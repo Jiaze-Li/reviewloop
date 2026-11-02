@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:12:51.071Z",
+  "updatedAt": "2026-11-02T15:13:33.940Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "feat: bind bounded untrusted artifact bytes and digest to reviewer proof",
+    "current": "feat: stage and bind artifact snapshots after stable Gate; fail closed on in-flight changes",
     "next": "",
     "history": [
       {
         "at": "2026-11-02T23:12:39+08:00",
         "text": "feat: securely capture bounded untrusted per-loop text artifact snapshots"
+      },
+      {
+        "at": "2026-11-02T23:13:23+08:00",
+        "text": "feat: bind bounded untrusted artifact bytes and digest to reviewer proof"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:12:39+08:00",
         "message": "feat: bind bounded untrusted artifact bytes and digest to reviewer proof"
+      },
+      {
+        "sha": "348cc8cd4ce90dc51900c5fa1147919b330da217",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:13:23+08:00",
+        "message": "feat: stage and bind artifact snapshots after stable Gate; fail closed on in-flight changes"
       }
     ],
     "pr": null,
