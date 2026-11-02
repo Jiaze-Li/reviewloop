@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:20:33.244Z",
+  "updatedAt": "2026-11-02T15:20:51.628Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,15 +8,26 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs",
+    "current": "feat: add read-only CLI for independently verifiable paired profile comparison",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-02T23:20:36+08:00",
+        "text": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs"
+      }
+    ],
     "commits": [
       {
         "sha": "c8e00a19f6ca7779d7781997a36b6e75d62e2193",
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:20:18+08:00",
         "message": "feat: add fail-closed matched-pair physical token evaluation over durable ReviewLoop runs"
+      },
+      {
+        "sha": "108ea3a6ee916e2f56db5ef2b4a0355b3909da8d",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:20:36+08:00",
+        "message": "feat: add read-only CLI for independently verifiable paired profile comparison"
       }
     ],
     "pr": null,
