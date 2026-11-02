@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:21:19.546Z",
+  "updatedAt": "2026-11-02T15:21:46.771Z",
   "task": {
     "id": "feat/paired-token-profile-evaluation",
     "branch": "feat/paired-token-profile-evaluation",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/paired-token-profile-evaluation",
     "started": "2026-11-02T23:20:18+08:00",
     "status": "In progress",
-    "current": "test: forbid invalid empirical token savings claims and verify read-only paired CLI",
+    "current": "test: compare non-integer measured USD totals with floating-point tolerance",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-02T23:21:10+08:00",
         "text": "feat: add read-only CLI for independently verifiable paired profile comparison"
+      },
+      {
+        "at": "2026-11-02T23:21:36+08:00",
+        "text": "test: forbid invalid empirical token savings claims and verify read-only paired CLI"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "feat/paired-token-profile-evaluation",
         "timestamp": "2026-11-02T23:21:10+08:00",
         "message": "test: forbid invalid empirical token savings claims and verify read-only paired CLI"
+      },
+      {
+        "sha": "cd7a09b25b11566fe124b2c2f29b3564010283f8",
+        "branch": "feat/paired-token-profile-evaluation",
+        "timestamp": "2026-11-02T23:21:36+08:00",
+        "message": "test: compare non-integer measured USD totals with floating-point tolerance"
       }
     ],
     "pr": null,
