@@ -60,17 +60,6 @@ export async function overrideLoopBudget({
     0,
   );
 
-  if (parsedUsage != null && parsedUsage <= currentUsageVolume) {
-    throw new Error(
-      `override-budget: new maxUsageVolume (${parsedUsage}) must exceed currently accumulated spend (${currentUsageVolume} tokens)`,
-    );
-  }
-  if (parsedCost != null && parsedCost <= currentCostUsd) {
-    throw new Error(
-      `override-budget: new maxCostUsd ($${parsedCost}) must exceed currently accumulated cost ($${currentCostUsd})`,
-    );
-  }
-
   const at = now().toISOString();
   const gateCount = reviewGateCount(loop.objective);
 
@@ -88,6 +77,34 @@ export async function overrideLoopBudget({
   const previousCostLimit = effectiveLimits.maxCostUsd;
   const currentReviewerCalls = spendRecords.filter((r) => r.role === 'reviewer').length;
   const currentSupervisorCalls = spendRecords.filter((r) => r.role === 'supervisor').length;
+
+  // Monotonic ceiling expansion: new limits must strictly exceed the previous effective limit
+  // AND must exceed currently accumulated spend.
+  if (parsedUsage != null) {
+    if (parsedUsage <= previousUsageLimit) {
+      throw new Error(
+        `override-budget: new maxUsageVolume (${parsedUsage}) must exceed current effective limit (${previousUsageLimit} tokens)`,
+      );
+    }
+    if (parsedUsage <= currentUsageVolume) {
+      throw new Error(
+        `override-budget: new maxUsageVolume (${parsedUsage}) must exceed currently accumulated spend (${currentUsageVolume} tokens)`,
+      );
+    }
+  }
+
+  if (parsedCost != null) {
+    if (parsedCost <= previousCostLimit) {
+      throw new Error(
+        `override-budget: new maxCostUsd ($${parsedCost}) must exceed current effective limit ($${previousCostLimit})`,
+      );
+    }
+    if (parsedCost <= currentCostUsd) {
+      throw new Error(
+        `override-budget: new maxCostUsd ($${parsedCost}) must exceed currently accumulated cost ($${currentCostUsd})`,
+      );
+    }
+  }
 
   const record = {
     at,
@@ -108,6 +125,16 @@ export async function overrideLoopBudget({
 
   // If the loop was halted in HUMAN_REQUIRED due to spend denial, restore it to REWORK
   // so the Worker can continue with the new authorized ceiling.
+  //
+  // Safety Invariants:
+  // 1. Convergence Isolation: If the loop halted due to convergence review-round exhaustion
+  //    (loop.budgetExhausted === true or reason indicates convergence failure), override-budget
+  //    MUST NOT restore it. Reopening a convergence-exhausted gate is strictly governed by
+  //    reopenExhaustedGate (reopen-gate).
+  // 2. Non-ceiling stops: Refuse to restore unaccounted spend (MODEL_SPEND_USAGE_UNRESOLVED),
+  //    token anomaly (MODEL_SPEND_TOKEN_ANOMALY_BLOCKED), call ceilings, etc.
+  // 3. Exhausted limit clearance: The new ceiling must actually clear the limit that was
+  //    exhausted (e.g. raising only --max-cost cannot restore a usage-exhausted loop).
   let stateRestored = false;
   if (loop.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
     const lastTransition = [...(loop.history ?? [])]
@@ -132,15 +159,28 @@ export async function overrideLoopBudget({
       || /supervisor\s+call\s+ceiling/i.test(denialReason);
     const isCallCeilingDenial = reviewerCallsExhausted || supervisorCallsExhausted;
 
-    // A real volume/cost ceiling denial must have SPEND_DENIED, ceiling reached, or budgetExhausted === true
-    const isSpendOrBudgetDenial = !isNonCeilingStop && !isCallCeilingDenial && (
+    // Explicit SPEND_DENIED stop code from spend authority / controller
+    const hasSpendDeniedCode = /(?:^|[^a-z0-9_])SPEND_DENIED(?:[^a-z0-9_]|$)/i.test(denialReason);
+
+    // Convergence exhaustion is exclusively managed by reopenExhaustedGate (reopen-gate).
+    // A loop is convergence-exhausted if budgetExhausted === true without an explicit SPEND_DENIED stop,
+    // or if the reason indicates review round/convergence failure.
+    const isConvergenceExhausted = !hasSpendDeniedCode && (
       loop.budgetExhausted === true
-      || /(?:^|[^a-z0-9_])SPEND_DENIED(?:[^a-z0-9_]|$)/i.test(denialReason)
-      || /(?:usage-volume|cost|usage)\s*ceiling/i.test(denialReason)
-      || /ceiling.*reached/i.test(denialReason)
+      || /convergence|review did not converge|round ceiling|round.*reached/i.test(denialReason)
     );
 
-    if (isSpendOrBudgetDenial) {
+    // A real volume/cost ceiling denial must have SPEND_DENIED or specific volume/cost ceiling,
+    // and must NOT be convergence exhaustion, call ceiling, or non-ceiling stop.
+    const isSpendCeilingReason = hasSpendDeniedCode
+      || /(?:usage-volume|cost|usage)\s*ceiling/i.test(denialReason);
+
+    const isSpendCeilingDenial = !isNonCeilingStop
+      && !isCallCeilingDenial
+      && !isConvergenceExhausted
+      && isSpendCeilingReason;
+
+    if (isSpendCeilingDenial) {
       // Check which volume/cost limits were actually exhausted against effective limits
       const usageExhausted = currentUsageVolume >= previousUsageLimit
         || /usage-volume\s*ceiling|usage.*ceiling/i.test(denialReason);
@@ -151,8 +191,6 @@ export async function overrideLoopBudget({
       const costCleared = parsedCost != null && parsedCost > currentCostUsd;
 
       // The new ceiling must actually clear the limit that was exhausted.
-      // If neither usage nor cost was exhausted, then the stop was not a volume/cost ceiling stop
-      // (e.g. it was a round/convergence exhaustion which needs reopen-gate, not budget override).
       const wasVolumeOrCostExhausted = usageExhausted || costExhausted;
 
       const canRestore = wasVolumeOrCostExhausted

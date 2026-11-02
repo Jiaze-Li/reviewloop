@@ -90,9 +90,39 @@ test('overrideLoopBudget rejects new ceiling that does not exceed currently accu
     },
   });
 
+  // 402,000 exceeds default limit (400,000), but does not exceed accumulated spend (403,000)
   await assert.rejects(
-    () => overrideLoopBudget({ persistence: p, loopId: 'spent-loop', reason: 'more tokens', maxUsage: 400000 }),
+    () => overrideLoopBudget({ persistence: p, loopId: 'spent-loop', reason: 'more tokens', maxUsage: 402000 }),
     /must exceed currently accumulated spend \(403000 tokens\)/,
+  );
+});
+
+test('overrideLoopBudget enforces monotonic ceiling expansion over current effective limit', async () => {
+  const p = new MockPersistence({
+    'high-limit-loop': {
+      reviewLoop: {
+        state: 'READY_FOR_WORK',
+        maxUsageVolumeOverride: 500000,
+        maxCostUsdOverride: 10,
+      },
+      reviewLoopSpend: {
+        records: [
+          { usageVolume: 300000, costUsd: 4.0 },
+        ],
+      },
+    },
+  });
+
+  // Lowering usage ceiling from 500k to 400k (even though > 300k spend) must be rejected
+  await assert.rejects(
+    () => overrideLoopBudget({ persistence: p, loopId: 'high-limit-loop', reason: 'lower budget', maxUsage: 400000 }),
+    /must exceed current effective limit \(500000 tokens\)/,
+  );
+
+  // Lowering cost ceiling from $10 to $8 (even though > $4 spend) must be rejected
+  await assert.rejects(
+    () => overrideLoopBudget({ persistence: p, loopId: 'high-limit-loop', reason: 'lower cost', maxCost: 8 }),
+    /must exceed current effective limit \(\$10\)/,
   );
 });
 
@@ -159,7 +189,6 @@ test('Spend authority honors durable budget override on subsequent dispatches', 
       reviewLoop: {
         loopId: 'overridden-loop',
         state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
-        budgetExhausted: true,
         reason: 'SPEND_DENIED',
       },
       reviewLoopSpend: {
@@ -319,7 +348,6 @@ test('overrideLoopBudget resolves effective limits from env and rejects partial 
         loopId: 'env-limited-loop',
         state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
         round: 4,
-        budgetExhausted: true,
         reason: 'SPEND_DENIED',
         history: [
           { from: 'REVIEWING', to: REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason: 'model spend blocked: SPEND_DENIED' },
@@ -421,4 +449,80 @@ test('overrideLoopBudget refuses to restore loops stopped by call ceiling or rou
   });
   assert.equal(roundRes.stateRestored, false);
   assert.equal(roundRes.loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+});
+
+test('overrideLoopBudget does not restore convergence-exhausted loop even when token spend exceeds limit', async () => {
+  const p = new MockPersistence({
+    'convergence-and-spend-loop': {
+      reviewLoop: {
+        loopId: 'convergence-and-spend-loop',
+        state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        round: 8,
+        budgetExhausted: true,
+        reason: 'review did not converge: maximum review rounds reached',
+        history: [
+          { from: 'REVIEWING', to: REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason: 'review did not converge' },
+        ],
+      },
+      reviewLoopSpend: {
+        records: [{ usageVolume: 405000, costUsd: 1.0 }],
+      },
+    },
+  });
+
+  // When a loop halts for convergence exhaustion (budgetExhausted=true) and token spend
+  // happens to exceed the limit (405,000 >= 400,000), expanding the token budget must
+  // NOT restore the loop to REWORK or clear budgetExhausted.
+  const res = await overrideLoopBudget({
+    persistence: p,
+    loopId: 'convergence-and-spend-loop',
+    maxUsage: 500000,
+    reason: 'Trying to restore convergence-exhausted loop with budget override',
+  });
+
+  // Limits are expanded and audited...
+  assert.equal(res.previousLimit, 400000);
+  assert.equal(res.newLimit, 500000);
+  assert.equal(res.overridesCount, 1);
+  // ...but state is NOT restored, leaving reopen-gate strictly in control of convergence rounds
+  assert.equal(res.stateRestored, false);
+  assert.equal(res.loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+
+  const updated = await p.readWorkflowState('convergence-and-spend-loop');
+  assert.equal(updated.reviewLoop.state, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+  assert.equal(updated.reviewLoop.budgetExhausted, true);
+});
+
+test('overrideLoopBudget refuses to restore loop with non-spend-denied round ceiling reached reason even when spend exceeds limit', async () => {
+  const p = new MockPersistence({
+    'round-ceiling-loop': {
+      reviewLoop: {
+        loopId: 'round-ceiling-loop',
+        state: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+        round: 3,
+        budgetExhausted: true,
+        reason: 'review round ceiling reached',
+        history: [
+          { from: 'REVIEWING', to: REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason: 'review round ceiling reached' },
+        ],
+      },
+      reviewLoopSpend: {
+        records: [{ usageVolume: 420000, costUsd: 1.0 }],
+      },
+    },
+  });
+
+  const res = await overrideLoopBudget({
+    persistence: p,
+    loopId: 'round-ceiling-loop',
+    maxUsage: 500000,
+    reason: 'Trying to restore round ceiling reached with budget override',
+  });
+
+  assert.equal(res.stateRestored, false);
+  assert.equal(res.loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+
+  const updated = await p.readWorkflowState('round-ceiling-loop');
+  assert.equal(updated.reviewLoop.state, REVIEW_LOOP_STATES.HUMAN_REQUIRED);
+  assert.equal(updated.reviewLoop.budgetExhausted, true);
 });
