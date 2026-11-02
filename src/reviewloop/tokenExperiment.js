@@ -12,7 +12,7 @@ const positive = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
 function modelFamilies(profile) {
   return [...new Set(profile.rounds.flatMap((round) => round.calls.map((call) => (
-    call.role + ':' + (call.family ?? '?') + ':' + (call.model ?? '?')
+    call.role + ':' + (call.family ?? '?') + ':' + (call.provider ?? '?') + ':' + (call.model ?? '?')
   ))))].sort();
 }
 
