@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-02T14:13:44.563Z",
+  "task": {
+    "id": "feat/token-profiling-cli",
+    "branch": "feat/token-profiling-cli",
+    "title": "feat/token-profiling-cli",
+    "task": "Development branch: feat/token-profiling-cli",
+    "started": "2026-11-02T22:13:30+08:00",
+    "status": "In progress",
+    "current": "feat: add read-only per-call and per-round token profile projection",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "706b31ac3bac3e5d232b903eddee056cca51af66",
+        "branch": "feat/token-profiling-cli",
+        "timestamp": "2026-11-02T22:13:30+08:00",
+        "message": "feat: add read-only per-call and per-round token profile projection"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
