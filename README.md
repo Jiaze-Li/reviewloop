@@ -226,6 +226,16 @@ Cache fields are provider-specific and **must not be added** to `usageVolume`;
 character counts are not exact tokens. `--json` emits the same read-only
 measurements in a machine-readable format.
 
+## Token profiling and measured comparisons
+
+`reviewloop profile --loop <id>` inspects physical spend for one LOCAL run
+without model calls. For a *matched* old/new performance comparison over two
+explicit durable `workflow.json` snapshots, use
+`node scripts/compare-token-profiles.mjs BEFORE_WORKFLOW_JSON AFTER_WORKFLOW_JSON [--json]`.
+It refuses to claim savings when the frozen contract, reviewed state, model
+routing or usage evidence cannot be matched. See
+[ReviewLoop Token Evaluation](docs/benchmarks/REVIEWLOOP_TOKEN_EVALUATION.md).
+
 ## Docs
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — current source of truth
