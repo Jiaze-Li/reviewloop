@@ -866,20 +866,14 @@ export function buildSupervisorInvoke() {
       : '';
     const prompt = [
       'You are a repair STRATEGIST, not an implementer. You cannot edit code or declare PASS.',
-      `ORIGINAL TASK GOAL (always binding): ${objective.goal}`,
-      objective.contractText
-        ? `FROZEN TASK CONTRACT (also binding; self-contained; must not weaken the goal):\n${normalizeContractText(objective.contractText)}`
-        : '',
-      ...reviewScopePromptLines(reviewScope),
-      ...evidencePromptLines(evidence),
+      goalText,
+      contractText,
+      ...scopeLines,
+      ...evidenceLines,
       `CURRENT GLOBAL REVIEW ROUND: ${round ?? 'unknown'}; CONVERGENCE EPOCH: ${convergenceEpoch}; PRIOR SUPERVISOR ESCALATIONS: ${supervisorEscalationCount}`,
-      priorSignatures?.length
-        ? `RECENT CONVERGENCE HISTORY (signatures only):\n${JSON.stringify(priorSignatures.slice(-6))}`
-        : '',
-      priorSupervisorGuidance
-        ? `PRIOR SUPERVISOR GUIDANCE:\n${priorSupervisorGuidance}`
-        : '',
-      `CURRENT BLOCKING FINDINGS:\n${JSON.stringify(blockingFindings)}`,
+      historyText,
+      priorGuidanceText,
+      blockingText,
       'Diagnose WHY Reviewer/Worker repair has not converged. Do not merely repeat the latest Reviewer finding.',
       'Choose REWORK when the blocker is valid but the Worker needs a genuinely new repair strategy.',
       'Choose REVIEWER_RECONSIDER when the implementation should be independently re-reviewed without requiring a code change because the blocker is out of scope, already satisfied, or based on a mistaken invariant.',
