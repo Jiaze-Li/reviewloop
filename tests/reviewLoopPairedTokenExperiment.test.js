@@ -46,7 +46,7 @@ test('matched frozen objective, reviewed state and model permit one measured phy
   assert.deepEqual(result.usageVolume, { before: 300, after: 110,
     change: -190, changePercent: (-190 / 300) * 100 });
   assert.equal(result.physicalCalls.change, -1);
-  assert.equal(result.knownCostUsd.change, -0.0019);
+  assert.ok(Math.abs(result.knownCostUsd.change + 0.0019) < 1e-12);
   assert.equal(JSON.stringify(result).includes('CONFIDENTIAL-DO-NOT-EXPORT'), false);
   assert.match(formatPairedTokenEvaluation(result), /Recorded usageVolume/);
   assert.match(formatPairedTokenEvaluation(result), /single pair does not prove causal savings/i);
