@@ -20,6 +20,10 @@ export const PROFILE_COMPONENTS = Object.freeze([
   'previousFindingsChars',
   'diffChars',
   'instructionsChars',
+  // Supervisor-only prompt sections (previously opaque to profiling).
+  'supervisorHistoryChars',
+  'blockingFindingsChars',
+  'priorSupervisorGuidanceChars',
 ]);
 
 export const PROFILE_USAGE_FIELDS = Object.freeze([
