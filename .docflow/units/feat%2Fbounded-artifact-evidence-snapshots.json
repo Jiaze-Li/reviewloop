@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:19:10.998Z",
+  "updatedAt": "2026-11-02T15:19:24.205Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs",
+    "current": "test: accept canonicalized explicit runtime root symlink without opening arbitrary symlink files",
     "next": "",
     "history": [
       {
@@ -46,6 +46,10 @@
       {
         "at": "2026-11-02T23:18:59+08:00",
         "text": "docs: render artifact protocol code examples as Markdown inline code"
+      },
+      {
+        "at": "2026-11-02T23:19:11+08:00",
+        "text": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs"
       }
     ],
     "commits": [
@@ -108,6 +112,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:18:59+08:00",
         "message": "fix: canonicalize user-configured runtime root before enforcing no-symlink loop/artifact dirs"
+      },
+      {
+        "sha": "9f835152bc7096cc18a072948f90ca76705b839a",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:19:11+08:00",
+        "message": "test: accept canonicalized explicit runtime root symlink without opening arbitrary symlink files"
       }
     ],
     "pr": {
