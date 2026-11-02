@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T15:15:30.552Z",
+  "updatedAt": "2026-11-02T15:15:35.966Z",
   "task": {
     "id": "feat/bounded-artifact-evidence-snapshots",
     "branch": "feat/bounded-artifact-evidence-snapshots",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/bounded-artifact-evidence-snapshots",
     "started": "2026-11-02T23:11:23+08:00",
     "status": "In progress",
-    "current": "docs: specify safe opt-in local artifact evidence snapshot protocol",
+    "current": "docs: link bounded opt-in artifact snapshot protocol from README",
     "next": "",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-02T23:15:12+08:00",
         "text": "test: validate safe artifact snapshot capture, hashing, model binding and mid-review invalidation"
+      },
+      {
+        "at": "2026-11-02T23:15:25+08:00",
+        "text": "docs: specify safe opt-in local artifact evidence snapshot protocol"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "feat/bounded-artifact-evidence-snapshots",
         "timestamp": "2026-11-02T23:15:12+08:00",
         "message": "docs: specify safe opt-in local artifact evidence snapshot protocol"
+      },
+      {
+        "sha": "5cf4174c8fe1d3f4b9cd5d30165f0bf55b97017e",
+        "branch": "feat/bounded-artifact-evidence-snapshots",
+        "timestamp": "2026-11-02T23:15:25+08:00",
+        "message": "docs: link bounded opt-in artifact snapshot protocol from README"
       }
     ],
     "pr": null,
