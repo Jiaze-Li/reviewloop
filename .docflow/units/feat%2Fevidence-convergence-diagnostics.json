@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-02T14:37:47.669Z",
+  "updatedAt": "2026-11-02T14:38:22.198Z",
   "task": {
     "id": "feat/evidence-convergence-diagnostics",
     "branch": "feat/evidence-convergence-diagnostics",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/evidence-convergence-diagnostics",
     "started": "2026-11-02T22:37:18+08:00",
     "status": "In progress",
-    "current": "feat: escalate repeated insufficiency of identical frozen evidence obligations",
+    "current": "feat: persist scoped evidence-convergence diagnostics per review round",
     "next": "",
     "history": [
       {
         "at": "2026-11-02T22:37:37+08:00",
         "text": "feat: conservatively identify persistent frozen evidence blockers"
+      },
+      {
+        "at": "2026-11-02T22:37:52+08:00",
+        "text": "feat: escalate repeated insufficiency of identical frozen evidence obligations"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/evidence-convergence-diagnostics",
         "timestamp": "2026-11-02T22:37:37+08:00",
         "message": "feat: escalate repeated insufficiency of identical frozen evidence obligations"
+      },
+      {
+        "sha": "0af78f3418acdc1aedd5be283a591d7918c7f7fd",
+        "branch": "feat/evidence-convergence-diagnostics",
+        "timestamp": "2026-11-02T22:37:52+08:00",
+        "message": "feat: persist scoped evidence-convergence diagnostics per review round"
       }
     ],
     "pr": null,
