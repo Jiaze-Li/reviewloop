@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:51:35.793Z",
+  "updatedAt": "2026-11-03T05:53:11.433Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "test(p0): inspect ambiguous and orphan spends with zero mutations or sensitive data leakage",
+    "current": "fix(p0): atomically commit known reservation, physical spend, and Sentinel latch",
     "next": "",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-11-03T13:51:26+08:00",
         "text": "test(p0): inject failures before rename, during fsync, and after atomic promotion"
+      },
+      {
+        "at": "2026-11-03T13:53:02+08:00",
+        "text": "test(p0): inspect ambiguous and orphan spends with zero mutations or sensitive data leakage"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:51:26+08:00",
         "message": "test(p0): inspect ambiguous and orphan spends with zero mutations or sensitive data leakage"
+      },
+      {
+        "sha": "9bca38e092a9812bb43f03901971b90e1768d087",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:53:02+08:00",
+        "message": "fix(p0): atomically commit known reservation, physical spend, and Sentinel latch"
       }
     ],
     "pr": null,
