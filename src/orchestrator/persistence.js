@@ -3,6 +3,7 @@
 
 import { mkdir, writeFile, readFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
+import { atomicReplaceUtf8 } from './atomicSnapshot.js';
 
 export class Persistence {
   constructor(baseDir) {
@@ -47,7 +48,9 @@ export class Persistence {
     }
     const dir = this.workflowDir(workflowId);
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, 'workflow.json'), JSON.stringify(state, null, 2), 'utf8');
+    // The spend/reservation ledgers share this snapshot. A crash must leave
+    // the old or the complete new version, never a truncated workflow.json.
+    await atomicReplaceUtf8(path.join(dir, 'workflow.json'), JSON.stringify(state, null, 2));
   }
 
   // Shallow read-modify-write merge of the workflow-scoped snapshot. Used to
