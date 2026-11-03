@@ -226,6 +226,22 @@ Cache fields are provider-specific and **must not be added** to `usageVolume`;
 character counts are not exact tokens. `--json` emits the same read-only
 measurements in a machine-readable format.
 
+## Crash-safe spend accounting and inspection
+
+The ReviewLoop-owned model-spend ledger commits `SETTLED_KNOWN` reservations,
+physical-call usage/cost records, and Token Sentinel latches in one durable
+workflow snapshot. Ambiguous `DISPATCHING` or `UNRESOLVED` calls still
+**block** automatic spending; UNKNOWN usage is never silently zeroed.
+For a strictly read-only audit of an operation or reservation, run:
+
+```sh
+reviewloop inspect-spend --loop <loopId> --operation <operationId> --json
+reviewloop inspect-spend --loop <loopId> --reservation <reservationId> --json
+```
+
+See [RL-P0-01: settlement safety and operator runbook](docs/RL-P0-01-SETTLEMENT.md).
+This inspector does not reconcile billing or authorize another call.
+
 ## Token profiling and measured comparisons
 
 `reviewloop profile --loop <id>` inspects physical spend for one LOCAL run
