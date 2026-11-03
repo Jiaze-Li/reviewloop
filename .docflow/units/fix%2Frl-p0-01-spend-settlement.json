@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:53:11.433Z",
+  "updatedAt": "2026-11-03T05:53:33.538Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "fix(p0): atomically commit known reservation, physical spend, and Sentinel latch",
+    "current": "fix(p0): permit atomic known-spend settlement before provider result escapes",
     "next": "",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-11-03T13:53:02+08:00",
         "text": "test(p0): inspect ambiguous and orphan spends with zero mutations or sensitive data leakage"
+      },
+      {
+        "at": "2026-11-03T13:53:25+08:00",
+        "text": "fix(p0): atomically commit known reservation, physical spend, and Sentinel latch"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:53:02+08:00",
         "message": "fix(p0): atomically commit known reservation, physical spend, and Sentinel latch"
+      },
+      {
+        "sha": "4973db5c871df1a424a9ab40da36e3f2f2e74e58",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:53:25+08:00",
+        "message": "fix(p0): permit atomic known-spend settlement before provider result escapes"
       }
     ],
     "pr": null,
