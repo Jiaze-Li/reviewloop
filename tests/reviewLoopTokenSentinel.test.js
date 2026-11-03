@@ -300,50 +300,50 @@ test('restart re-inference: a durable spend-log READ failure fails closed (UNKNO
   assert.equal(state?.modelSpendReservations, undefined, 'no permit / reservation minted');
 });
 
-test('an atomic spend+latch write failure is surfaced (not swallowed) and the call is still accounted in-process', async () => {
+test('atomic reservation+spend+Sentinel commit failure remains blocked and accounted in-process', async () => {
   const persistence = persistenceOf();
-  const realUpdate = persistence.updateWorkflowState.bind(persistence);
-  persistence.updateWorkflowState = async (id, patch) => {
-    // the anomalous settlement writes spend record + latch in ONE call
-    if (patch && 'reviewLoopTokenAnomaly' in patch) throw new Error('atomic write failed');
-    return realUpdate(id, patch);
+  const realWrite = persistence.writeWorkflowState.bind(persistence);
+  persistence.writeWorkflowState = async (id, next) => {
+    // Fault the NEW single-snapshot settlement boundary, not the old
+    // updateWorkflowState(spend+latch) that no longer exists.
+    if (next?.reviewLoopTokenAnomaly?.tripped) throw new Error('atomic write failed');
+    return realWrite(id, next);
   };
   const spend = createReviewLoopSpend({ loopId: 'L', persistence });
   await assert.rejects(
     () => meterOnce(spend, { usage: { input_tokens: 40001, output_tokens: 0 } }),
-    (e) => e.code === 'MODEL_SPEND_TOKEN_ANOMALY_STATE_UNAVAILABLE',
+    (e) => e.code === 'MODEL_SPEND_SETTLEMENT_PERSIST_FAILED',
   );
-  // Atomic transition: the durable write failed, so NEITHER the spend record nor
-  // the latch landed — never "spend persisted, latch missing".
   const state = await persistence.readWorkflowState('L');
   assert.equal(state.reviewLoopSpend, undefined);
   assert.equal(state.reviewLoopTokenAnomaly, undefined);
-  // The anomalous call's real usage is still fully accounted in-process (never 0)
-  // and this process stays blocked.
+  assert.equal(Object.values(state.modelSpendReservations)[0].status, 'DISPATCHING',
+    'the original dispatch marker remains a durable restart blocker');
+  // Real usage is preserved in this process even though the transaction was
+  // refused. A new process still blocks via the durable DISPATCHING marker.
   const t = await spend.telemetry();
   assert.equal(t.usageVolume, 40001);
   assert.equal(t.tokenAnomalyBlocked, true);
 });
 
-test('anomalous settlement writes the spend record + anomaly latch in ONE atomic state transition', async () => {
+test('anomalous settlement writes reservation + spend + Sentinel in ONE atomic state snapshot', async () => {
   const persistence = persistenceOf();
   const writes = [];
-  const realUpdate = persistence.updateWorkflowState.bind(persistence);
-  persistence.updateWorkflowState = async (id, patch) => {
-    writes.push(Object.keys(patch ?? {}));
-    return realUpdate(id, patch);
+  const realWrite = persistence.writeWorkflowState.bind(persistence);
+  persistence.writeWorkflowState = async (id, next) => {
+    writes.push(structuredClone(next));
+    return realWrite(id, next);
   };
   const spend = createReviewLoopSpend({ loopId: 'L', persistence });
   await assert.rejects(
     () => meterOnce(spend, { usage: { input_tokens: 40001, output_tokens: 0 } }),
     (e) => e.code === 'MODEL_SPEND_TOKEN_ANOMALY_BLOCKED',
   );
-  // exactly one write carries BOTH keys; there is no write that carries the
-  // spend record without the latch (the historical crash window).
-  const bothKeys = writes.filter((k) => k.includes('reviewLoopSpend') && k.includes('reviewLoopTokenAnomaly'));
-  const spendOnly = writes.filter((k) => k.includes('reviewLoopSpend') && !k.includes('reviewLoopTokenAnomaly'));
-  assert.equal(bothKeys.length, 1);
-  assert.equal(spendOnly.length, 0);
+  const committed = writes.filter(x => Object.values(x.modelSpendReservations ?? {})
+    .some(r => r.status === 'SETTLED_KNOWN'));
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].reviewLoopSpend.records.length, 1);
+  assert.equal(committed[0].reviewLoopTokenAnomaly.tripped, true);
   const state = await persistence.readWorkflowState('L');
   assert.equal(state.reviewLoopSpend.records.at(-1).usageVolume, 40001);
   assert.equal(state.reviewLoopTokenAnomaly.tripped, true);
