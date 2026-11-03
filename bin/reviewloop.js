@@ -23,6 +23,7 @@ import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenProfile.js';
+import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInspect.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 
@@ -169,6 +170,22 @@ async function profile(rest) {
   console.log(rest.includes('--json') ? JSON.stringify(report, null, 2) : formatTokenProfile(report));
 }
 
+async function inspectSpendCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reservationId = flagValue(rest, '--reservation');
+  const operationId = flagValue(rest, '--operation');
+  if (!loopId || Boolean(reservationId) === Boolean(operationId)) {
+    throw new Error('usage: reviewloop inspect-spend --loop <loopId> (--reservation <uuid> | --operation <operationId>) [--json]');
+  }
+  const result = await inspectSpend({
+    persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT),
+    loopId, reservationId, operationId,
+  });
+  console.log(rest.includes('--json')
+    ? JSON.stringify(result, null, 2)
+    : formatSpendInspection(result));
+}
+
 async function readLoops() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
   if (!existsSync(root)) return [];
@@ -235,6 +252,9 @@ async function main() {
     case 'profile':
       await profile(rest);
       break;
+    case 'inspect-spend':
+      await inspectSpendCommand(rest);
+      break;
     case 'acknowledge-spend':
       await acknowledgeSpend(rest);
       break;
@@ -260,7 +280,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);
