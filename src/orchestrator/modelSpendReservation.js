@@ -146,6 +146,47 @@ export class ReservationStore {
     if (!workflowId || !this._persistence || typeof this._persistence.updateWorkflowState !== 'function') return;
     await this._persistence.updateWorkflowState(workflowId, { [WORKFLOW_STATE_KEY]: reservations });
   }
+
+  // ReviewLoop-only atomic known settlement. Commit the reservation status,
+  // *the exact accounting record*, and any Token Sentinel latch in ONE
+  // workflow snapshot replacement. Never report success for a half-write.
+  // The caller holds the existing per-loop lease; this is not a substitute for
+  // cross-process exclusion.
+  async commitKnownSpend({ workflowId, reservationId, reservation, spendRecord, anomalyRecord = null }) {
+    const persistence = this._persistence;
+    if (!persistence
+      || typeof persistence.readWorkflowState !== 'function'
+      || typeof persistence.writeWorkflowState !== 'function') {
+      throw new Error('atomic known-spend settlement requires durable workflow persistence');
+    }
+    if (!spendRecord || spendRecord.reservationId !== reservationId
+      || spendRecord.usageKnown !== true
+      || spendRecord.usageAccounting?.volumeResolved !== true) {
+      throw new Error('atomic known-spend settlement requires an exact resolved usage record');
+    }
+    const state = await persistence.readWorkflowState(workflowId);
+    const previous = state?.[WORKFLOW_STATE_KEY]?.[reservationId];
+    if (!previous || previous.status !== RESERVATION_STATUS.DISPATCHING) {
+      throw new Error('atomic known-spend settlement requires DISPATCHING reservation');
+    }
+    const spendState = state.reviewLoopSpend ?? { records: [] };
+    const priorRecords = Array.isArray(spendState.records) ? spendState.records : [];
+    if (priorRecords.some((r) => r.reservationId === reservationId)) {
+      throw new Error('atomic known-spend settlement refuses duplicate reservation accounting');
+    }
+    const originalLatch = state.reviewLoopTokenAnomaly;
+    const next = {
+      ...state,
+      [WORKFLOW_STATE_KEY]: { ...state[WORKFLOW_STATE_KEY], [reservationId]: reservation },
+      reviewLoopSpend: { ...spendState, records: [...priorRecords, spendRecord] },
+      ...(anomalyRecord ? {
+        reviewLoopTokenAnomaly: originalLatch?.tripped === true ? originalLatch : anomalyRecord,
+      } : {}),
+    };
+    // One write, no read-modify-write merge after data construction. The
+    // Persistence implementation publishes workflow.json with atomic rename.
+    await persistence.writeWorkflowState(workflowId, next);
+  }
 }
 
 // The reservation lifecycle. One ledger typically backs one ModelSpendAuthority
@@ -288,6 +329,38 @@ export class ReservationLedger {
     candidateMap.set(reservationId, candidate);
     await this._persistCandidate(workflowId, candidateMap);
     // Only reached once durable persistence has succeeded.
+    map.set(reservationId, candidate);
+    this._onEvent?.({ type: 'RESERVATION_SETTLED_KNOWN', reservationId, workflowId: workflowId ?? null });
+    return candidate;
+  }
+
+  // ReviewLoop physical calls settle reservation + spend + Sentinel together.
+  // A crash therefore cannot leave a NEW known reservation without its spend
+  // record. Older/legacy callers retain settleKnown's previous API.
+  async settleKnownWithSpend({
+    workflowId, reservationId, usageCallId = null, usageReference = null,
+    reason = null, spendRecord, anomalyRecord = null,
+  }) {
+    const map = await this._loadWorkflow(workflowId);
+    const record = map.get(reservationId);
+    if (!record) throw new Error('settleKnownWithSpend: reservation missing');
+    if (record.status !== RESERVATION_STATUS.DISPATCHING) {
+      throw new Error('settleKnownWithSpend: reservation is not DISPATCHING');
+    }
+    const candidate = {
+      ...record,
+      status: RESERVATION_STATUS.SETTLED_KNOWN,
+      settledAt: new Date().toISOString(),
+      settlementReason: reason,
+      usageCallId,
+      usageReference,
+    };
+    // Persistence first, cache afterward. On any fault the cached status
+    // stays DISPATCHING, which blocks all subsequent model authorization.
+    await this._store.commitKnownSpend({
+      workflowId, reservationId, reservation: candidate,
+      spendRecord, anomalyRecord,
+    });
     map.set(reservationId, candidate);
     this._onEvent?.({ type: 'RESERVATION_SETTLED_KNOWN', reservationId, workflowId: workflowId ?? null });
     return candidate;
