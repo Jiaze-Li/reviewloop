@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:50:13.420Z",
+  "updatedAt": "2026-11-03T05:50:31.819Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "feat(p0): add content-free read-only reservation and spend evidence inspection",
+    "current": "feat(p0): expose zero-write inspect-spend CLI for one reservation/operation",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-03T13:50:04+08:00",
         "text": "fix(p0): publish workflow.json using durable atomic file replacement"
+      },
+      {
+        "at": "2026-11-03T13:50:23+08:00",
+        "text": "feat(p0): add content-free read-only reservation and spend evidence inspection"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:50:04+08:00",
         "message": "feat(p0): add content-free read-only reservation and spend evidence inspection"
+      },
+      {
+        "sha": "c33eeddb7cd9a5534f92ade53fbf660d45fca6ea",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:50:23+08:00",
+        "message": "feat(p0): expose zero-write inspect-spend CLI for one reservation/operation"
       }
     ],
     "pr": null,
