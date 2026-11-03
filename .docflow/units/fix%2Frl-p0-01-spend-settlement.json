@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-03T05:49:14.261Z",
+  "task": {
+    "id": "fix/rl-p0-01-spend-settlement",
+    "branch": "fix/rl-p0-01-spend-settlement",
+    "title": "fix/rl-p0-01-spend-settlement",
+    "task": "Development branch: fix/rl-p0-01-spend-settlement",
+    "started": "2026-11-03T13:49:05+08:00",
+    "status": "In progress",
+    "current": "fix(p0): add fsynced same-directory atomic workflow snapshot replacement",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "0966ae89ee2e2baa99f2f42f3a72cf0f50548b18",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:49:05+08:00",
+        "message": "fix(p0): add fsynced same-directory atomic workflow snapshot replacement"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
