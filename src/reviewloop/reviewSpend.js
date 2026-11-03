@@ -907,11 +907,14 @@ export function createReviewLoopSpend({
         // subsequent durable write fails, the cached DISPATCHING reservation
         // and this latch both refuse further model dispatch.
         if (anomalyRecord) anomalyLatched = anomalyRecord;
+        // Keep the provider-reported usage in this process even when a disk
+        // write fails. A failed commit leaves durable DISPATCHING (blocking);
+        // telemetry must never claim that the physically completed call cost 0.
+        sessionRecords.push(full);
         await reservationLedger.settleKnownWithSpend({
           workflowId, reservationId: id, usageCallId, usageReference, reason,
           spendRecord: full, anomalyRecord,
         });
-        sessionRecords.push(full);
         atomicKnownCommitted = true;
         atomicAnomaly = anomalyRecord;
       },
