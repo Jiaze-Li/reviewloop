@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:56:50.986Z",
+  "updatedAt": "2026-11-03T05:59:03.087Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "test(p0): fault inject atomic known settlement, no duplicate accounting, sentinel and UNKNOWN halt",
+    "current": "fix(p0): retain real in-process usage if atomic durable settlement fails",
     "next": "",
     "history": [
       {
@@ -46,6 +46,10 @@
       {
         "at": "2026-11-03T13:56:16+08:00",
         "text": "fix(p0): settle provider usage and reservation atomically before any ReviewLoop result or retry"
+      },
+      {
+        "at": "2026-11-03T13:58:52+08:00",
+        "text": "test(p0): fault inject atomic known settlement, no duplicate accounting, sentinel and UNKNOWN halt"
       }
     ],
     "commits": [
@@ -108,6 +112,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:56:16+08:00",
         "message": "test(p0): fault inject atomic known settlement, no duplicate accounting, sentinel and UNKNOWN halt"
+      },
+      {
+        "sha": "baeea6a19300df1064e51db9fe78d8156cee6691",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:58:52+08:00",
+        "message": "fix(p0): retain real in-process usage if atomic durable settlement fails"
       }
     ],
     "pr": {
