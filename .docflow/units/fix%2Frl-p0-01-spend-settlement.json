@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T06:01:17.849Z",
+  "updatedAt": "2026-11-03T06:01:55.993Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "docs(p0): design, fault matrix and read-only operator runbook for spend settlement",
+    "current": "docs(p0): link crash-safe spend and read-only inspection runbook",
     "next": "",
     "history": [
       {
@@ -58,6 +58,10 @@
       {
         "at": "2026-11-03T14:01:04+08:00",
         "text": "test(p0): target new atomic reservation+spend+Sentinel commit fault boundary"
+      },
+      {
+        "at": "2026-11-03T14:01:45+08:00",
+        "text": "docs(p0): design, fault matrix and read-only operator runbook for spend settlement"
       }
     ],
     "commits": [
@@ -138,6 +142,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T14:01:04+08:00",
         "message": "docs(p0): design, fault matrix and read-only operator runbook for spend settlement"
+      },
+      {
+        "sha": "653373cf290d0e104622097b3dd8b3f31fcc88ce",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T14:01:45+08:00",
+        "message": "docs(p0): link crash-safe spend and read-only inspection runbook"
       }
     ],
     "pr": {
