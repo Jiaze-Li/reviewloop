@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:59:03.087Z",
+  "updatedAt": "2026-11-03T05:59:04.945Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -126,7 +126,7 @@
       "title": "fix(P0): crash-safe ReviewLoop spend settlement and read-only reservation inspection",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/36",
       "merged": false,
-      "updatedAt": "2026-11-03T05:56:41Z"
+      "updatedAt": "2026-11-03T05:58:53Z"
     },
     "completed": null,
     "outcome": null
