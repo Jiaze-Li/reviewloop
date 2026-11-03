@@ -602,7 +602,7 @@ export class ModelSpendAuthority {
   // it throws AUTHORIZATION_ERROR_CODES.MODEL_SPEND_USAGE_UNRESOLVED
   // instead, so a caller cannot mistake "the call functionally succeeded"
   // for "it is safe to keep advancing the workflow".
-  async dispatch(permit, rawIntent, dispatchFn) {
+  async dispatch(permit, rawIntent, dispatchFn, { onKnownSettlement = null } = {}) {
     const intent = normalizeCallIntent(rawIntent);
     const token = permit instanceof PhysicalCallPermit
       ? permit._revealTokenTo(PhysicalCallPermit._brand)
@@ -671,7 +671,7 @@ export class ModelSpendAuthority {
 
     if (settlement.known) {
       try {
-        await this._reservationLedger.settleKnown({
+        const settlementArgs = {
           workflowId: intent.workflowId,
           reservationId: record.reservationId,
           usageCallId: settlement.callId,
@@ -683,7 +683,17 @@ export class ModelSpendAuthority {
                 ? SETTLEMENT_REASON.PROVEN_QUOTA_REJECTED_ZERO
                 : SETTLEMENT_REASON.PROVEN_PRE_SEND_ZERO)
               : 'PROVIDER_CALL_FAILED_WITH_KNOWN_USAGE'),
-        });
+        };
+        if (typeof onKnownSettlement === 'function') {
+          // ReviewLoop supplies an internal settlement hook that writes the
+          // reservation and its spend record in ONE durable transaction.
+          // A failure remains DISPATCHING (blocking), never triggers failover.
+          await onKnownSettlement({ ...settlementArgs, outcome });
+        } else {
+          // Backward-compatible generic authority path: callers without a
+          // spend ledger retain the existing reservation lifecycle.
+          await this._reservationLedger.settleKnown(settlementArgs);
+        }
       } catch (persistError) {
         // Settlement persistence failure (§ Failure 2). The provider
         // physically ran and its usage WAS known, but the durable
