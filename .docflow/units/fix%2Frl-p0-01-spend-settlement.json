@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:49:43.823Z",
+  "updatedAt": "2026-11-03T05:50:13.420Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,12 +8,16 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "fix(p0): publish workflow.json using durable atomic file replacement",
+    "current": "feat(p0): add content-free read-only reservation and spend evidence inspection",
     "next": "",
     "history": [
       {
         "at": "2026-11-03T13:49:21+08:00",
         "text": "fix(p0): add fsynced same-directory atomic workflow snapshot replacement"
+      },
+      {
+        "at": "2026-11-03T13:50:04+08:00",
+        "text": "fix(p0): publish workflow.json using durable atomic file replacement"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:49:21+08:00",
         "message": "fix(p0): publish workflow.json using durable atomic file replacement"
+      },
+      {
+        "sha": "0b81cdfce0e45484fe53c72aa0e68262451acf77",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:50:04+08:00",
+        "message": "feat(p0): add content-free read-only reservation and spend evidence inspection"
       }
     ],
     "pr": null,
