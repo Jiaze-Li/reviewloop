@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T02:24:07.174Z",
+  "updatedAt": "2026-11-03T02:24:15.060Z",
   "task": {
     "id": "fix/dependency-security-2026-11",
     "branch": "fix/dependency-security-2026-11",
@@ -19,7 +19,14 @@
         "message": "fix: update vulnerable production dependencies"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 35,
+      "state": "open",
+      "title": "fix: resolve npm dependency security advisories",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/35",
+      "merged": false,
+      "updatedAt": "2026-11-03T02:24:01Z"
+    },
     "completed": null,
     "outcome": null
   }
