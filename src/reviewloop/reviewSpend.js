@@ -837,6 +837,86 @@ export function createReviewLoopSpend({
       emitAndThrowAnomaly({ record: anomalyRecord, latchPersisted, latchError });
     };
 
+
+    // Production ReviewLoop uses one atomic persistence transition for
+    // SETTLED_KNOWN + its exact spend record (+ Sentinel when tripped).
+    // In-memory or deliberately partial test stores keep the legacy generic
+    // reservation path and session-local accounting.
+    const atomicKnown = Boolean(persistence
+      && typeof persistence.readWorkflowState === 'function'
+      && typeof persistence.writeWorkflowState === 'function');
+    let atomicKnownCommitted = false;
+    let atomicAnomaly = null;
+    const settlementOptions = atomicKnown ? {
+      onKnownSettlement: async ({
+        workflowId, reservationId: id, usageCallId, usageReference, reason, outcome,
+      }) => {
+        const success = outcome.ok;
+        const err = success ? null : outcome.error;
+        const usage = success
+          ? (outcome.value?.usage ?? null)
+          : (err?.details?.usage ?? err?.usage ?? null);
+        const accounting = usageAccountingOf({ usage, family, provider });
+        // The callback is only reached with a Provider Usage object. Require
+        // the same mechanically-resolved semantics as the ordinary spend path.
+        if (usage == null || accounting.volumeResolved !== true) {
+          throw new Error('atomic settlement refused missing or unresolvable provider usage');
+        }
+        const meta = payloadMetaOf(success ? outcome.value?.meta : err?.details?.meta);
+        const breakdown = usageBreakdownOf(usage);
+        const overhead = contextOverheadTokens(breakdown, meta, { family, provider });
+        const price = success ? outcome.value?.costUsd : err?.details?.costUsd;
+        const costKnown = Number.isFinite(price) || (!success && err?.details?.preSendZeroProven === true);
+        const resolvedModel = success ? (outcome.value?.model ?? model ?? null) : (model ?? null);
+        const full = {
+          role,
+          reservationId: id,
+          at: new Date().toISOString(),
+          model: resolvedModel,
+          requestedFamily: family,
+          family,
+          provider,
+          usageKnown: true,
+          usageVolume: accounting.usageVolume,
+          usageBreakdown: breakdown,
+          usageAccounting: accountingProvenanceOf(accounting),
+          payloadMeta: meta,
+          contextOverheadTokens: overhead,
+          costUsd: Number.isFinite(price) ? price : 0,
+          costKnown,
+          businessOutcome: success ? 'SUCCESS' : 'FAILURE',
+          ...(success ? {} : {
+            failureCode: err?.code ?? err?.providerFailure ?? null,
+            transientAuth: err?.transientAuth === true,
+            transientNetwork: err?.transientNetwork === true,
+            zeroProof: err?.details?.zeroProof ?? null,
+          }),
+          operationId: operationId ?? null,
+          attempt,
+          rawUsage: usage,
+          round: auditContext?.round ?? null,
+          chunkIndex: auditContext?.chunkIndex ?? null,
+          chunkTotal: auditContext?.chunkTotal ?? null,
+          quotaPools: auditContext?.quotaPools ?? null,
+        };
+        const hit = detectSingleCallTokenAnomaly({ accounting, contextOverhead: overhead, limits });
+        const anomalyRecord = hit ? buildAnomalyRecord({
+          hit, role, family, provider, resolvedModel,
+        }) : null;
+        // Latch within this process BEFORE the filesystem await; if a
+        // subsequent durable write fails, the cached DISPATCHING reservation
+        // and this latch both refuse further model dispatch.
+        if (anomalyRecord) anomalyLatched = anomalyRecord;
+        await reservationLedger.settleKnownWithSpend({
+          workflowId, reservationId: id, usageCallId, usageReference, reason,
+          spendRecord: full, anomalyRecord,
+        });
+        sessionRecords.push(full);
+        atomicKnownCommitted = true;
+        atomicAnomaly = anomalyRecord;
+      },
+    } : undefined;
+
     let result;
     try {
       result = await authority.dispatch(permit, intent, async () => {
@@ -896,8 +976,17 @@ export function createReviewLoopSpend({
           // Mechanical payload-size metadata (lengths only, never prompt text).
           meta: out?.meta ?? null,
         };
-      });
+      }, settlementOptions);
     } catch (err) {
+      if (atomicKnownCommitted) {
+        // The provider failed AFTER its usage was atomically settled. The
+        // original business error can reach bounded failover, but there is
+        // no second spend-log append and no repeated settlement.
+        if (atomicAnomaly) emitAndThrowAnomaly({
+          record: atomicAnomaly, latchPersisted: true, latchError: null,
+        });
+        throw err;
+      }
       // dispatch threw. A spend/authorization denial (SPEND_DENIED,
       // MODEL_SPEND_USAGE_UNRESOLVED, ...) means there is NO reliably-settled
       // physical attempt to account for — re-throw untouched. Any other error
@@ -961,6 +1050,22 @@ export function createReviewLoopSpend({
         });
       }
       throw err;
+    }
+
+    if (atomicKnown) {
+      if (!atomicKnownCommitted) {
+        // Defensive: a successful provider result without an atomic durable
+        // receipt is not allowed to become a successful ReviewLoop review.
+        throw new AuthorizationError(
+          AUTHORIZATION_ERROR_CODES.MODEL_SPEND_SETTLEMENT_PERSIST_FAILED,
+          'the provider call returned without a durable atomic spend settlement',
+          { loopId, role, operationId },
+        );
+      }
+      if (atomicAnomaly) emitAndThrowAnomaly({
+        record: atomicAnomaly, latchPersisted: true, latchError: null,
+      });
+      return result?.value ?? result;
     }
 
     const okBreakdown = usageBreakdownOf(result?.usage);
