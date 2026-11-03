@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:56:24.750Z",
+  "updatedAt": "2026-11-03T05:56:50.986Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -110,7 +110,14 @@
         "message": "test(p0): fault inject atomic known settlement, no duplicate accounting, sentinel and UNKNOWN halt"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 36,
+      "state": "open",
+      "title": "fix(P0): crash-safe ReviewLoop spend settlement and read-only reservation inspection",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/36",
+      "merged": false,
+      "updatedAt": "2026-11-03T05:56:41Z"
+    },
     "completed": null,
     "outcome": null
   }
