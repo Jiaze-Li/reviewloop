@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:59:45.031Z",
+  "updatedAt": "2026-11-03T06:01:14.110Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "test(p0): target new atomic reservation+spend+Sentinel commit fault boundary",
+    "current": "docs(p0): design, fault matrix and read-only operator runbook for spend settlement",
     "next": "",
     "history": [
       {
@@ -54,6 +54,10 @@
       {
         "at": "2026-11-03T13:59:33+08:00",
         "text": "fix(p0): retain real in-process usage if atomic durable settlement fails"
+      },
+      {
+        "at": "2026-11-03T14:01:04+08:00",
+        "text": "test(p0): target new atomic reservation+spend+Sentinel commit fault boundary"
       }
     ],
     "commits": [
@@ -128,6 +132,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:59:33+08:00",
         "message": "test(p0): target new atomic reservation+spend+Sentinel commit fault boundary"
+      },
+      {
+        "sha": "58dc68e0d3fc276bb933982329ca0bb9fa81e565",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T14:01:04+08:00",
+        "message": "docs(p0): design, fault matrix and read-only operator runbook for spend settlement"
       }
     ],
     "pr": {
