@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-03T05:50:31.819Z",
+  "updatedAt": "2026-11-03T05:51:07.093Z",
   "task": {
     "id": "fix/rl-p0-01-spend-settlement",
     "branch": "fix/rl-p0-01-spend-settlement",
@@ -8,7 +8,7 @@
     "task": "Development branch: fix/rl-p0-01-spend-settlement",
     "started": "2026-11-03T13:49:05+08:00",
     "status": "In progress",
-    "current": "feat(p0): expose zero-write inspect-spend CLI for one reservation/operation",
+    "current": "test(p0): inject failures before rename, during fsync, and after atomic promotion",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-03T13:50:23+08:00",
         "text": "feat(p0): add content-free read-only reservation and spend evidence inspection"
+      },
+      {
+        "at": "2026-11-03T13:50:53+08:00",
+        "text": "feat(p0): expose zero-write inspect-spend CLI for one reservation/operation"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "fix/rl-p0-01-spend-settlement",
         "timestamp": "2026-11-03T13:50:23+08:00",
         "message": "feat(p0): expose zero-write inspect-spend CLI for one reservation/operation"
+      },
+      {
+        "sha": "111a50b95b431e69577aea827518ea137e4e136f",
+        "branch": "fix/rl-p0-01-spend-settlement",
+        "timestamp": "2026-11-03T13:50:53+08:00",
+        "message": "test(p0): inject failures before rename, during fsync, and after atomic promotion"
       }
     ],
     "pr": null,
