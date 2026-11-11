@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-11T17:24:08.124Z",
+  "updatedAt": "2026-11-11T17:40:29.355Z",
   "task": {
     "id": "feat/design-task-type",
     "branch": "feat/design-task-type",
     "title": "feat/design-task-type",
     "task": "Development branch: feat/design-task-type",
     "started": "2026-11-12T01:07:24+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Make design review surface unstated assumptions and rejected options for user confirmation",
     "next": "等两个 PR 的独立审查通过后合并，并重新安装新版 Worker 规则让“前提确认”生效",
     "history": [
@@ -32,13 +32,15 @@
     ],
     "pr": {
       "number": 37,
-      "state": "open",
+      "state": "closed",
       "title": "Add design review taskType routed through the supervisor pool",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/37",
-      "merged": false,
-      "updatedAt": "2026-11-11T17:23:47Z"
+      "merged": true,
+      "mergedAt": "2026-11-11T17:40:17Z",
+      "closedAt": "2026-11-11T17:40:17Z",
+      "updatedAt": "2026-11-11T17:40:18Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-11T17:40:17Z",
+    "outcome": "Merged"
   }
 }
