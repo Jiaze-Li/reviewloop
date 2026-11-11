@@ -498,7 +498,7 @@ export function createReviewLoopController({
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
   const runReviewerOverEvidence = createReviewerRunner({
-    persistence, env, reviewerFn, routeReviewerFn, meteredWithFailover, saveLoop,
+    persistence, env, reviewerFn, routeReviewerFn, routeSupervisorFn, meteredWithFailover, saveLoop,
   });
 
   // Gate commands for one review gate, shared by LOCAL and PR. Uses exactly the

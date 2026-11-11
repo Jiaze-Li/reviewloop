@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { normalizeContractText, normalizeEvidenceRequirements } from './contractEvidence.js';
 
 export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL' });
+export const TASK_TYPES = Object.freeze({ CODE: 'code', DESIGN: 'design' });
 
 export const DEFAULT_BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2']);
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
@@ -140,6 +141,7 @@ export function createReviewObjective({
   goal,
   repository,
   mode,
+  taskType = TASK_TYPES.CODE,
   prNumber = null,
   reviewer = null,
   baseline = null,
@@ -163,6 +165,10 @@ export function createReviewObjective({
   const resolvedMode = mode || REVIEW_MODES.LOCAL;
   if (!Object.values(REVIEW_MODES).includes(resolvedMode)) {
     throw new Error(`createReviewObjective: unknown mode "${resolvedMode}"`);
+  }
+  const resolvedTaskType = String(taskType ?? TASK_TYPES.CODE).trim().toLowerCase();
+  if (!Object.values(TASK_TYPES).includes(resolvedTaskType)) {
+    throw new Error(`createReviewObjective: unknown taskType "${taskType}"`);
   }
 
   const normalizedConstraints = Array.isArray(constraints)
@@ -202,6 +208,7 @@ export function createReviewObjective({
       }
       : null,
     mode: resolvedMode,
+    taskType: resolvedTaskType,
     reviewer: 'internal',
     baseline: baseline ?? null,
     constraints: normalizedConstraints,
@@ -256,6 +263,7 @@ function fingerprintFields(o) {
   };
   // Backward compatibility: legacy objectives had no phase plan, so an empty
   // plan is intentionally omitted from the fingerprint.
+  if (o.taskType && o.taskType !== TASK_TYPES.CODE) base.taskType = o.taskType;
   if (Array.isArray(o.phases) && o.phases.length) base.phases = o.phases;
   if (o.contractText) base.contractText = o.contractText;
   if (Array.isArray(o.evidenceRequirements) && o.evidenceRequirements.length) {
@@ -322,6 +330,9 @@ export function assertObjectiveNotWeakened(original, candidate) {
   const problems = [];
   if (candidate.goal !== original.goal) problems.push('goal changed');
   if (candidate.mode !== original.mode) problems.push('mode changed');
+  if ((candidate.taskType ?? TASK_TYPES.CODE) !== (original.taskType ?? TASK_TYPES.CODE)) {
+    problems.push('taskType changed');
+  }
   if (JSON.stringify(candidate.repository ?? null) !== JSON.stringify(original.repository ?? null)) {
     problems.push('repository changed');
   }

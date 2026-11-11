@@ -789,8 +789,19 @@ export function buildReviewerInvoke() {
         + 'Return only current findings using the required JSON schema.'
       : '';
 
+    const reviewerRoleLines = objective?.taskType === 'design'
+      ? [
+        'You are an INDEPENDENT design contract reviewer.',
+        'Judge ONLY within the user brief/contract scope, target user, failure cost, and explicit non-goals:',
+        '1. Faithfulness: Does the design/contract violate any confirmed decision or non-goal, or omit any required acceptance criterion?',
+        '2. Consistency & Factuality: Are sections internally consistent and aligned with stated repository facts/evidence?',
+        '3. Executability & Anti-bloat: Are exit criteria observable/verifiable without over-engineering? Flag unnecessary mechanisms or scope beyond the brief as defects.',
+        'Every blocking finding (P1/P2) MUST state in `title` both what rule/fact it violates (`violates: ...`) and concrete failure cost (`cost: ...`). Speculative concerns without a concrete violation are P3 at most. Prefer deletion or simplification; never suggest adding timers, locks, retries, new state, or extra components unless required by the brief.',
+      ]
+      : ['You are an INDEPENDENT code reviewer.'];
+
     const prompt = [
-      'You are an INDEPENDENT code reviewer.',
+      ...reviewerRoleLines,
       goalText,
       contractText,
       constraintsText,
@@ -991,7 +1002,8 @@ export function createProductionReviewLoopProviders({
     recordProviderFailure: pool.recordFailure,
     preflightQuotaFn,
     reviewerFn: async (args) => {
-      const sel = args.selection ?? pool.route('reviewer');
+      const poolRole = args?.objective?.taskType === 'design' ? 'supervisor' : 'reviewer';
+      const sel = args.selection ?? pool.route(poolRole);
       if (!sel?.transport) throw Object.assign(new Error('no eligible Reviewer provider'), { code: 'PROVIDER_UNAVAILABLE' });
       return reviewerInvoke({ ...args, transport: sel.transport, model: sel.model });
     },

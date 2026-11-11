@@ -1,6 +1,6 @@
 // Frozen task initialization. Dependencies are injected from the controller boundary.
 import { randomUUID } from 'node:crypto';
-import { createReviewObjective, normalizePhasePlan, assertResumeTaskDefinitionBound, REVIEW_MODES } from './objective.js';
+import { createReviewObjective, normalizePhasePlan, assertResumeTaskDefinitionBound, REVIEW_MODES, TASK_TYPES } from './objective.js';
 import { initialLoopState } from './state.js';
 import { assertContractHandoff, normalizeEvidenceRequirements } from './contractEvidence.js';
 import { sha256Hex, phasesOf, currentReviewScope } from './phaseState.js';
@@ -15,13 +15,19 @@ function compactBaselineSummary(baseline) {
 
 export function createBeginTask({ clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent }) {
   async function begin({
-    goal, cwd, prNumber = null, reviewer = null,
+    goal, cwd, taskType = TASK_TYPES.CODE, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
     constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
   } = {}) {
     if (prNumber != null) throw new Error('reviewloop_begin: PR mode has been retired; use claude-review-bot for GitHub PR review.');
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
+    const resolvedTaskType = String(taskType ?? TASK_TYPES.CODE).trim().toLowerCase();
+    if (!Object.values(TASK_TYPES).includes(resolvedTaskType)) {
+      throw new Error(`reviewloop_begin: unknown taskType "${taskType}"`);
+    }
+    const effectiveVerificationCommands = verificationCommands
+      ?? (resolvedTaskType === TASK_TYPES.DESIGN ? ['git diff --check'] : null);
     const frozenContractText = assertContractHandoff({
       goal, contractText, constraints, phases, evidenceRequirements,
     });
@@ -63,10 +69,11 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
     // exact-HEAD disposable worktree so the ambient cwd's own branch/config
     // (which may differ from the PR entirely) can never leak into the frozen
     // PR Gate plan.
+    const isDesignDefaultVerification = resolvedTaskType === TASK_TYPES.DESIGN && verificationCommands == null;
     const freezeVerificationPlan = (discoverCwd) => {
-      const discovered = discoverVerificationCommandsFn({ cwd: discoverCwd, configured: verificationCommands });
+      const discovered = discoverVerificationCommandsFn({ cwd: discoverCwd, configured: effectiveVerificationCommands });
       const plan = {
-        source: String(discovered.source ?? 'unknown'),
+        source: isDesignDefaultVerification ? 'design-default' : String(discovered.source ?? 'unknown'),
         commands: (discovered.commands ?? []).map(String),
         manifestFingerprint: discovered.manifestFingerprint
           ?? sha256Hex(`fallback::${JSON.stringify(discovered.commands ?? [])}`),
@@ -96,7 +103,9 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
     if (signal?.aborted) throw new Error('reviewloop_begin: cancelled by the caller before the baseline Gate ran');
     let baselineGateRan = false;
     try {
-      if (verificationPlan.source !== 'mechanical' && verificationPlan.commands.length) {
+      if (verificationPlan.source !== 'mechanical'
+        && verificationPlan.source !== 'design-default'
+        && verificationPlan.commands.length) {
         const g = await runGateFn({
           cwd, commands: verificationPlan.commands, runner: gateRunner, env, signal,
         });
@@ -144,7 +153,7 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
       : (Number.isInteger(envMaxRounds) && envMaxRounds > 0 ? envMaxRounds : undefined);
 
     const objective = createReviewObjective({
-      loopId, goal, repository, mode, reviewer, baseline,
+      loopId, goal, repository, mode, taskType: resolvedTaskType, reviewer, baseline,
       constraints, phases, contractText: frozenContractText, evidenceRequirements,
       blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       verificationPlan,
@@ -195,14 +204,15 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
     }
 
     const loopState = initialLoopState(objective);
-    loopState.verificationCommands = verificationCommands ?? null;
+    loopState.verificationCommands = effectiveVerificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
     await store.save(loopId, loopState);
-    onEvent?.({ type: 'REVIEWLOOP_BEGIN', loopId, mode });
+    onEvent?.({ type: 'REVIEWLOOP_BEGIN', loopId, mode, taskType: objective.taskType });
 
     return {
       loopId,
       mode,
+      taskType: objective.taskType,
       status: 'READY',
       baseline: baseline ? compactBaselineSummary(baseline) : null,
       reviewer: objective.reviewer,
