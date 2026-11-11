@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-11T17:07:34.822Z",
+  "task": {
+    "id": "feat/design-task-type",
+    "branch": "feat/design-task-type",
+    "title": "feat/design-task-type",
+    "task": "Development branch: feat/design-task-type",
+    "started": "2026-11-12T01:07:24+08:00",
+    "status": "In progress",
+    "current": "Add design review taskType routed through the supervisor pool",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "24a1fb730cc034e6f1fc807b4249c9d322110274",
+        "branch": "feat/design-task-type",
+        "timestamp": "2026-11-12T01:07:24+08:00",
+        "message": "Add design review taskType routed through the supervisor pool"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
