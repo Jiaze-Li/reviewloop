@@ -47,10 +47,14 @@ test('buildReviewerInvoke emits anti-bloat design contract prompt when taskType 
   assert.match(designPrompt, /Executability & Anti-bloat/);
   assert.match(designPrompt, /violates:/);
   assert.match(designPrompt, /never suggest adding timers, locks, retries/);
+  assert.match(designPrompt, /Assumptions & Options/);
+  assert.match(designPrompt, /violates: unstated assumption/);
+  assert.match(designPrompt, /never flag one merely for being listed/);
   assert.doesNotMatch(designPrompt, /You are an INDEPENDENT code reviewer\./);
 
   assert.match(codePrompt, /You are an INDEPENDENT code reviewer\./);
   assert.doesNotMatch(codePrompt, /You are an INDEPENDENT design contract reviewer\./);
+  assert.doesNotMatch(codePrompt, /Assumptions & Options/);
 });
 
 test('taskType=design routes review dispatches through the supervisor pool order while accounting under reviewerCalls', async () => {
