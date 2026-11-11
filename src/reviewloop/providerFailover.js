@@ -121,7 +121,7 @@ export function createMeteredWithFailover({
     // a fresh dispatch on identical evidence for a first attempt (crash/resume
     // re-call included).
     return async function meteredWithFailover({
-      spend, role, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null, signal = null,
+      spend, role, routingRole = null, routeFn, defaultFamily, defaultProvider, operationId, evidenceIds, invoke, workflowId = null, signal = null,
       // Durable physical-call-audit identity forwarded verbatim into the spend
       // record (round / chunkIndex / chunkTotal; quotaPools is filled in below
       // from the resolved routing selection) — see reviewSpend.js meteredCall.
@@ -136,12 +136,13 @@ export function createMeteredWithFailover({
       onAttempt = null,
     }) {
       const tried = new Set();
+      const effectiveRoutingRole = routingRole ?? role;
       // Effective attempt bound = role candidate count PLUS the bounded AGY
       // same-family transient retry allowance. The two extra slots are shared by
       // canonical auth-refresh races and mechanically-proven pre-send network
       // failures. Ordinary provider failures still traverse each policy
       // candidate at most once.
-      const maxAttempts = providerAttemptBudget(role) + transientAuthRetryDelays.length;
+      const maxAttempts = providerAttemptBudget(effectiveRoutingRole) + transientAuthRetryDelays.length;
       let transientRetriesUsed = 0;
       let lastErr = null;
       let priorAttempts = [];
@@ -239,7 +240,7 @@ export function createMeteredWithFailover({
           && entry.lastTransientAuth === true;
         if (exhaustedByAuth && recordProviderFailure) {
           recordProviderFailure(
-            { role, family: entry.family, provider: entry.provider },
+            { role: effectiveRoutingRole, family: entry.family, provider: entry.provider },
             {
               code: 'PROVIDER_AUTH_FAILED',
               recoveredFromDurableTransientExhaustion: true,

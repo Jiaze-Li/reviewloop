@@ -4,7 +4,7 @@ import { chunkDiffForReview } from './diffChunker.js';
 import { sha256Hex, scopeBoundFingerprint, currentReviewScope } from './phaseState.js';
 import { normalizeReview } from './reviewPolicy.js';
 
-export function createReviewerRunner({ persistence, env, reviewerFn, routeReviewerFn, meteredWithFailover, saveLoop }) {
+export function createReviewerRunner({ persistence, env, reviewerFn, routeReviewerFn, routeSupervisorFn = null, meteredWithFailover, saveLoop }) {
   async function runReviewerOverEvidence({
     spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective),
     evidenceBundle = null, evidenceProofFingerprint = '', signal,
@@ -182,12 +182,17 @@ export function createReviewerRunner({ persistence, env, reviewerFn, routeReview
           reviewScope,
         ),
       });
+      const isDesignTask = objective?.taskType === 'design';
+      const effectiveRouteFn = isDesignTask ? (routeSupervisorFn ?? routeReviewerFn) : routeReviewerFn;
+      const effectiveRoutingRole = isDesignTask && routeSupervisorFn ? 'supervisor' : 'reviewer';
+      const defaultFamily = isDesignTask ? 'agy:gemini-supervisor' : 'agy:gpt-oss';
       // eslint-disable-next-line no-await-in-loop
       const raw = await meteredWithFailover({
         spend,
         role: 'reviewer',
-        routeFn: routeReviewerFn,
-        defaultFamily: 'agy:gpt-oss',
+        routingRole: effectiveRoutingRole,
+        routeFn: effectiveRouteFn,
+        defaultFamily,
         defaultProvider: 'agy',
         operationId: chunkId,
         workflowId: loopState.loopId,

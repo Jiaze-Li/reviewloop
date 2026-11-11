@@ -63,6 +63,7 @@ export function createReviewLoopMcpServer({
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
+        taskType: z.enum(['code', 'design']).optional().describe('review mode: "code" (default) or "design" (design/contract review routed through supervisor pool). A design contract must carry an "Options" section (alternatives considered + why rejected) and an "Assumptions" section (plain-language premises the brief never stated, or "None"). Anything written for the user to read (the PR design-pass comment) opens with at most 5 short plain-language lines: what will be built and the Assumptions to confirm; no file paths, identifiers or jargon, and never a bare pointer to a document'),
         // Explicit compatibility tripwire. Without it Zod could silently drop
         // unknown prNumber and accidentally start a LOCAL review.
         prNumber: z.number().int().optional().describe('RETIRED: PR review is handled by claude-review-bot; supplying this errors'),
@@ -92,6 +93,7 @@ export function createReviewLoopMcpServer({
       outputSchema: {
         loopId: z.string(),
         mode: z.literal('LOCAL'),
+        taskType: z.enum(['code', 'design']).optional(),
         status: z.literal('READY'),
         baseline: z.record(z.string(), z.any()).nullable(),
         reviewer: z.string(),
@@ -103,6 +105,7 @@ export function createReviewLoopMcpServer({
     async ({
       goal,
       cwd: reqCwd,
+      taskType,
       prNumber,
       constraints,
       contractText,
@@ -115,6 +118,7 @@ export function createReviewLoopMcpServer({
       const res = await ctl.begin({
         goal,
         cwd: reqCwd ? path.resolve(reqCwd) : cwd,
+        taskType,
         prNumber: prNumber ?? null,
         constraints: constraints ?? [],
         contractText: contractText ?? '',
@@ -128,6 +132,7 @@ export function createReviewLoopMcpServer({
       const structured = {
         loopId: res.loopId,
         mode: res.mode,
+        taskType: res.taskType ?? 'code',
         status: 'READY',
         baseline: res.baseline ?? null,
         reviewer: res.reviewer,
