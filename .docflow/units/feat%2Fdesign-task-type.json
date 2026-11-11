@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-11T17:07:34.822Z",
+  "updatedAt": "2026-11-11T17:07:39.706Z",
   "task": {
     "id": "feat/design-task-type",
     "branch": "feat/design-task-type",
@@ -19,7 +19,14 @@
         "message": "Add design review taskType routed through the supervisor pool"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 37,
+      "state": "open",
+      "title": "Add design review taskType routed through the supervisor pool",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/37",
+      "merged": false,
+      "updatedAt": "2026-11-11T17:07:29Z"
+    },
     "completed": null,
     "outcome": null
   }
