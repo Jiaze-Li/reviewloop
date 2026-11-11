@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-11T17:23:57.703Z",
+  "updatedAt": "2026-11-11T17:24:08.124Z",
   "task": {
     "id": "feat/design-task-type",
     "branch": "feat/design-task-type",
@@ -9,7 +9,7 @@
     "started": "2026-11-12T01:07:24+08:00",
     "status": "In progress",
     "current": "Make design review surface unstated assumptions and rejected options for user confirmation",
-    "next": "Wait for automated PR review and merge the new design review mode",
+    "next": "等两个 PR 的独立审查通过后合并，并重新安装新版 Worker 规则让“前提确认”生效",
     "history": [
       {
         "at": "2026-11-12T01:23:44+08:00",
