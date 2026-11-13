@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-13T12:04:58.631Z",
+  "task": {
+    "id": "docs/local-only-design-decision",
+    "branch": "docs/local-only-design-decision",
+    "title": "docs/local-only-design-decision",
+    "task": "Development branch: docs/local-only-design-decision",
+    "started": "2026-11-13T20:04:47+08:00",
+    "status": "In progress",
+    "current": "Record that design review stays local-only and the GitHub-bot design path was dropped",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "126e5c8ef58be0d2531ca97be1631264a8d8c7e1",
+        "branch": "docs/local-only-design-decision",
+        "timestamp": "2026-11-13T20:04:47+08:00",
+        "message": "Record that design review stays local-only and the GitHub-bot design path was dropped"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
