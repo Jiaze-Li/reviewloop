@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-13T02:21:12.392Z",
+  "task": {
+    "id": "feat/pr-description-handoff",
+    "branch": "feat/pr-description-handoff",
+    "title": "feat/pr-description-handoff",
+    "task": "Development branch: feat/pr-description-handoff",
+    "started": "2026-11-13T10:21:00+08:00",
+    "status": "In progress",
+    "current": "Tell Workers how to open the PR description after a code task passes",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "badd6a986792d45ba67d9222d3ec10eb1db520ff",
+        "branch": "feat/pr-description-handoff",
+        "timestamp": "2026-11-13T10:21:00+08:00",
+        "message": "Tell Workers how to open the PR description after a code task passes"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
