@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-13T12:04:58.631Z",
+  "updatedAt": "2026-11-13T12:11:07.427Z",
   "task": {
     "id": "docs/local-only-design-decision",
     "branch": "docs/local-only-design-decision",
@@ -19,7 +19,14 @@
         "message": "Record that design review stays local-only and the GitHub-bot design path was dropped"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 39,
+      "state": "open",
+      "title": "Record that design review stays local-only",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/39",
+      "merged": false,
+      "updatedAt": "2026-11-13T12:10:55Z"
+    },
     "completed": null,
     "outcome": null
   }
