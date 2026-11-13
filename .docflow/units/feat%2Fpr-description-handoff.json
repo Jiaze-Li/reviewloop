@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-13T02:21:23.681Z",
+  "updatedAt": "2026-11-13T02:28:45.877Z",
   "task": {
     "id": "feat/pr-description-handoff",
     "branch": "feat/pr-description-handoff",
     "title": "feat/pr-description-handoff",
     "task": "Development branch: feat/pr-description-handoff",
     "started": "2026-11-13T10:21:00+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Tell Workers how to open the PR description after a code task passes",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 38,
-      "state": "open",
+      "state": "closed",
       "title": "Worker Contract v11: PR description handoff for code tasks",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/38",
-      "merged": false,
-      "updatedAt": "2026-11-13T02:21:04Z"
+      "merged": true,
+      "mergedAt": "2026-11-13T02:28:36Z",
+      "closedAt": "2026-11-13T02:28:36Z",
+      "updatedAt": "2026-11-13T02:28:36Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-13T02:28:36Z",
+    "outcome": "Merged"
   }
 }
