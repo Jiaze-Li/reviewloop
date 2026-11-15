@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-15T02:55:58.407Z",
+  "task": {
+    "id": "claude/stoic-gates-ajzwr1",
+    "branch": "claude/stoic-gates-ajzwr1",
+    "title": "claude/stoic-gates-ajzwr1",
+    "task": "Development branch: claude/stoic-gates-ajzwr1",
+    "started": "2026-11-15T02:55:47Z",
+    "status": "In progress",
+    "current": "Unify Design review with the Code engine (reviewTarget + designSha256)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "a79635ef1135afebbf01b1a0d2314f2ccb5811b3",
+        "branch": "claude/stoic-gates-ajzwr1",
+        "timestamp": "2026-11-15T02:55:47Z",
+        "message": "Unify Design review with the Code engine (reviewTarget + designSha256)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
