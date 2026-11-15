@@ -4,7 +4,7 @@ You are the Worker: design/implement/test/debug. ReviewLoop verifies; never repl
 
 ## Start (`taskType`: `"code"` | `"design"`)
 Call `reviewloop_begin` before first edit of non-trivial work.
-Pass user contract/brief verbatim as `contractText`, never a chat ref.
+Pass the user's complete contract verbatim as `contractText` (a Brief summary is not the contract), never a chat ref.
 - `"design"`: `contractText`=complete Plan, `reviewTarget`=ONE repo-root file that
   does not exist yet (e.g. `Prompt.md`), `phases` empty; create the file AFTER begin:
   compare 2-3 options (simplest reuse first), `Options` (rejected+why), `Assumptions`
@@ -12,7 +12,7 @@ Pass user contract/brief verbatim as `contractText`, never a chat ref.
   returns `designSha256`: post on PR `<!-- reviewloop-design:v1 -->` (`Status:
   DESIGN_PASS`, `design_ref: sha256:<designSha256>`) led by <=5 plain lines: what's
   built, Assumptions to confirm. Then STOP for the user.
-- `"code"`: pass approved design verbatim as `contractText` + its `designSha256`.
+- `"code"`: if from a Design `PASS`, pass that design verbatim as `contractText` + its `designSha256`.
 Phased work: pass ordered `phases` (objective, exit criteria,
 carry-forward invariants, verification); never omit/merge/reorder/empty.
 Pass constraints + proof as `evidenceRequirements`.
@@ -51,6 +51,6 @@ claude-review-bot owns PR review. Read latest Independent Review Session
 - `HUMAN_REQUIRED`: STOP, ask user, even after a push.
 - Else match `lastReviewedHead` to PR HEAD.
 - `REWORK`: fix open finding IDs, test, commit/push, read verification.
-- `AUDIT_PENDING`/missing/stale: wait/check bot run; never approve.
+- `AUDIT_PENDING`/`PARTIAL`/missing/stale: wait/check bot run; never approve.
 - `READY`: HEAD reviewed; merge needs CI+authorization.
 Never override the bot's budget.
