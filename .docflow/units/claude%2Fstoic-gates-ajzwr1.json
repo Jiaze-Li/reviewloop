@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:00:43.276Z",
+  "updatedAt": "2026-11-15T03:03:25.237Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
     "title": "claude/stoic-gates-ajzwr1",
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Fix three stale or misleading lines in the Worker Policy",
     "next": "",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 41,
-      "state": "open",
+      "state": "closed",
       "title": "Unify Design review with the Code engine (reviewTarget + designSha256)",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/41",
-      "merged": false,
-      "updatedAt": "2026-11-15T03:00:33Z"
+      "merged": true,
+      "mergedAt": "2026-11-15T03:03:14Z",
+      "closedAt": "2026-11-15T03:03:15Z",
+      "updatedAt": "2026-11-15T03:03:15Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-15T03:03:14Z",
+    "outcome": "Merged"
   }
 }
