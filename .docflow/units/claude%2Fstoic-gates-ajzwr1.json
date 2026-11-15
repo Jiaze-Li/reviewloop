@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:09:15.912Z",
+  "updatedAt": "2026-11-15T03:10:39.899Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
     "title": "claude/stoic-gates-ajzwr1",
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Drop the unused design-pass comment marker from the Worker Policy",
     "next": "",
     "history": [
@@ -52,14 +52,16 @@
     ],
     "pr": {
       "number": 42,
-      "state": "open",
+      "state": "closed",
       "title": "Drop the unused design-pass comment marker from the Worker Policy",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/42",
-      "merged": false,
-      "updatedAt": "2026-11-15T03:09:03Z"
+      "merged": true,
+      "mergedAt": "2026-11-15T03:10:30Z",
+      "closedAt": "2026-11-15T03:10:30Z",
+      "updatedAt": "2026-11-15T03:10:30Z"
     },
-    "completed": null,
-    "outcome": null,
+    "completed": "2026-11-15T03:10:30Z",
+    "outcome": "Merged",
     "prs": [
       {
         "number": 41,
