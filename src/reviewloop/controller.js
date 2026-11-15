@@ -24,7 +24,7 @@ import {
   assertNotLegacyWorkflow,
   isTerminal,
 } from './state.js';
-import { captureBaseline, collectWorkerDelta } from './gitEvidence.js';
+import { captureBaseline, collectWorkerDelta, readCurrentBranch } from './gitEvidence.js';
 import { withInProcessLoopLock, acquireLoopFileLease } from './loopLease.js';
 import { discoverVerificationCommands, runGate, GATE_VERDICTS } from './gatePolicy.js';
 import {
@@ -113,6 +113,8 @@ export function createReviewLoopController({
   sleepFn = defaultRetrySleep,
   captureBaselineFn = captureBaseline,
   collectWorkerDeltaFn = collectWorkerDelta,
+  // Display-only: the branch of the repository a loop is bound to.
+  readBranchFn = readCurrentBranch,
   // Re-collect the Worker delta AFTER the review-time Gate (a snapshot / codegen
   // / format check can mutate tracked files). Defaults to the real collector
   // only when the delta collector itself is the real one — an injected test
@@ -269,7 +271,7 @@ export function createReviewLoopController({
   }
 
   const begin = createBeginTask({
-    clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent,
+    clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent, readBranchFn,
   });
 
   async function loadLoop(loopId) {
@@ -640,6 +642,11 @@ export function createReviewLoopController({
     }
   }
 
+  // Display-only branch of the bound repository (never throws).
+  async function safeBranch(cwd) {
+    try { return cwd ? await readBranchFn({ cwd }) : null; } catch { return null; }
+  }
+
   // ---- LOCAL mode --------------------------------------------------------
   async function reviewLocal({ loopState, evidence, signal }) {
     const objective = loopState.objective;
@@ -665,7 +672,9 @@ export function createReviewLoopController({
         status: 'NO_PROGRESS',
         loopId: loopState.loopId,
         round: loopState.round,
-        reason: 'no Worker change has been made since reviewloop_begin; do the work, then call reviewloop_review',
+        reason: 'no Worker change has been made since reviewloop_begin; do the work, then call reviewloop_review. '
+          + `This loop is bound to ${cwd ?? '(unknown repository)'} (branch ${(await safeBranch(cwd)) ?? 'unknown'}); `
+          + 'edits made in any other repository or git worktree are not seen. If you worked elsewhere, move the change here or start the work in the bound directory.',
         telemetry: await durableTelemetry(loopState.loopId),
         safetyEvents: safetyEventsForReview(),
       };

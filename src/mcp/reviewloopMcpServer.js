@@ -103,6 +103,8 @@ export function createReviewLoopMcpServer({
         currentPhase: z.string().optional(),
         planWarnings: z.array(z.string()).optional(),
         reviewTarget: z.string().optional(),
+        repositoryRoot: z.string().optional().describe('the repository directory this loop is bound to; edit only here'),
+        branch: z.string().nullable().optional(),
       },
     },
     async ({
@@ -145,6 +147,7 @@ export function createReviewLoopMcpServer({
         reviewer: res.reviewer,
         phaseCount: res.phaseCount ?? 0,
         currentPhase: res.currentPhase ?? 'task',
+        ...(res.repositoryRoot ? { repositoryRoot: res.repositoryRoot, branch: res.branch ?? null } : {}),
         ...(res.reviewTarget ? { reviewTarget: res.reviewTarget } : {}),
         ...(res.planWarnings?.length ? { planWarnings: res.planWarnings } : {}),
       };

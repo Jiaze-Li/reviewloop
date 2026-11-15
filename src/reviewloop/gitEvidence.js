@@ -807,4 +807,19 @@ export async function collectWorkerDelta({
   };
 }
 
+// The branch a loop is bound to, for display only (never part of any identity
+// or fingerprint). Returns null when it cannot be read; a detached HEAD is
+// reported as '(detached HEAD)'.
+export async function readCurrentBranch({ cwd, spawn = nodeSpawn } = {}) {
+  try {
+    const res = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd, spawn);
+    if (res.code !== 0) return null;
+    const name = res.stdout.trim();
+    if (!name) return null;
+    return name === 'HEAD' ? '(detached HEAD)' : name;
+  } catch {
+    return null;
+  }
+}
+
 export { sha256 as evidenceSha256, GitEvidenceError };
