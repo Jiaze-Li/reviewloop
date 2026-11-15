@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:11:51.683Z",
+  "updatedAt": "2026-11-15T03:14:35.676Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
     "status": "Completed",
-    "current": "Teach the minimal begin/review call shapes in the Worker Policy (#40, point 1)",
+    "current": "Tell the Worker which repository a loop is bound to (#40, point 2)",
     "next": "",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-15T03:11:42Z",
         "text": "Drop the unused design-pass comment marker from the Worker Policy"
+      },
+      {
+        "at": "2026-11-15T03:14:26Z",
+        "text": "Teach the minimal begin/review call shapes in the Worker Policy (#40, point 1)"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "claude/stoic-gates-ajzwr1",
         "timestamp": "2026-11-15T03:11:42Z",
         "message": "Teach the minimal begin/review call shapes in the Worker Policy (#40, point 1)"
+      },
+      {
+        "sha": "9f09a127923154f85b4d2238bbb902e7ef256d23",
+        "branch": "claude/stoic-gates-ajzwr1",
+        "timestamp": "2026-11-15T03:14:26Z",
+        "message": "Tell the Worker which repository a loop is bound to (#40, point 2)"
       }
     ],
     "pr": {
