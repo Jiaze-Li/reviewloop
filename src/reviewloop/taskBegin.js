@@ -4,6 +4,7 @@ import { createReviewObjective, normalizePhasePlan, assertResumeTaskDefinitionBo
 import { initialLoopState } from './state.js';
 import { assertContractHandoff, normalizeEvidenceRequirements } from './contractEvidence.js';
 import { sha256Hex, phasesOf, currentReviewScope } from './phaseState.js';
+import { assertReviewTargetAbsent, designContentSha256 } from './designTarget.js';
 
 function compactBaselineSummary(baseline) {
   return {
@@ -18,6 +19,7 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
     goal, cwd, taskType = TASK_TYPES.CODE, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
     constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
+    reviewTarget = null, designSha256 = null,
   } = {}) {
     if (prNumber != null) throw new Error('reviewloop_begin: PR mode has been retired; use claude-review-bot for GitHub PR review.');
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
@@ -31,6 +33,43 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
     const frozenContractText = assertContractHandoff({
       goal, contractText, constraints, phases, evidenceRequirements,
     });
+    // Design target (unified Design path). Every check here is side-effect
+    // free and runs before any baseline/Gate work.
+    let frozenReviewTarget = null;
+    if (reviewTarget != null) {
+      if (resolvedTaskType !== TASK_TYPES.DESIGN) {
+        throw new Error('reviewloop_begin: reviewTarget is only valid with taskType "design"');
+      }
+      if (Array.isArray(phases) && phases.length) {
+        throw new Error(
+          'reviewloop_begin: a Design loop with reviewTarget must use a single whole-task gate (phases=[]); '
+          + 'phased review can show the Reviewer only a later delta, never the complete design file',
+        );
+      }
+      if (!frozenContractText) {
+        throw new Error('reviewloop_begin: a Design loop with reviewTarget requires the complete Plan as contractText');
+      }
+      frozenReviewTarget = await assertReviewTargetAbsent({ cwd, reviewTarget });
+    }
+    // Code begin may bind itself to the exact Design that passed review.
+    // Content-consistency check only: it is not proof of Design PASS or of user authorization.
+    if (designSha256 != null) {
+      if (resolvedTaskType !== TASK_TYPES.CODE) {
+        throw new Error('reviewloop_begin: designSha256 is only valid with taskType "code"');
+      }
+      const expected = String(designSha256).trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(expected)) {
+        throw new Error('reviewloop_begin: designSha256 must be 64 hexadecimal characters');
+      }
+      const actual = designContentSha256(frozenContractText);
+      if (actual !== expected) {
+        throw new Error(
+          `reviewloop_begin: contractText does not match the approved Design (designSha256 ${expected.slice(0, 12)}… expected, `
+          + `contractText hashes to ${actual.slice(0, 12)}…). Pass the exact Design/Work Contract that passed review, `
+          + 'or obtain a new Design PASS for the changed text. Comparison is on the whitespace-trimmed UTF-8 content.',
+        );
+      }
+    }
     // Validate bounded structured phase metadata before baseline/Gate work.
     // createReviewObjective normalizes again when freezing the objective; this
     // early pass is deliberately side-effect free and prevents invalid
@@ -156,6 +195,7 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
       loopId, goal, repository, mode, taskType: resolvedTaskType, reviewer, baseline,
       constraints, phases, contractText: frozenContractText, evidenceRequirements,
       blockingSeverities, maxReviewRounds: resolvedMaxRounds,
+      reviewTarget: frozenReviewTarget,
       verificationPlan,
       baselineGateEvidence: baselineGate,
     });
@@ -199,6 +239,17 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
         );
       }
     }
+    // gitEvidence refuses to attribute a NEW untracked file under a parent
+    // directory unless the runtime has an atomic whole-path symlink guard
+    // (Darwin's O_NOFOLLOW_ANY). Where it does not (e.g. Linux), only a
+    // repository-root target can be reviewed: say so while it is free to fix.
+    if (frozenReviewTarget && frozenReviewTarget.includes('/') && process.platform !== 'darwin') {
+      planWarnings.push(
+        `reviewTarget "${frozenReviewTarget}" is in a subdirectory: on this runtime (${process.platform}) ReviewLoop cannot attribute a new `
+        + 'untracked file under a parent directory (no atomic whole-path symlink guard), so review would stop at HUMAN_REQUIRED. '
+        + 'Use a repository-root path (e.g. "Prompt.md") and move the file after PASS, then call reviewloop_begin again BEFORE creating it.',
+      );
+    }
     if (preflightPhases.length > 8) {
       planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
     }
@@ -219,6 +270,7 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
       phaseCount: phasesOf(objective).length,
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
+      ...(objective.reviewTarget ? { reviewTarget: objective.reviewTarget } : {}),
       ...(planWarnings.length ? { planWarnings } : {}),
     };
   }

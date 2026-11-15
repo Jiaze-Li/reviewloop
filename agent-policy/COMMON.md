@@ -1,19 +1,25 @@
 # ReviewLoop Worker Contract
-Contract version: 11
+Contract version: 12
 You are the Worker: design/implement/test/debug. ReviewLoop verifies; never replaces you.
 
 ## Start (`taskType`: `"code"` | `"design"`)
 Call `reviewloop_begin` before first edit of non-trivial work.
-Pass user contract/brief verbatim as `contractText`, never a chat ref.
-- `"design"`: compare 2-3 options (simplest reuse first), draft contract from
-  brief with `Options` (rejected+why) and `Assumptions` (unstated premises or
-  `None`). On `PASS`, commit/push; on PR post `<!-- reviewloop-design:v1 -->` (`Status: DESIGN_PASS`, `design_ref: sha256:<hex>`)
-  led by <=5 plain lines for user: what's built, Assumptions to confirm.
-- `"code"`: if from `DESIGN_PASS`, verify `design_ref` first.
+Pass the user's complete contract verbatim as `contractText` (a Brief summary is not the contract), never a chat ref.
+- `"design"`: `contractText`=complete Plan, `reviewTarget`=ONE repo-root file that
+  does not exist yet (e.g. `Prompt.md`), `phases` empty; create the file AFTER begin:
+  compare 2-3 options (simplest reuse first), `Options` (rejected+why), `Assumptions`
+  (unstated premises or `None`), Work Contract. No commit before `PASS`. `PASS`
+  returns `designSha256`: post on PR `<!-- reviewloop-design:v1 -->` (`Status:
+  DESIGN_PASS`, `design_ref: sha256:<designSha256>`) led by <=5 plain lines: what's
+  built, Assumptions to confirm. Then STOP for the user.
+- `"code"`: if from a Design `PASS`, pass that design verbatim as `contractText` + its `designSha256`.
 Phased work: pass ordered `phases` (objective, exit criteria,
 carry-forward invariants, verification); never omit/merge/reorder/empty.
 Pass constraints + proof as `evidenceRequirements`.
 One LOCAL task = one `loopId`. Fix `planWarnings` first.
+If the task uses the personal-skills Engineering method: `policy_sha` = full `main`
+commit SHA of `Jiaze-Li/personal-skills`; read `engineering-workflow/README.md` at
+that SHA per stage; follow its stage stops. Unreadable = say so; never claim followed.
 
 ## Work / review
 Do current phase/task, call `reviewloop_review({ loopId, evidence? })`.
@@ -45,6 +51,6 @@ claude-review-bot owns PR review. Read latest Independent Review Session
 - `HUMAN_REQUIRED`: STOP, ask user, even after a push.
 - Else match `lastReviewedHead` to PR HEAD.
 - `REWORK`: fix open finding IDs, test, commit/push, read verification.
-- `AUDIT_PENDING`/missing/stale: wait/check bot run; never approve.
+- `AUDIT_PENDING`/`PARTIAL`/missing/stale: wait/check bot run; never approve.
 - `READY`: HEAD reviewed; merge needs CI+authorization.
 Never override the bot's budget.

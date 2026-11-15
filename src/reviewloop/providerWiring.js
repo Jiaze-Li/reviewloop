@@ -39,6 +39,7 @@ import {
   verifyEffectiveAgyAgent,
 } from './adapters/agyCustomAgentCapability.js';
 import { evidencePromptLines, normalizeContractText } from './contractEvidence.js';
+import { usesSupervisorPoolForReview } from './objective.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 
@@ -1003,7 +1004,7 @@ export function createProductionReviewLoopProviders({
     recordProviderFailure: pool.recordFailure,
     preflightQuotaFn,
     reviewerFn: async (args) => {
-      const poolRole = args?.objective?.taskType === 'design' ? 'supervisor' : 'reviewer';
+      const poolRole = usesSupervisorPoolForReview(args?.objective) ? 'supervisor' : 'reviewer';
       const sel = args.selection ?? pool.route(poolRole);
       if (!sel?.transport) throw Object.assign(new Error('no eligible Reviewer provider'), { code: 'PROVIDER_UNAVAILABLE' });
       return reviewerInvoke({ ...args, transport: sel.transport, model: sel.model });

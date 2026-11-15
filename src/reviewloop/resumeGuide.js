@@ -53,6 +53,10 @@ export function buildResumePrompt(loop) {
     `goal: ${String(objective.goal ?? '').slice(0, 400)}`,
     `loop state: ${loop.state}`,
   ];
+  if (objective.reviewTarget) {
+    lines.push(`design review target: ${objective.reviewTarget} (frozen; the complete current file is reviewed every round)`);
+    if (loop.designReview?.designSha256) lines.push(`approved designSha256: ${loop.designReview.designSha256}`);
+  }
 
   if (phases.length) {
     lines.push(`phases completed: ${done.length ? done.join(', ') : '(none)'} of ${phases.map((p) => p.id).join(', ')}`);
