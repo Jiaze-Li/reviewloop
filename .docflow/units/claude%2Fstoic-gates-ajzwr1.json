@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:10:39.899Z",
+  "updatedAt": "2026-11-15T03:11:51.683Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
     "status": "Completed",
-    "current": "Drop the unused design-pass comment marker from the Worker Policy",
+    "current": "Teach the minimal begin/review call shapes in the Worker Policy (#40, point 1)",
     "next": "",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-15T03:07:36Z",
         "text": "Fix three stale or misleading lines in the Worker Policy"
+      },
+      {
+        "at": "2026-11-15T03:11:42Z",
+        "text": "Drop the unused design-pass comment marker from the Worker Policy"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "claude/stoic-gates-ajzwr1",
         "timestamp": "2026-11-15T03:07:36Z",
         "message": "Drop the unused design-pass comment marker from the Worker Policy"
+      },
+      {
+        "sha": "3fb158b2e97ad7354d38e31c08d8c6110880a8f2",
+        "branch": "claude/stoic-gates-ajzwr1",
+        "timestamp": "2026-11-15T03:11:42Z",
+        "message": "Teach the minimal begin/review call shapes in the Worker Policy (#40, point 1)"
       }
     ],
     "pr": {
