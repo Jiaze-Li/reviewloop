@@ -9,9 +9,8 @@ Pass the user's complete contract verbatim as `contractText` (a Brief summary is
   does not exist yet (e.g. `Prompt.md`), `phases` empty; create the file AFTER begin:
   compare 2-3 options (simplest reuse first), `Options` (rejected+why), `Assumptions`
   (unstated premises or `None`), Work Contract. No commit before `PASS`. `PASS`
-  returns `designSha256`: post on PR `<!-- reviewloop-design:v1 -->` (`Status:
-  DESIGN_PASS`, `design_ref: sha256:<designSha256>`) led by <=5 plain lines: what's
-  built, Assumptions to confirm. Then STOP for the user.
+  returns `designSha256`: post a PR comment of <=5 plain lines (what's built,
+  Assumptions to confirm) ending with `designSha256: <hex>`. Then STOP for the user.
 - `"code"`: if from a Design `PASS`, pass that design verbatim as `contractText` + its `designSha256`.
 Phased work: pass ordered `phases` (objective, exit criteria,
 carry-forward invariants, verification); never omit/merge/reorder/empty.
