@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:15:59.274Z",
+  "updatedAt": "2026-11-15T03:18:02.963Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
     "title": "claude/stoic-gates-ajzwr1",
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Tell the Worker which repository a loop is bound to (#40, point 2)",
     "next": "",
     "history": [
@@ -72,14 +72,16 @@
     ],
     "pr": {
       "number": 43,
-      "state": "open",
+      "state": "closed",
       "title": "Worker friction fixes (#40): minimal call shapes and bound-repository hint",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/43",
-      "merged": false,
-      "updatedAt": "2026-11-15T03:15:49Z"
+      "merged": true,
+      "mergedAt": "2026-11-15T03:17:52Z",
+      "closedAt": "2026-11-15T03:17:52Z",
+      "updatedAt": "2026-11-15T03:17:53Z"
     },
-    "completed": null,
-    "outcome": null,
+    "completed": "2026-11-15T03:17:52Z",
+    "outcome": "Merged",
     "prs": [
       {
         "number": 42,
