@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T02:58:24.512Z",
+  "updatedAt": "2026-11-15T02:58:36.830Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
@@ -30,7 +30,14 @@
         "message": "Trim duplicated Worker Policy wording for the Design flow"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 41,
+      "state": "open",
+      "title": "Unify Design review with the Code engine (reviewTarget + designSha256)",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/41",
+      "merged": false,
+      "updatedAt": "2026-11-15T02:58:27Z"
+    },
     "completed": null,
     "outcome": null
   }
