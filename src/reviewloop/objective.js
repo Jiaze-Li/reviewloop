@@ -156,6 +156,10 @@ export function createReviewObjective({
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
   verificationPlan = null,
   baselineGateEvidence = null,
+  // Design only: the ONE repository-relative design file whose complete
+  // current content every review round must put in front of the Reviewer.
+  // Its presence is also the version marker of the unified Design path.
+  reviewTarget = null,
   createdAt = new Date().toISOString(),
 } = {}) {
   if (!loopId) throw new Error('createReviewObjective: loopId is required');
@@ -240,6 +244,12 @@ export function createReviewObjective({
     baselineGateEvidence: baselineGateEvidenceIdentity(baselineGateEvidence),
     createdAt,
   };
+  if (reviewTarget != null) {
+    if (resolvedTaskType !== TASK_TYPES.DESIGN) {
+      throw new Error('createReviewObjective: reviewTarget is only valid for taskType "design"');
+    }
+    objective.reviewTarget = String(reviewTarget);
+  }
 
   objective.fingerprint = fingerprintFields(objective);
 
@@ -285,6 +295,10 @@ function fingerprintFields(o) {
       evidenceComplete: o.baseline.evidenceComplete !== false,
     };
   }
+  // Design review target: load-bearing (it selects the Reviewer route and the
+  // full-file check). Folded in only when present, so every pre-existing
+  // objective keeps its original hash.
+  if (o.reviewTarget) base.reviewTarget = o.reviewTarget;
   // Baseline Gate evidence identity — load-bearing for FAIL->WARN suppression.
   // Only folded in when present, so a pre-baselineGate objective keeps its hash.
   if (o.baselineGateEvidence && typeof o.baselineGateEvidence === 'object') {
@@ -365,6 +379,9 @@ export function assertObjectiveNotWeakened(original, candidate) {
   if (JSON.stringify(candidate.phases ?? []) !== JSON.stringify(original.phases ?? [])) {
     problems.push('phase plan changed');
   }
+  if ((candidate.reviewTarget ?? null) !== (original.reviewTarget ?? null)) {
+    problems.push('design reviewTarget changed');
+  }
   if ((candidate.contractText ?? null) !== (original.contractText ?? null)) {
     problems.push('frozen contract text changed');
   }
@@ -382,4 +399,13 @@ export function assertObjectiveNotWeakened(original, candidate) {
     throw new Error(`ReviewObjective weakened: ${problems.join('; ')}`);
   }
   return true;
+}
+
+// A Design loop created WITHOUT a reviewTarget is the pre-unification
+// ("legacy") Design path: it keeps its historical Supervisor-pool routing so
+// resuming it after an upgrade never changes its route or cost. New Design
+// loops carry a frozen reviewTarget and use the normal Reviewer pool, exactly
+// like Code. Supervisor is invoked only by the shared non-convergence policy.
+export function usesSupervisorPoolForReview(objective) {
+  return objective?.taskType === TASK_TYPES.DESIGN && !objective?.reviewTarget;
 }

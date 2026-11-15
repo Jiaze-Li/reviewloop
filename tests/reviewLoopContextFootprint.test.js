@@ -43,8 +43,10 @@ test('exactly two Worker-facing MCP tools', () => {
   assert.deepEqual(m.workerFacingTools.sort(), ['reviewloop_begin', 'reviewloop_review']);
 });
 
-test('COMMON stays under the 2.5KB Worker-context target', () => {
-  assert.ok(measure().commonBytes <= 2560, `COMMON is ${measure().commonBytes} bytes`);
+test('COMMON stays under the 3.2KB Worker-context target', () => {
+  // Budget raised from 2560 to 3200 bytes, deliberately: the unified Design flow
+  // (reviewTarget + designSha256) and the personal-skills method entry add ~560 bytes.
+  assert.ok(measure().commonBytes <= 3200, `COMMON is ${measure().commonBytes} bytes`);
 });
 
 test('PASS / REWORK payloads stay compact (no raw evidence blobs)', () => {

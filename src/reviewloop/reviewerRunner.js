@@ -3,6 +3,7 @@ import { reconstructPhysicalCalls } from './reviewSpend.js';
 import { chunkDiffForReview } from './diffChunker.js';
 import { sha256Hex, scopeBoundFingerprint, currentReviewScope } from './phaseState.js';
 import { normalizeReview } from './reviewPolicy.js';
+import { usesSupervisorPoolForReview } from './objective.js';
 
 export function createReviewerRunner({ persistence, env, reviewerFn, routeReviewerFn, routeSupervisorFn = null, meteredWithFailover, saveLoop }) {
   async function runReviewerOverEvidence({
@@ -182,7 +183,10 @@ export function createReviewerRunner({ persistence, env, reviewerFn, routeReview
           reviewScope,
         ),
       });
-      const isDesignTask = objective?.taskType === 'design';
+      // Only a legacy Design loop (no frozen reviewTarget) keeps the
+      // historical Supervisor-pool route; new Design and Code both use the
+      // Reviewer pool.
+      const isDesignTask = usesSupervisorPoolForReview(objective);
       const effectiveRouteFn = isDesignTask ? (routeSupervisorFn ?? routeReviewerFn) : routeReviewerFn;
       const effectiveRoutingRole = isDesignTask && routeSupervisorFn ? 'supervisor' : 'reviewer';
       const defaultFamily = isDesignTask ? 'agy:gemini-supervisor' : 'agy:gpt-oss';

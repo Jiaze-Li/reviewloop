@@ -680,6 +680,7 @@ export function buildResumePacket({
     verificationPlan: objective?.verificationPlan ?? null,
     pendingEvidenceRequirements,
     repository: objective?.repository ?? null,
+    ...(objective?.reviewTarget ? { reviewTarget: objective.reviewTarget } : {}),
     head,
     completedPhases: completed.map((p) => ({ id: p.id, title: p.title, proof: p.proof })),
     completedGate: completedScope ? { id: completedScope.id, title: completedScope.title } : null,

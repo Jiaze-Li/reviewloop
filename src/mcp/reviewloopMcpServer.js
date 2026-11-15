@@ -63,7 +63,7 @@ export function createReviewLoopMcpServer({
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
-        taskType: z.enum(['code', 'design']).optional().describe('review mode: "code" (default) or "design" (design/contract review routed through supervisor pool). A design contract must carry an "Options" section (alternatives considered + why rejected) and an "Assumptions" section (plain-language premises the brief never stated, or "None"). Anything written for the user to read (the PR design-pass comment) opens with at most 5 short plain-language lines: what will be built and the Assumptions to confirm; no file paths, identifiers or jargon, and never a bare pointer to a document'),
+        taskType: z.enum(['code', 'design']).optional().describe('review mode: "code" (default) or "design". A Design loop that passes reviewTarget uses the same Reviewer pool, Gate, budgets and Supervisor escalation as Code, and reviews the complete current design file every round. A design contract must carry an "Options" section (alternatives considered + why rejected) and an "Assumptions" section (plain-language premises the brief never stated, or "None"). Anything written for the user to read (the PR design-pass comment) opens with at most 5 short plain-language lines: what will be built and the Assumptions to confirm; no file paths, identifiers or jargon, and never a bare pointer to a document'),
         // Explicit compatibility tripwire. Without it Zod could silently drop
         // unknown prNumber and accidentally start a LOCAL review.
         prNumber: z.number().int().optional().describe('RETIRED: PR review is handled by claude-review-bot; supplying this errors'),
@@ -77,6 +77,8 @@ export function createReviewLoopMcpServer({
           required: z.boolean().optional(),
           covers: z.array(z.string().min(1)).optional(),
         })).optional().describe('frozen non-command evidence obligations; required items mechanically block PASS until evidence is submitted'),
+        reviewTarget: z.string().min(1).optional().describe('design only: ONE repository-relative path (forward slashes, no "..") of the complete design file, at most 65536 UTF-8 bytes. It must NOT exist yet: call reviewloop_begin first, THEN create the file. Requires contractText (the complete Plan) and phases=[]. Every reviewloop_review round gives the Reviewer the whole current file; PASS returns designSha256'),
+        designSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('code only, optional: the designSha256 returned by the Design PASS. reviewloop_begin refuses a contractText whose whitespace-trimmed UTF-8 content hashes differently. A content-consistency check, not proof of Design PASS or of user authorization'),
         verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
         blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1 and P2'),
         maxReviewRounds: z.number().int().positive().optional().describe('maximum fresh Reviewer rounds PER gate (each phase gate and the final gate); defaults to 3'),
@@ -100,6 +102,7 @@ export function createReviewLoopMcpServer({
         phaseCount: z.number().int().optional(),
         currentPhase: z.string().optional(),
         planWarnings: z.array(z.string()).optional(),
+        reviewTarget: z.string().optional(),
       },
     },
     async ({
@@ -114,6 +117,8 @@ export function createReviewLoopMcpServer({
       blockingSeverities,
       maxReviewRounds,
       phases,
+      reviewTarget,
+      designSha256,
     }, extra) => {
       const res = await ctl.begin({
         goal,
@@ -127,6 +132,8 @@ export function createReviewLoopMcpServer({
         blockingSeverities,
         maxReviewRounds,
         phases: phases ?? [],
+        reviewTarget: reviewTarget ?? null,
+        designSha256: designSha256 ?? null,
         signal: extra?.signal,
       });
       const structured = {
@@ -138,6 +145,7 @@ export function createReviewLoopMcpServer({
         reviewer: res.reviewer,
         phaseCount: res.phaseCount ?? 0,
         currentPhase: res.currentPhase ?? 'task',
+        ...(res.reviewTarget ? { reviewTarget: res.reviewTarget } : {}),
         ...(res.planWarnings?.length ? { planWarnings: res.planWarnings } : {}),
       };
       return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
@@ -198,6 +206,8 @@ export function createReviewLoopMcpServer({
         resumePacket: z.record(z.string(), z.any()).nullable().optional(),
         contextRefreshSafe: z.boolean().optional(),
         evidenceRecordCount: z.number().int().nonnegative().optional(),
+        designSha256: z.string().optional().describe('Design PASS only: SHA-256 of the whitespace-trimmed UTF-8 content of the design file the Reviewer actually reviewed; publish it with the design-pass comment and pass it to the Code reviewloop_begin'),
+        reviewTarget: z.string().optional(),
         telemetry: z.record(z.string(), z.any()).optional(),
       },
     },

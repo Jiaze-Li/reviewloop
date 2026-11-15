@@ -58,6 +58,7 @@ import {
   mergeScopedGateCommands,
 } from './phaseState.js';
 import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
+import { DesignTargetError, readReviewTarget, assertTargetWithinOneChunk } from './designTarget.js';
 import {
   EvidenceValidationError,
   normalizeContractText,
@@ -997,6 +998,22 @@ export function createReviewLoopController({
         delta.diffScope = 'final-cross-phase';
       }
     }
+    // Design review target: before ANY model spend, the complete current design
+    // file must be readable and must sit inside ONE Reviewer request. Otherwise
+    // no single call has seen the whole document and a PASS would be a lie.
+    let designTarget = null;
+    if (objective.reviewTarget) {
+      try {
+        designTarget = await readReviewTarget({ cwd, reviewTarget: objective.reviewTarget });
+        assertTargetWithinOneChunk({ diff: delta.diff, target: designTarget, env });
+      } catch (err) {
+        if (!(err instanceof DesignTargetError)) throw err;
+        return evidenceRework({
+          loopState, gate, head: delta.currentHead ?? null,
+          reason: `design review target (${objective.reviewTarget}): ${err.message}`,
+        });
+      }
+    }
     const spend = spendFor(loopState.loopId, objective, {
       maxUsageVolume: loopState?.maxUsageVolumeOverride,
       maxCostUsd: loopState?.maxCostUsdOverride,
@@ -1031,6 +1048,35 @@ export function createReviewLoopController({
         reason: 'artifact evidence changed or became unavailable while the Reviewer was running; recapture stable evidence and re-review (no PASS authorized)',
         receipt: unacceptedEvidence(evidence, 'ARTIFACT_CHANGED'),
       });
+    }
+    // A Design PASS must certify exactly the bytes (and the Worker delta) the
+    // Reviewer was shown. The Gate stabilization loop above only covers changes
+    // made BEFORE the Reviewer call, so re-read the design file and re-collect
+    // the delta now. Any difference means no PASS is possible this round.
+    if (designTarget) {
+      let drift = null;
+      try {
+        const after = await readReviewTarget({ cwd, reviewTarget: objective.reviewTarget });
+        if (after.sha256 !== designTarget.sha256) {
+          drift = 'the design file changed while the Reviewer was running';
+        } else {
+          const post = await collectWorkerDeltaFn({ cwd, baseline });
+          if (!post || post.evidenceComplete === false || post.fingerprint !== delta.fingerprint) {
+            drift = 'the Worker changes (git delta) changed while the Reviewer was running';
+          }
+        }
+      } catch (err) {
+        drift = `the design file or Worker delta could not be re-verified after the Reviewer ran (${err?.message ?? err})`;
+      }
+      if (drift) {
+        loopState.chunkReviewCheckpoint = null;
+        loopState.lastReviewedFingerprint = null;
+        loopState.lastReview = null;
+        return evidenceRework({
+          loopState, gate, head: delta.currentHead ?? null,
+          reason: `${drift}; no PASS is authorized for a design the Reviewer did not see. Stabilize the file and call reviewloop_review again in this same loop`,
+        });
+      }
     }
     review.reviewedFingerprint = fp;
     // The Reviewer audit identity includes one-shot Supervisor adjudication,
@@ -1092,6 +1138,17 @@ export function createReviewLoopController({
         return phaseResult;
       }
       loopState.resumePacket = null;
+      if (designTarget) {
+        // Persisted so the approved digest survives a crash between PASS and
+        // the Worker publishing it. Content-consistency check only.
+        loopState.designReview = {
+          reviewTarget: designTarget.path,
+          designSha256: designTarget.sha256,
+          bytes: designTarget.bytes,
+          round: loopState.round,
+          reviewedAt: new Date(clock()).toISOString(),
+        };
+      }
       recordTransition(loopState, REVIEW_LOOP_STATES.PASS, decision.reason);
       await saveLoop(loopState);
       return passResult(loopState, review, telemetry);
@@ -1333,8 +1390,13 @@ export function createReviewLoopController({
       reviewer: review.reviewer,
       nonBlockingFindings: review.nonBlockingFindings, nonBlockingOmitted: review.nonBlockingOmitted ?? 0,
       evidenceRecordCount: (loopState.evidenceRecords ?? []).length,
+      ...designReviewFields(loopState),
       telemetry: telemetry ?? emptyTelemetry(), safetyEvents: safetyEventsForReview(),
     };
+  }
+  function designReviewFields(loopState) {
+    const d = loopState.designReview;
+    return d?.designSha256 ? { designSha256: d.designSha256, reviewTarget: d.reviewTarget } : {};
   }
   function humanRequiredResult(loopState, review, telemetry, supervisorGuidance) {
     const budgetExhausted = loopState.budgetExhausted === true;
@@ -1385,6 +1447,7 @@ export function createReviewLoopController({
           + 'user and stop; do NOT reviewloop_begin again in this task. A new user instruction starts a fresh loop.'
         : 'loop already terminal',
       lastReview: compactLastReview(loopState),
+      ...(loopState.state === REVIEW_LOOP_STATES.PASS ? designReviewFields(loopState) : {}),
       telemetry: await durableTelemetry(loopState.loopId), safetyEvents: safetyEventsForReview(),
     };
   }
