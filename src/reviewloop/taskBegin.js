@@ -14,7 +14,10 @@ function compactBaselineSummary(baseline) {
   };
 }
 
-export function createBeginTask({ clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent }) {
+export function createBeginTask({
+  clock, captureBaselineFn, discoverVerificationCommandsFn, runGateFn, gateRunner, env, store, onEvent,
+  readBranchFn = null,
+}) {
   async function begin({
     goal, cwd, taskType = TASK_TYPES.CODE, prNumber = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
@@ -254,6 +257,11 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
       planWarnings.push(`${preflightPhases.length} phases: every phase costs at least one Reviewer call; consider fewer, larger phases`);
     }
 
+    // Echo what this loop is bound to, so a Worker editing a different
+    // repository or worktree notices at once (issue #40). Display only.
+    let boundBranch = null;
+    try { boundBranch = readBranchFn ? await readBranchFn({ cwd }) : null; } catch { boundBranch = null; }
+
     const loopState = initialLoopState(objective);
     loopState.verificationCommands = effectiveVerificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
@@ -265,6 +273,8 @@ export function createBeginTask({ clock, captureBaselineFn, discoverVerification
       mode,
       taskType: objective.taskType,
       status: 'READY',
+      repositoryRoot: cwd,
+      branch: boundBranch,
       baseline: baseline ? compactBaselineSummary(baseline) : null,
       reviewer: objective.reviewer,
       phaseCount: phasesOf(objective).length,
