@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:14:35.676Z",
+  "updatedAt": "2026-11-15T03:15:59.274Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
     "title": "claude/stoic-gates-ajzwr1",
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
-    "status": "Completed",
+    "status": "In progress",
     "current": "Tell the Worker which repository a loop is bound to (#40, point 2)",
     "next": "",
     "history": [
@@ -71,18 +71,26 @@
       }
     ],
     "pr": {
-      "number": 42,
-      "state": "closed",
-      "title": "Drop the unused design-pass comment marker from the Worker Policy",
-      "url": "https://github.com/Jiaze-Li/reviewloop/pull/42",
-      "merged": true,
-      "mergedAt": "2026-11-15T03:10:30Z",
-      "closedAt": "2026-11-15T03:10:30Z",
-      "updatedAt": "2026-11-15T03:10:30Z"
+      "number": 43,
+      "state": "open",
+      "title": "Worker friction fixes (#40): minimal call shapes and bound-repository hint",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/43",
+      "merged": false,
+      "updatedAt": "2026-11-15T03:15:49Z"
     },
-    "completed": "2026-11-15T03:10:30Z",
-    "outcome": "Merged",
+    "completed": null,
+    "outcome": null,
     "prs": [
+      {
+        "number": 42,
+        "state": "closed",
+        "title": "Drop the unused design-pass comment marker from the Worker Policy",
+        "url": "https://github.com/Jiaze-Li/reviewloop/pull/42",
+        "merged": true,
+        "mergedAt": "2026-11-15T03:10:30Z",
+        "closedAt": "2026-11-15T03:10:30Z",
+        "updatedAt": "2026-11-15T03:10:30Z"
+      },
       {
         "number": 41,
         "state": "closed",
