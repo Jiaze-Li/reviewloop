@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T02:58:36.830Z",
+  "updatedAt": "2026-11-15T03:00:43.276Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
@@ -8,12 +8,16 @@
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
     "status": "In progress",
-    "current": "Trim duplicated Worker Policy wording for the Design flow",
+    "current": "Fix three stale or misleading lines in the Worker Policy",
     "next": "",
     "history": [
       {
         "at": "2026-11-15T02:58:14Z",
         "text": "Unify Design review with the Code engine (reviewTarget + designSha256)"
+      },
+      {
+        "at": "2026-11-15T03:00:30Z",
+        "text": "Trim duplicated Worker Policy wording for the Design flow"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "claude/stoic-gates-ajzwr1",
         "timestamp": "2026-11-15T02:58:14Z",
         "message": "Trim duplicated Worker Policy wording for the Design flow"
+      },
+      {
+        "sha": "9519c69ef0dcde24659f15a05c1be4e6690a00df",
+        "branch": "claude/stoic-gates-ajzwr1",
+        "timestamp": "2026-11-15T03:00:30Z",
+        "message": "Fix three stale or misleading lines in the Worker Policy"
       }
     ],
     "pr": {
