@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-15T03:03:25.237Z",
+  "updatedAt": "2026-11-15T03:07:51.321Z",
   "task": {
     "id": "claude/stoic-gates-ajzwr1",
     "branch": "claude/stoic-gates-ajzwr1",
@@ -8,7 +8,7 @@
     "task": "Development branch: claude/stoic-gates-ajzwr1",
     "started": "2026-11-15T02:55:47Z",
     "status": "Completed",
-    "current": "Fix three stale or misleading lines in the Worker Policy",
+    "current": "Drop the unused design-pass comment marker from the Worker Policy",
     "next": "",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-15T03:00:30Z",
         "text": "Trim duplicated Worker Policy wording for the Design flow"
+      },
+      {
+        "at": "2026-11-15T03:07:36Z",
+        "text": "Fix three stale or misleading lines in the Worker Policy"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "claude/stoic-gates-ajzwr1",
         "timestamp": "2026-11-15T03:00:30Z",
         "message": "Fix three stale or misleading lines in the Worker Policy"
+      },
+      {
+        "sha": "9468fd41cca602d985393c1cb4abbe25ed9a2d82",
+        "branch": "claude/stoic-gates-ajzwr1",
+        "timestamp": "2026-11-15T03:07:36Z",
+        "message": "Drop the unused design-pass comment marker from the Worker Policy"
       }
     ],
     "pr": {
