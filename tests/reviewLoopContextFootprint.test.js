@@ -67,3 +67,14 @@ test('footprint report is emitted for the record', () => {
   }));
   assert.ok(m.schemaBytes > 0);
 });
+
+// The Worker Policy's call shapes (issue #40) must keep matching the real MCP
+// schema, so a rename cannot silently leave the policy teaching a wrong shape.
+test('COMMON call shapes match the MCP input schema', () => {
+  const common = readFileSync(new URL('../agent-policy/COMMON.md', import.meta.url), 'utf8');
+  const server = readFileSync(new URL('../src/mcp/reviewloopMcpServer.js', import.meta.url), 'utf8');
+  for (const field of ['evidenceRequirements', 'requirementId', 'summary', 'cwd', 'contractText', 'reviewTarget', 'designSha256']) {
+    assert.ok(common.includes(field), `COMMON should mention ${field}`);
+    assert.ok(server.includes(`${field}:`) || server.includes(`${field},`), `MCP server should define ${field}`);
+  }
+});

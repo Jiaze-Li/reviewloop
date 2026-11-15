@@ -14,15 +14,17 @@ Pass the user's complete contract verbatim as `contractText` (a Brief summary is
 - `"code"`: if from a Design `PASS`, pass that design verbatim as `contractText` + its `designSha256`.
 Phased work: pass ordered `phases` (objective, exit criteria,
 carry-forward invariants, verification); never omit/merge/reorder/empty.
-Pass constraints + proof as `evidenceRequirements`.
+Proof: `begin` `evidenceRequirements:[{id,description}]`; `review`
+`evidence:[{requirementId:<declared id>,summary}]`; none declared = no `evidence`.
+`begin` binds `cwd` (default: server cwd): edit only that repo.
 One LOCAL task = one `loopId`. Fix `planWarnings` first.
 If the task uses the personal-skills Engineering method: `policy_sha` = full `main`
 commit SHA of `Jiaze-Li/personal-skills`; read `engineering-workflow/README.md` at
 that SHA per stage; follow its stage stops. Unreadable = say so; never claim followed.
 
 ## Work / review
-Do current phase/task, call `reviewloop_review({ loopId, evidence? })`.
-Submit only inline proof (Reviewer has no file tools).
+Do current phase/task, call `reviewloop_review({loopId,evidence?})`.
+Inline proof only (Reviewer has no file tools).
 - `PHASE_PASS`: continue in same loop. Stage/commit new files for
   `nextDiffScope: phase-delta`; untracked files force cumulative review. On refresh
   reload `resumePacket` + repo instructions.
