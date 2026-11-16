@@ -290,7 +290,8 @@ function stripFence(text) {
 
 function looksLikePayload(obj) {
   return obj && typeof obj === 'object' && !Array.isArray(obj)
-    && (Array.isArray(obj.findings) || 'recommendation' in obj || 'guidance' in obj);
+    && (Array.isArray(obj.findings) || 'recommendation' in obj || 'guidance' in obj
+      || 'requestedFiles' in obj || 'proposals' in obj || 'comparison' in obj);
 }
 
 // A model reply is often prose wrapped around the JSON, e.g.
@@ -921,6 +922,24 @@ export function buildSupervisorInvoke() {
   };
 }
 
+// Two-stage Design review transports (designTwoStage.js owns prompts and
+// schema validation; this only sends the prompt and parses a JSON object).
+export function buildDesignStageInvoke() {
+  return async ({ prompt, transport, model, signal }) => {
+    const res = await transport(prompt, { signal });
+    const { parsed, raw } = parseJsonish(res);
+    const value = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : { malformed: true, reason: 'model output is not a JSON object', raw };
+    return {
+      value,
+      usage: res?.usage ?? null,
+      model: res?.model ?? model,
+      meta: { promptChars: prompt.length, diffChars: 0, reviewPayloadChars: prompt.length, ...(res?.meta ?? {}) },
+    };
+  };
+}
+
 // Zero-token stale-health revalidator for the AGY families: re-runs the
 // local, synchronous, no-CLI-spawn provisioning check that startup wiring
 // already performs once (see agyIsolationAvailable above). It re-verifies
@@ -994,6 +1013,7 @@ export function createProductionReviewLoopProviders({
   });
   const reviewerInvoke = buildReviewerInvoke();
   const supervisorInvoke = buildSupervisorInvoke();
+  const designStageInvoke = buildDesignStageInvoke();
 
   return {
     env,
@@ -1013,6 +1033,16 @@ export function createProductionReviewLoopProviders({
       const sel = args.selection ?? pool.route('supervisor');
       if (!sel?.transport) throw Object.assign(new Error('no eligible Supervisor provider'), { code: 'PROVIDER_UNAVAILABLE' });
       return supervisorInvoke({ ...args, transport: sel.transport, model: sel.model });
+    },
+    designReviewerFn: async (args) => {
+      const sel = args.selection ?? pool.route('reviewer');
+      if (!sel?.transport) throw Object.assign(new Error('no eligible Reviewer provider'), { code: 'PROVIDER_UNAVAILABLE' });
+      return designStageInvoke({ ...args, transport: sel.transport, model: sel.model });
+    },
+    designSupervisorFn: async (args) => {
+      const sel = args.selection ?? pool.route('supervisor');
+      if (!sel?.transport) throw Object.assign(new Error('no eligible Supervisor provider'), { code: 'PROVIDER_UNAVAILABLE' });
+      return designStageInvoke({ ...args, transport: sel.transport, model: sel.model });
     },
     reviewerInvoke,
     supervisorInvoke,

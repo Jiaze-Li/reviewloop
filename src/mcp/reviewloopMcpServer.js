@@ -20,6 +20,7 @@ import { RouteAuditLog, QuotaPoolRegistry } from '../orchestrator/roleRouting.js
 import { probeAgyModelCatalog } from '../agy/agyModelCatalog.js';
 import { createAgyQuotaPreflight } from '../agy/agyQuotaProbe.js';
 import { probeReviewTransportRuntime } from '../reviewloop/adapters/cliReviewTransports.js';
+import { beginStatusLine } from '../reviewloop/statusLine.js';
 
 export function createReviewLoopMcpServer({
   controller = null,
@@ -63,7 +64,7 @@ export function createReviewLoopMcpServer({
       inputSchema: {
         goal: z.string().min(1).describe('the original user coding goal (immutable success definition)'),
         cwd: z.string().optional().describe('workspace directory (default: server cwd)'),
-        taskType: z.enum(['code', 'design']).optional().describe('review mode: "code" (default) or "design". A Design loop that passes reviewTarget uses the same Reviewer pool, Gate, budgets and Supervisor escalation as Code, and reviews the complete current design file every round. A design contract must carry an "Options" section (alternatives considered + why rejected) and an "Assumptions" section (plain-language premises the brief never stated, or "None"). Anything written for the user to read (the PR design-pass comment) opens with at most 5 short plain-language lines: what will be built and the Assumptions to confirm; no file paths, identifiers or jargon, and never a bare pointer to a document'),
+        taskType: z.enum(['code', 'design']).optional().describe('review mode: "code" (default) or "design". A Design loop that passes reviewTarget runs two-stage review each round: the Reviewer independently proposes approaches WITHOUT seeing your design file, then the Supervisor compares them with the complete current design file and checks the design blockers (same Gate and budgets as Code). A design contract must carry an "Options" section (alternatives considered + why rejected) and an "Assumptions" section (plain-language premises the brief never stated, or "None"). Design PASS returns a Supervisor-written designPassComment: post it to the PR verbatim and relay it to the user; never rewrite it or replace it with a pointer to a document'),
         // Explicit compatibility tripwire. Without it Zod could silently drop
         // unknown prNumber and accidentally start a LOCAL review.
         prNumber: z.number().int().optional().describe('RETIRED: PR review is handled by claude-review-bot; supplying this errors'),
@@ -97,6 +98,7 @@ export function createReviewLoopMcpServer({
         mode: z.literal('LOCAL'),
         taskType: z.enum(['code', 'design']).optional(),
         status: z.literal('READY'),
+        statusLine: z.string().optional().describe('fixed one-line status; show it to the user verbatim'),
         baseline: z.record(z.string(), z.any()).nullable(),
         reviewer: z.string(),
         phaseCount: z.number().int().optional(),
@@ -143,6 +145,7 @@ export function createReviewLoopMcpServer({
         mode: res.mode,
         taskType: res.taskType ?? 'code',
         status: 'READY',
+        statusLine: beginStatusLine({ taskType: res.taskType ?? 'code', loopId: res.loopId }),
         baseline: res.baseline ?? null,
         reviewer: res.reviewer,
         phaseCount: res.phaseCount ?? 0,
@@ -171,6 +174,7 @@ export function createReviewLoopMcpServer({
       outputSchema: {
         status: z.string(),
         loopId: z.string(),
+        statusLine: z.string().optional().describe('fixed one-line status; show it to the user verbatim'),
         round: z.number().optional(),
         gateRound: z.number().optional(),
         // Diagnostics the controller emits on REWORK / PASS / HUMAN_REQUIRED /
@@ -210,6 +214,12 @@ export function createReviewLoopMcpServer({
         contextRefreshSafe: z.boolean().optional(),
         evidenceRecordCount: z.number().int().nonnegative().optional(),
         designSha256: z.string().optional().describe('Design PASS only: SHA-256 of the whitespace-trimmed UTF-8 content of the design file the Reviewer actually reviewed; publish it with the design-pass comment and pass it to the Code reviewloop_begin'),
+        designPassComment: z.string().optional().describe('Design PASS only: the Supervisor-written, formatted user comment (already ends with the designSha256 line); post it to the PR VERBATIM and relay it to the user, do not summarize or rewrite it'),
+        planConcern: z.string().optional().describe('the Supervisor thinks following the Plan itself may be wrong; tell the user, it does not block'),
+        humanQuestions: z.array(z.string()).optional().describe('HUMAN_REQUIRED: questions the user must answer'),
+        reviewerProposals: z.array(z.record(z.string(), z.any())).optional().describe('REWORK exchange / HUMAN_REQUIRED: the independent Reviewer approaches to weigh against your design'),
+        exchangeCount: z.number().optional(),
+        comparison: z.record(z.string(), z.any()).optional(),
         reviewTarget: z.string().optional(),
         telemetry: z.record(z.string(), z.any()).optional(),
       },

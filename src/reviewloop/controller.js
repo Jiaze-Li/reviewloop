@@ -5,6 +5,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
+import { reviewStatusLine } from './statusLine.js';
+import {
+  createDesignTwoStageRunner, decideDesignTransition, finalizePassComment, initialDesignTwoStageState, DESIGN_LIMITS,
+} from './designTwoStage.js';
 import { evidenceBlockerRequirementIds } from './evidenceConvergence.js';
 import { ArtifactEvidenceError, captureArtifactSnapshots, artifactSnapshotsStillMatch } from './artifactEvidence.js';
 import { Persistence } from '../orchestrator/persistence.js';
@@ -15,6 +19,8 @@ import {
   assertResumeTaskDefinitionBound,
   rehydrateObjective,
   assertObjectiveNotWeakened,
+  resolveReviewMode,
+  REVIEW_WORKFLOWS,
   baselineGateEvidenceIdentity,
 } from './objective.js';
 import {
@@ -101,6 +107,10 @@ export function createReviewLoopController({
   recordSafetyEvent = null,
   reviewerFn = requireProvider('Reviewer'),
   supervisorFn = requireProvider('Supervisor'),
+  // Two-stage Design review transports (prompt-in, JSON-out). Only used when
+  // reviewMode === 'design-two-stage'.
+  designReviewerFn = requireProvider('Design Reviewer'),
+  designSupervisorFn = requireProvider('Design Supervisor'),
   // optional pool routing (production wiring). Return { family, provider,
   // model, transport } or null. When present, the controller binds the real
   // selected family into the CallIntent and drives bounded failover.
@@ -425,7 +435,7 @@ export function createReviewLoopController({
       }
       activeLeaseGuards.set(loopId, lease.verifyHeld ?? (async () => true));
       try {
-        return await reviewInner({ loopId, evidence, signal });
+        return await withStatusLine(loopId, await reviewInner({ loopId, evidence, signal, onHeartbeat }));
       } catch (err) {
         if (err instanceof LeaseLostError) {
           // The lease was reclaimed by another owner while this call ran. We
@@ -448,7 +458,25 @@ export function createReviewLoopController({
     }));
   }
 
-  async function reviewInner({ loopId, evidence, signal }) {
+  // Best-effort stage heartbeat; a failing notifier never affects the review.
+  async function emitHeartbeat(onHeartbeat, stage) {
+    if (typeof onHeartbeat !== 'function') return;
+    try { await onHeartbeat(`ReviewLoop stage: ${stage}`); } catch { /* ignore */ }
+  }
+
+  // Attach the deterministic one-line statusLine (Design 5.3). Best effort: a
+  // failure to resolve taskType must never change or fail the review result.
+  async function withStatusLine(loopId, result) {
+    if (!result || typeof result !== 'object') return result;
+    let taskType = 'code';
+    try { taskType = (await loadLoop(loopId)).objective?.taskType ?? 'code'; } catch { /* keep default */ }
+    return {
+      ...result,
+      statusLine: reviewStatusLine({ taskType, loopId, round: result.round, status: result.status }),
+    };
+  }
+
+  async function reviewInner({ loopId, evidence, signal, onHeartbeat }) {
     // Per-invocation safety-event isolation: start this call with a clean list.
     const loopState = await loadLoop(loopId);
     const objective = loopState.objective;
@@ -496,7 +524,7 @@ export function createReviewLoopController({
     // completed phase, objective or task-wide spend counter.
     loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
 
-    return reviewLocal({ loopState, evidence, signal });
+    return reviewLocal({ loopState, evidence, signal, onHeartbeat });
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
@@ -648,7 +676,7 @@ export function createReviewLoopController({
   }
 
   // ---- LOCAL mode --------------------------------------------------------
-  async function reviewLocal({ loopState, evidence, signal }) {
+  async function reviewLocal({ loopState, evidence, signal, onHeartbeat }) {
     const objective = loopState.objective;
     const reviewScope = currentReviewScope(loopState, objective);
     const cwd = objective.repository?.root;
@@ -776,6 +804,7 @@ export function createReviewLoopController({
         });
       }
     }
+    await emitHeartbeat(onHeartbeat, 'gate_running');
     let gateMutatedTree = false;
     let gate = await runGateFn({
       cwd, commands: gateCommands, runner: gateRunner, env, signal,
@@ -1031,6 +1060,12 @@ export function createReviewLoopController({
     // the logical (delta + gate) review state so a crash/resume of the same
     // review never consumes an extra round.
 
+    if (designTarget && resolveReviewMode(objective) === REVIEW_WORKFLOWS.DESIGN_TWO_STAGE) {
+      return reviewDesignTwoStage({
+        loopState, objective, delta, gate, designTarget, spend, fp, baseline, cwd, signal, onHeartbeat,
+      });
+    }
+
     let reviewOut;
     try {
       reviewOut = await runReviewerOverEvidence({
@@ -1063,20 +1098,7 @@ export function createReviewLoopController({
     // made BEFORE the Reviewer call, so re-read the design file and re-collect
     // the delta now. Any difference means no PASS is possible this round.
     if (designTarget) {
-      let drift = null;
-      try {
-        const after = await readReviewTarget({ cwd, reviewTarget: objective.reviewTarget });
-        if (after.sha256 !== designTarget.sha256) {
-          drift = 'the design file changed while the Reviewer was running';
-        } else {
-          const post = await collectWorkerDeltaFn({ cwd, baseline });
-          if (!post || post.evidenceComplete === false || post.fingerprint !== delta.fingerprint) {
-            drift = 'the Worker changes (git delta) changed while the Reviewer was running';
-          }
-        }
-      } catch (err) {
-        drift = `the design file or Worker delta could not be re-verified after the Reviewer ran (${err?.message ?? err})`;
-      }
+      const drift = await designDriftReason({ cwd, objective, designTarget, delta, baseline });
       if (drift) {
         loopState.chunkReviewCheckpoint = null;
         loopState.lastReviewedFingerprint = null;
@@ -1176,6 +1198,173 @@ export function createReviewLoopController({
       reason: decision.reason,
       telemetry: await spend.telemetry(),
       safetyEvents: safetyEventsForReview(),
+    };
+  }
+
+
+  // Shared Design drift guard: the file (and the Worker delta) must be exactly
+  // what the models were shown. Returns a reason string or null.
+  async function designDriftReason({ cwd, objective, designTarget, delta, baseline }) {
+    try {
+      const after = await readReviewTarget({ cwd, reviewTarget: objective.reviewTarget });
+      if (after.sha256 !== designTarget.sha256) return 'the design file changed while the Reviewer was running';
+      const post = await collectWorkerDeltaFn({ cwd, baseline });
+      if (!post || post.evidenceComplete === false || post.fingerprint !== delta.fingerprint) {
+        return 'the Worker changes (git delta) changed while the Reviewer was running';
+      }
+      return null;
+    } catch (err) {
+      return `the design file or Worker delta could not be re-verified after the Reviewer ran (${err?.message ?? err})`;
+    }
+  }
+
+  const designRunner = createDesignTwoStageRunner({
+    meteredWithFailover, routeReviewerFn, routeSupervisorFn, designReviewerFn, designSupervisorFn,
+    saveLoop: (ls) => saveLoop(ls),
+  });
+
+  function designFindingSignature(f) { return `${f.severity}::${f.title}`; }
+
+  // reviewMode === 'design-two-stage' only. Stage 1 Reviewer proposal, stage 2
+  // Supervisor adjudication, then the pure transition table in designTwoStage.js.
+  async function reviewDesignTwoStage({
+    loopState, objective, delta, gate, designTarget, spend, fp, baseline, cwd, signal, onHeartbeat,
+  }) {
+    const ds = loopState.designTwoStage ?? initialDesignTwoStageState();
+    loopState.designTwoStage = ds;
+    const roundCap = (objective.maxReviewRounds ?? 3) + DESIGN_LIMITS.maxExchanges;
+    const priorGateRound = Number.isInteger(loopState.gateRound) ? loopState.gateRound : loopState.round;
+    // A crash/resume of the SAME logical state reuses its assigned round.
+    if (ds.inFlight?.key === fp && Number.isInteger(ds.inFlight.round)) {
+      loopState.round = ds.inFlight.round;
+    } else {
+      if (priorGateRound >= roundCap) {
+        loopState.budgetExhausted = true;
+        recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `design review round budget (${roundCap}) is spent`);
+        await saveLoop(loopState);
+        return {
+          status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round, terminal: true, budgetExhausted: true,
+          reason: `the design review round budget (${roundCap}) is spent; report to the user and stop`,
+          telemetry: await spend.telemetry(), safetyEvents: safetyEventsForReview(),
+        };
+      }
+      loopState.round += 1;
+      loopState.gateRound = priorGateRound + 1;
+      loopState.epochReviewRound = (Number.isInteger(loopState.epochReviewRound) ? loopState.epochReviewRound : priorGateRound) + 1;
+      ds.inFlight = { key: fp, round: loopState.round };
+      await saveLoop(loopState);
+    }
+
+    let out;
+    try {
+      out = await designRunner.runDesignRound({
+        spend, loopState, objective, designTarget, cwd, signal, onHeartbeat, designState: ds,
+      });
+    } catch (err) {
+      if (err instanceof LeaseLostError) throw err;
+      return spendDenialResult(loopState, err, await spend.telemetry());
+    }
+    const failClosed = async (reason) => {
+      ds.inFlight = null;
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason);
+      await saveLoop(loopState);
+      return {
+        status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
+        reason: `Design review did not produce a usable result: ${reason}`,
+        telemetry: await spend.telemetry(), safetyEvents: safetyEventsForReview(),
+      };
+    };
+    if (out.kind === 'FAILED') return failClosed(out.reason);
+
+    const drift = await designDriftReason({ cwd, objective, designTarget, delta, baseline });
+    if (drift) {
+      ds.inFlight = null;
+      loopState.lastReviewedFingerprint = null;
+      loopState.lastReview = null;
+      return evidenceRework({
+        loopState, gate, head: delta.currentHead ?? null,
+        reason: `${drift}; no PASS is authorized for a design the Supervisor did not see. Stabilize the file and call reviewloop_review again in this same loop`,
+      });
+    }
+
+    const adj = out.adjudication;
+    const decision = decideDesignTransition({ adjudication: adj, exchangeCount: ds.exchangeCount });
+    if (decision.kind === 'FAILED') return failClosed(decision.reason);
+
+    const blocking = adj.blockingFindings.map((f) => ({
+      severity: f.severity, title: f.title, detail: f.detail, rule: f.rule, signature: designFindingSignature(f),
+    }));
+    const review = {
+      status: blocking.length ? 'ACTIONABLE' : 'CLEAN', reviewer: 'internal', provider: 'internal',
+      reviewedHead: delta.currentHead, blockingFindings: blocking,
+      nonBlockingFindings: adj.nonBlockingFindings.map((f) => ({ severity: 'P3', title: f.title, detail: f.detail })),
+      nonBlockingOmitted: 0, findingSignatures: blocking.map((f) => f.signature).sort(), error: null,
+      physicalCalls: out.physicalCalls,
+    };
+    review.reviewedFingerprint = fp;
+    loopState.lastReview = review;
+    loopState.lastReviewedFingerprint = fp;
+    loopState.lastGateFingerprint = gate.fingerprint;
+    ds.inFlight = null;
+    ds.history = [...ds.history, { round: loopState.round, verdict: adj.comparison.verdict, reason: adj.comparison.reason }].slice(-6);
+    recordFindingSignatures(loopState, review, currentReviewScope(loopState, objective));
+    const designFields = {
+      comparison: adj.comparison,
+      ...(adj.comparison.planConcern ? { planConcern: adj.comparison.planConcern } : {}),
+    };
+    const telemetry = await spend.telemetry();
+
+    if (decision.kind === 'PASS') {
+      const designPassComment = finalizePassComment(adj.designPassComment, designTarget.sha256);
+      loopState.resumePacket = null;
+      loopState.designReview = {
+        reviewTarget: designTarget.path, designSha256: designTarget.sha256, bytes: designTarget.bytes,
+        round: loopState.round, reviewedAt: new Date(clock()).toISOString(),
+        designPassComment, planConcern: adj.comparison.planConcern ?? null,
+      };
+      recordTransition(loopState, REVIEW_LOOP_STATES.PASS, `design adjudicated ${adj.comparison.verdict}`);
+      await saveLoop(loopState);
+      return { ...passResult(loopState, review, telemetry), ...designFields };
+    }
+    if (decision.kind === 'HUMAN') {
+      const exhausted = decision.humanQuestions.length === 0;
+      if (exhausted) loopState.budgetExhausted = true;
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason);
+      await saveLoop(loopState);
+      return {
+        ...humanRequiredResult(loopState, review, telemetry, null),
+        ...designFields,
+        humanQuestions: decision.humanQuestions,
+        reviewerProposals: out.proposals,
+        reason: decision.reason + (exhausted ? ' — this ReviewLoop budget is spent; report to the user and stop, do not start another loop for this task' : ''),
+      };
+    }
+    if (decision.kind === 'EXCHANGE') {
+      ds.exchangeCount = decision.exchangeCount;
+      ds.reviewerProposals = out.proposals;
+      ds.workerSummary = adj.comparison.workerSummary;
+      // The Worker may legitimately defend an unchanged design after seeing the
+      // proposals; the exchange budget (max 2) bounds this instead.
+      loopState.lastReviewedFingerprint = null;
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, `design differs materially (exchange ${ds.exchangeCount} of ${DESIGN_LIMITS.maxExchanges})`);
+      await saveLoop(loopState);
+      return {
+        ...compactReworkPayload({ loopState, review, gate }),
+        ...designFields,
+        exchangeCount: ds.exchangeCount,
+        reviewerProposals: out.proposals,
+        reason: `The independent Reviewer's approach differs materially from your design (exchange ${ds.exchangeCount} of ${DESIGN_LIMITS.maxExchanges}). Weigh these proposals; revise the design or justify keeping it in the file, then call reviewloop_review again in this same loop.`,
+        nextAction: 'Compare reviewerProposals with your design; revise the design file (or add the reasoning for your choice to Options), then call reviewloop_review again.',
+        telemetry, safetyEvents: safetyEventsForReview(),
+      };
+    }
+    recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'design adjudication found blocking defects');
+    await saveLoop(loopState);
+    return {
+      ...compactReworkPayload({ loopState, review, gate }),
+      ...designFields,
+      reason: 'design adjudication found blocking defects',
+      telemetry, safetyEvents: safetyEventsForReview(),
     };
   }
 
@@ -1405,7 +1594,13 @@ export function createReviewLoopController({
   }
   function designReviewFields(loopState) {
     const d = loopState.designReview;
-    return d?.designSha256 ? { designSha256: d.designSha256, reviewTarget: d.reviewTarget } : {};
+    return d?.designSha256
+      ? {
+        designSha256: d.designSha256, reviewTarget: d.reviewTarget,
+        ...(d.designPassComment ? { designPassComment: d.designPassComment } : {}),
+        ...(d.planConcern ? { planConcern: d.planConcern } : {}),
+      }
+      : {};
   }
   function humanRequiredResult(loopState, review, telemetry, supervisorGuidance) {
     const budgetExhausted = loopState.budgetExhausted === true;

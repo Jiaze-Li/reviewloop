@@ -173,3 +173,21 @@ function reviewDiffLimit(env) {
   const n = Number(env?.REVIEWLOOP_MAX_REVIEW_DIFF_CHARS);
   return Number.isFinite(n) && n > 0 ? n : 45_000;
 }
+
+// Safe, bounded, strict-UTF-8 read of an arbitrary repository file for the
+// two-stage Reviewer context proxy. Same symlink/regular-file guards as the
+// design target; the caller owns the allow-list (tracked files only).
+export async function readRepoFile({ cwd, rel, maxBytes }) {
+  const found = await lstatNoSymlinks(cwd, rel);
+  if (found.missing) fail('DESIGN_TARGET_MISSING', `${rel} does not exist`);
+  if (!found.stat.isFile()) fail('DESIGN_TARGET_NOT_FILE', `${rel} is not a regular file`);
+  if (found.stat.size > maxBytes) fail('DESIGN_TARGET_TOO_LARGE', `${rel} exceeds ${maxBytes} bytes`);
+  let buf;
+  try { buf = await fsp.readFile(path.join(cwd, rel)); } catch (err) {
+    fail('DESIGN_TARGET_UNREADABLE', `cannot read ${rel}: ${err?.message ?? err}`);
+  }
+  if (buf.length > maxBytes) fail('DESIGN_TARGET_TOO_LARGE', `${rel} exceeds ${maxBytes} bytes`);
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { fail('DESIGN_TARGET_NOT_UTF8', `${rel} is not valid UTF-8`); }
+  return { path: rel, text, bytes: buf.length };
+}

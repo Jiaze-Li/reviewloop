@@ -1,5 +1,5 @@
 # ReviewLoop Worker Contract
-Contract version: 13
+Contract version: 14
 You are the Worker: design/implement/test/debug. ReviewLoop verifies.
 
 ## Start (`taskType`: `"code"` | `"design"`)
@@ -8,9 +8,10 @@ Pass the user's complete contract verbatim as `contractText` (a Brief summary is
 - `"design"`: `contractText`=complete Plan, `reviewTarget`=ONE repo-root file that
   does not exist yet (e.g. `Prompt.md`), `phases` empty; create the file AFTER begin:
   compare 2-3 options (simplest reuse first), `Options` (rejected+why), `Assumptions`
-  (unstated premises or `None`), Work Contract. No commit before `PASS`. `PASS`
-  returns `designSha256`: post a PR comment of <=5 plain lines (what's built,
-  Assumptions to confirm) ending with `designSha256: <hex>`. Then STOP for the user.
+  (unstated premises or `None`), Work Contract. No commit before `PASS`. Design
+  `REWORK` may carry `reviewerProposals`: weigh them, revise or justify. `PASS`
+  returns `designPassComment`: post it to the PR VERBATIM (no rewrite), relay it
+  and any `planConcern` to the user. Then STOP for the user.
 - `"code"`: if from a Design `PASS`, pass that design verbatim as `contractText` + its `designSha256`.
 Phased work: pass ordered `phases` (objective, exit criteria,
 carry-forward invariants, verification); never omit/merge/reorder/empty.
@@ -26,6 +27,7 @@ and `engineering-workflow/README.md` at that SHA; first user reply of the stage 
 
 ## Work / review
 Do current phase/task, call `reviewloop_review({loopId,evidence?})`.
+Show the user each result's `statusLine` verbatim.
 Inline proof only (Reviewer has no file tools).
 - `PHASE_PASS`: continue in same loop. Stage/commit new files for
   `nextDiffScope: phase-delta`; untracked files force cumulative review. On refresh

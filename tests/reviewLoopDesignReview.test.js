@@ -31,7 +31,7 @@ const untrackedBlock = (rel, text) => `--- Worker untracked file ${rel} (${Buffe
 // disk, exactly like gitEvidence does for a new untracked file.
 function makeCtl({
   cwd, rel = 'Prompt.md', reviewerFn, routeReviewerFn, routeSupervisorFn, env, deltaFingerprint,
-  extraDiff = '', readText,
+  extraDiff = '', readText, designReviewerFn, designSupervisorFn,
 } = {}) {
   const calls = { reviewer: 0, delta: 0 };
   const persistence = new MemoryPersistence();
@@ -63,6 +63,8 @@ function makeCtl({
       calls.reviewer += 1;
       return { value: { findings: [] }, usage: { input_tokens: 10, output_tokens: 5 }, model: 'test-reviewer' };
     }),
+    ...(designReviewerFn ? { designReviewerFn } : {}),
+    ...(designSupervisorFn ? { designSupervisorFn } : {}),
     ...(routeReviewerFn ? { routeReviewerFn } : {}),
     ...(routeSupervisorFn ? { routeSupervisorFn } : {}),
   });
@@ -72,6 +74,32 @@ function makeCtl({
 const designBegin = (ctl, cwd, extra = {}) => ctl.begin({
   goal: 'Design the thing', cwd, taskType: 'design', contractText: PLAN, reviewTarget: 'Prompt.md', ...extra,
 });
+
+// Scripted two-stage design transports. `adjudicate` may be a value or a fn.
+const ALIGNED = {
+  comparison: { verdict: 'ALIGNED', reason: 'same approach', workerSummary: 'reuse the engine', planConcern: null },
+  blockingFindings: [], nonBlockingFindings: [], humanQuestions: [],
+  designPassComment: 'Builds X by reusing the existing engine.\nAssumptions to confirm: none.',
+};
+const PROPOSALS = { proposals: [{ title: 'Reuse', summary: 'reuse the engine', tradeoffs: 'less flexible' }], confidenceNote: 'ok' };
+function designFakes({ adjudicate = ALIGNED, proposals = PROPOSALS, onReviewer, onSupervisor } = {}) {
+  const log = { reviewer: [], supervisor: [] };
+  return {
+    log,
+    designReviewerFn: async (args) => {
+      log.reviewer.push(args);
+      if (onReviewer) await onReviewer(args);
+      const value = args.stage === 'files' ? { requestedFiles: [] } : proposals;
+      return { value, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
+    },
+    designSupervisorFn: async (args) => {
+      log.supervisor.push(args);
+      if (onSupervisor) await onSupervisor(args);
+      const value = typeof adjudicate === 'function' ? adjudicate(log.supervisor.length) : adjudicate;
+      return { value, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
+    },
+  };
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -237,16 +265,10 @@ test('begin: a design loop WITHOUT reviewTarget behaves exactly as before (legac
 
 // ------------------------------------------------------------- review path
 
-test('review: Reviewer gets the whole design file; PASS returns and persists designSha256', async () => {
+test('review: two-stage PASS returns the Supervisor comment with the exact digest line and persists designSha256', async () => {
   const cwd = tmpRepo();
-  const seen = [];
-  const { ctl, persistence, calls } = makeCtl({
-    cwd,
-    reviewerFn: async (args) => {
-      seen.push(args.diff ?? args.delta?.diff ?? '');
-      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
-    },
-  });
+  const fakes = designFakes();
+  const { ctl, persistence, calls } = makeCtl({ cwd, ...fakes });
   const b = await designBegin(ctl, cwd);
   writeFileSync(path.join(cwd, 'Prompt.md'), DESIGN);
 
@@ -254,16 +276,23 @@ test('review: Reviewer gets the whole design file; PASS returns and persists des
   assert.equal(r.status, 'PASS');
   assert.equal(r.designSha256, designContentSha256(DESIGN));
   assert.equal(r.reviewTarget, 'Prompt.md');
-  assert.equal(calls.delta >= 2, true, 'delta is re-collected after the Reviewer');
-  assert.ok(seen.join('\n').includes(DESIGN.trim()), 'the Reviewer request carries the complete design text');
+  assert.ok(r.designPassComment.endsWith(`designSha256: ${designContentSha256(DESIGN)}`));
+  assert.equal(calls.reviewer, 0, 'the single-pass Reviewer path is never used');
+  assert.equal(fakes.log.reviewer.length, 2, 'file request + proposal');
+  assert.equal(fakes.log.supervisor.length, 1);
+  assert.ok(fakes.log.supervisor[0].prompt.includes(DESIGN.trim()), 'the Supervisor sees the complete design');
+  for (const a of fakes.log.reviewer) {
+    assert.ok(!a.prompt.includes('Options'), 'Reviewer prompt never carries the design text (I1)');
+    assert.ok(!a.prompt.includes('Prompt.md'), 'Reviewer prompt never names the design file (I1)');
+  }
 
   const persisted = (await persistence.readWorkflowState(b.loopId)).reviewLoop;
   assert.equal(persisted.designReview.designSha256, designContentSha256(DESIGN));
-  // A later read of the terminal PASS still returns the approved digest.
   const again = await ctl.review({ loopId: b.loopId });
   assert.equal(again.status, 'PASS');
   assert.equal(again.terminal, true);
   assert.equal(again.designSha256, designContentSha256(DESIGN));
+  assert.ok(again.designPassComment.includes('designSha256:'));
   rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -290,15 +319,12 @@ test('review: a design file split across Reviewer chunks => REWORK, ZERO Reviewe
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('review: design file edited WHILE the Reviewer runs => no PASS even if the Reviewer says CLEAN', async () => {
+test('review: design file edited WHILE the models run => no PASS even if adjudicated ALIGNED', async () => {
   const cwd = tmpRepo();
   const file = path.join(cwd, 'Prompt.md');
   const { ctl } = makeCtl({
     cwd,
-    reviewerFn: async () => {
-      writeFileSync(file, `${DESIGN}\nSneaky late edit\n`);
-      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
-    },
+    ...designFakes({ onSupervisor: () => writeFileSync(file, `${DESIGN}\nSneaky late edit\n`) }),
   });
   const b = await designBegin(ctl, cwd);
   writeFileSync(file, DESIGN);
@@ -309,11 +335,11 @@ test('review: design file edited WHILE the Reviewer runs => no PASS even if the 
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('review: Worker delta changing while the Reviewer runs (file unchanged) => no PASS', async () => {
+test('review: Worker delta changing while the models run (file unchanged) => no PASS', async () => {
   const cwd = tmpRepo();
   const file = path.join(cwd, 'Prompt.md');
   let n = 0;
-  const { ctl } = makeCtl({ cwd, deltaFingerprint: () => { n += 1; return n <= 1 ? 'F-before' : 'F-after'; } });
+  const { ctl } = makeCtl({ cwd, ...designFakes(), deltaFingerprint: () => { n += 1; return n <= 1 ? 'F-before' : 'F-after'; } });
   const b = await designBegin(ctl, cwd);
   writeFileSync(file, DESIGN);
   const r = await ctl.review({ loopId: b.loopId });
@@ -322,16 +348,10 @@ test('review: Worker delta changing while the Reviewer runs (file unchanged) => 
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('review: a design file deleted while the Reviewer runs => no PASS', async () => {
+test('review: a design file deleted while the models run => no PASS', async () => {
   const cwd = tmpRepo();
   const file = path.join(cwd, 'Prompt.md');
-  const { ctl } = makeCtl({
-    cwd,
-    reviewerFn: async () => {
-      rmSync(file);
-      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
-    },
-  });
+  const { ctl } = makeCtl({ cwd, ...designFakes({ onSupervisor: () => rmSync(file) }) });
   const b = await designBegin(ctl, cwd);
   writeFileSync(file, DESIGN);
   const r = await ctl.review({ loopId: b.loopId });
@@ -343,22 +363,17 @@ test('review: a design file deleted while the Reviewer runs => no PASS', async (
 test('review: blocking finding => REWORK; fixing the file and re-reviewing in the SAME loop passes with the NEW digest', async () => {
   const cwd = tmpRepo();
   const file = path.join(cwd, 'Prompt.md');
-  let round = 0;
-  const { ctl } = makeCtl({
-    cwd,
-    reviewerFn: async () => {
-      round += 1;
-      return {
-        value: { findings: round === 1 ? [{ severity: 'P2', file: 'Prompt.md', line: 1, title: 'violates: missing AC; cost: rework' }] : [] },
-        usage: { input_tokens: 1, output_tokens: 1 },
-        model: 'm',
-      };
-    },
-  });
+  const blocked = {
+    ...ALIGNED,
+    blockingFindings: [{ severity: 'P2', title: 'violates: missing AC; cost: rework', detail: 'd', rule: 'AC' }],
+    designPassComment: null,
+  };
+  const { ctl } = makeCtl({ cwd, ...designFakes({ adjudicate: (n) => (n === 1 ? blocked : ALIGNED) }) });
   const b = await designBegin(ctl, cwd);
   writeFileSync(file, DESIGN);
   const r1 = await ctl.review({ loopId: b.loopId });
   assert.equal(r1.status, 'REWORK');
+  assert.equal(r1.blockingFindings.length, 1);
   const fixed = `${DESIGN}\n## AC\n- observable\n`;
   writeFileSync(file, fixed);
   const r2 = await ctl.review({ loopId: b.loopId });
@@ -373,9 +388,14 @@ test('review: blocking finding => REWORK; fixing the file and re-reviewing in th
 
 function routingCtl({ cwd, routedRoles }) {
   const providers = createProductionReviewLoopProviders({
-    callAgy: async (opts) => ({
-      model: opts?.model ?? 'm', exitCode: 0, text: '{"findings":[]}', usage: { input_tokens: 20, output_tokens: 5 },
-    }),
+    callAgy: async (opts) => {
+      const prompt = String(opts?.prompt ?? opts?.message ?? '');
+      let text = '{"findings":[]}';
+      if (prompt.includes('Return JSON only: {"requestedFiles"')) text = '{"requestedFiles":[]}';
+      else if (prompt.includes('Return JSON only: {"proposals"')) text = JSON.stringify(PROPOSALS);
+      else if (prompt.includes('Return JSON only: {"comparison"')) text = JSON.stringify(ALIGNED);
+      return { model: opts?.model ?? 'm', exitCode: 0, text, usage: { input_tokens: 20, output_tokens: 5 } };
+    },
   });
   return createReviewLoopController({
     persistence: new MemoryPersistence(),
@@ -394,10 +414,12 @@ function routingCtl({ cwd, routedRoles }) {
     routeSupervisorFn: (s, c) => { routedRoles.push('supervisor'); return providers.routeSupervisorFn(s, c); },
     reviewerFn: providers.reviewerFn,
     supervisorFn: providers.supervisorFn,
+    designReviewerFn: providers.designReviewerFn,
+    designSupervisorFn: providers.designSupervisorFn,
   });
 }
 
-test('routing: a NEW Design loop (reviewTarget) routes its ordinary review through the REVIEWER pool', async () => {
+test('routing: a two-stage Design loop routes the Reviewer stages through the REVIEWER pool and adjudication through the SUPERVISOR pool', async () => {
   const cwd = tmpRepo();
   const routedRoles = [];
   const ctl = routingCtl({ cwd, routedRoles });
@@ -405,9 +427,9 @@ test('routing: a NEW Design loop (reviewTarget) routes its ordinary review throu
   writeFileSync(path.join(cwd, 'Prompt.md'), DESIGN);
   const r = await ctl.review({ loopId: b.loopId });
   assert.equal(r.status, 'PASS');
-  assert.deepEqual(routedRoles, ['reviewer'], 'actual route selection, not the ledger role label');
-  assert.equal(r.telemetry.reviewerCalls, 1);
-  assert.equal(r.telemetry.supervisorCalls, 0);
+  assert.deepEqual(routedRoles, ['reviewer', 'reviewer', 'supervisor'], 'actual route selection, not the ledger role label');
+  assert.equal(r.telemetry.reviewerCalls, 2);
+  assert.equal(r.telemetry.supervisorCalls, 1);
   rmSync(cwd, { recursive: true, force: true });
 });
 
