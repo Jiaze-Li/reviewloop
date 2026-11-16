@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T04:23:14.207Z",
+  "updatedAt": "2026-11-16T04:23:21.635Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
@@ -76,7 +76,7 @@
       "title": "Plan: two-stage design review (independent proposal + Supervisor adjudication)",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/45",
       "merged": false,
-      "updatedAt": "2026-11-16T04:20:22Z"
+      "updatedAt": "2026-11-16T04:23:07Z"
     },
     "completed": null,
     "outcome": null
