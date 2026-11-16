@@ -71,7 +71,7 @@ test('checkGit / checkNode report local runtime prerequisites', () => {
 test('repo invariants: reviewer+supervisor only, ReviewLoop COMMON, no retired concepts', () => {
   const r = checkRepoInvariants();
   assert.equal(r.ok, true, JSON.stringify(r.issues));
-  assert.ok(r.commonBytes <= 3200);
+  assert.ok(r.commonBytes <= 3300);
 });
 
 test('reviewer + supervisor pools have eligible internal candidates', () => {

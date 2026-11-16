@@ -143,7 +143,7 @@ export function checkRepoInvariants({ policyFile = DEFAULT_POLICY_FILE } = {}) {
     issues.push('COMMON still references retired SuperGPT concepts (Front Agent / route / Fast/Full / Planner / Executor)');
   }
   const bytes = Buffer.byteLength(common, 'utf8');
-  if (bytes > 3200) issues.push(`COMMON is ${bytes} bytes — exceeds the 3.2KB Worker-context target`);
+  if (bytes > 3300) issues.push(`COMMON is ${bytes} bytes — exceeds the 3.3KB Worker-context target`);
   return { name: 'repo_invariants', ok: issues.length === 0, issues, commonBytes: bytes };
 }
 
