@@ -1,6 +1,6 @@
 # ReviewLoop Worker Contract
-Contract version: 12
-You are the Worker: design/implement/test/debug. ReviewLoop verifies; never replaces you.
+Contract version: 13
+You are the Worker: design/implement/test/debug. ReviewLoop verifies.
 
 ## Start (`taskType`: `"code"` | `"design"`)
 Call `reviewloop_begin` before first edit of non-trivial work.
@@ -18,9 +18,11 @@ Proof: `begin` `evidenceRequirements:[{id,description}]`; `review`
 `evidence:[{requirementId:<declared id>,summary}]`; none declared = no `evidence`.
 `begin` binds `cwd` (default: server cwd): edit only that repo.
 One LOCAL task = one `loopId`. Fix `planWarnings` first.
-If the task uses the personal-skills Engineering method: `policy_sha` = full `main`
-commit SHA of `Jiaze-Li/personal-skills`; read `engineering-workflow/README.md` at
-that SHA per stage; follow its stage stops. Unreadable = say so; never claim followed.
+Plan/Design/Code work or a PR follows the personal-skills Engineering method; never
+self-exempt. `policy_sha` = full `main` SHA of `Jiaze-Li/personal-skills`. Before each
+stage's first write, `begin` or PR, read that stage's skill (lead/architect/task-spec)
+and `engineering-workflow/README.md` at that SHA; first user reply of the stage opens
+`已读规范：<file> @<sha7>`. Unreadable = say so; never claim followed.
 
 ## Work / review
 Do current phase/task, call `reviewloop_review({loopId,evidence?})`.
@@ -28,7 +30,7 @@ Inline proof only (Reviewer has no file tools).
 - `PHASE_PASS`: continue in same loop. Stage/commit new files for
   `nextDiffScope: phase-delta`; untracked files force cumulative review. On refresh
   reload `resumePacket` + repo instructions.
-- `PASS`: LOCAL task done; see Handoff.
+- `PASS`: LOCAL task done.
 - `REWORK`: fix findings/collect missing proof, review.
 - `HUMAN_REQUIRED`: STOP/report blocker; never bypass budgets via new loop.
 - `WAITING_FOR_REVIEW`: wait, retry.
@@ -41,10 +43,8 @@ unrun checks.
 
 ## Safety
 Gate FAIL (0 tokens) = repair cycle, not a Reviewer round.
-Each gate has its own budget. Spend, Sentinel, ledgers, baseline, frozen
-contract stay task-wide across `PHASE_PASS`/refresh.
-ReviewLoop never spawns Worker, force-pushes or auto-merges. Only a new user
-instruction starts a new loop.
+Spend, Sentinel, ledgers, baseline, frozen contract stay task-wide across
+`PHASE_PASS`/refresh. Only a new user instruction starts a new loop.
 
 ## After push
 claude-review-bot owns PR review. Read latest Independent Review Session
