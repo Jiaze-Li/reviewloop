@@ -17,7 +17,7 @@ test('clean first pass: Gate PASS + Reviewer clean -> PASS, reviewer=1 superviso
   const { controller, calls } = makeHarness({
     deltas: [{ fingerprint: 'd1', diff: 'x', changedFiles: ['a.js'] }],
     gates: [{ verdict: 'PASS', fingerprint: 'g1' }],
-    reviews: [{ findings: [finding('P3')] }],
+    reviews: [{ findings: [] }],
   });
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
   const r = await controller.review({ loopId });
@@ -28,11 +28,21 @@ test('clean first pass: Gate PASS + Reviewer clean -> PASS, reviewer=1 superviso
   assert.equal(r.telemetry.workerUsage, 'external / not observable by ReviewLoop');
 });
 
-test('P3-only findings do not block: PASS', async () => {
+test('code task: P3 findings block by default -> REWORK listing them', async () => {
   const { controller } = makeHarness({ reviews: [{ findings: [finding('P3'), finding('P3', 'b.js')] }] });
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
   const r = await controller.review({ loopId });
+  assert.equal(r.status, 'REWORK');
+  assert.equal(r.blockingFindings.length, 2);
+  assert.ok(r.blockingFindings.every((f) => f.severity === 'P3'));
+});
+
+test('explicit blockingSeverities [P1,P2] keeps P3 non-blocking: PASS', async () => {
+  const { controller } = makeHarness({ reviews: [{ findings: [finding('P3'), finding('P3', 'b.js')] }] });
+  const { loopId } = await controller.begin({ goal: 'g', cwd: '/r', blockingSeverities: ['P1', 'P2'] });
+  const r = await controller.review({ loopId });
   assert.equal(r.status, 'PASS');
+  assert.equal(r.nonBlockingCount ?? r.nonBlockingFindings?.length, 2);
 });
 
 test('Gate regression -> REWORK directly, reviewer=0 supervisor=0', async () => {

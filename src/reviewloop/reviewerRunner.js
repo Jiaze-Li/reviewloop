@@ -8,7 +8,7 @@ import { usesSupervisorPoolForReview } from './objective.js';
 export function createReviewerRunner({ persistence, env, reviewerFn, routeReviewerFn, routeSupervisorFn = null, meteredWithFailover, saveLoop }) {
   async function runReviewerOverEvidence({
     spend, loopState, objective, delta, gate, reviewScope = currentReviewScope(loopState, objective),
-    evidenceBundle = null, evidenceProofFingerprint = '', signal,
+    evidenceBundle = null, evidenceProofFingerprint = '', signal, onProgress = null,
   }) {
     // Every PHYSICAL Reviewer attempt for this call — one entry per failover
     // retry AND per chunk, success or failure. Never collapsed into a single
@@ -139,6 +139,11 @@ export function createReviewerRunner({ persistence, env, reviewerFn, routeReview
 
     const perChunk = [];
     for (const chunk of chunks) {
+      // Best-effort progress for the person watching; never affects the review.
+      if (typeof onProgress === 'function') {
+        // eslint-disable-next-line no-await-in-loop
+        try { await onProgress(`reviewer_running chunk ${chunk.index + 1}/${chunk.total}`); } catch { /* ignore */ }
+      }
       if (signal?.aborted) {
         // The MCP client cancelled the review. Do NOT start another paid model
         // dispatch — fail the review closed (never CLEAN/PASS on a cancel).

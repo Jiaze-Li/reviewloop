@@ -11,19 +11,22 @@
 //     review_id,           // provider review id, or null
 //     status,              // 'CLEAN' | 'ACTIONABLE' | 'FAILED'
 //     findings: [ {
-//       severity,          // 'P1' | 'P2' | 'OTHER'
+//       severity,          // 'P1' | 'P2' | 'P3' | 'OTHER'
 //       file, line,        // location, or null
 //       title,             // short finding headline
 //       description,       // full finding body
 //       signature,         // stable identity across repair rounds
 //     } ],
-//     blocking,            // findings with severity P1 / P2 (subset of findings)
+//     blocking,            // findings with severity P1 / P2 / P3 (subset of findings)
 //     error,               // { reason, message } when status === 'FAILED', else null
 //   }
 //
-// Only P1 / P2 block. Everything else (P3, nit, suggestion, info, style, ...)
-// normalizes to OTHER and never blocks. The policy never inspects a raw
-// provider payload again — it only reads this structure.
+// P1 / P2 / P3 are kept as distinct severities and are candidate blockers here;
+// which of them actually block is the frozen objective's `blockingSeverities`
+// (code tasks: P1+P2+P3, design tasks: P1+P2), applied by the reviewer runner.
+// Everything else (nit, suggestion, info, style, ...) normalizes to OTHER and
+// never blocks. The policy never inspects a raw provider payload again — it
+// only reads this structure.
 
 export const NORMALIZED_REVIEW_STATUS = Object.freeze({
   CLEAN: 'CLEAN',
@@ -31,8 +34,8 @@ export const NORMALIZED_REVIEW_STATUS = Object.freeze({
   FAILED: 'FAILED',
 });
 
-export const NORMALIZED_FINDING_SEVERITIES = Object.freeze(['P1', 'P2', 'OTHER']);
-export const BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2']);
+export const NORMALIZED_FINDING_SEVERITIES = Object.freeze(['P1', 'P2', 'P3', 'OTHER']);
+export const BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2', 'P3']);
 
 // Reasons a provider result normalizes to FAILED (drives reviewer failover in
 // the loop; never a repair round).
@@ -47,13 +50,14 @@ function collapse(value) {
 }
 
 // Map an arbitrary provider severity token onto the normalized ladder.
-// Exact P1 / P2 (any case) plus a small, well-known synonym set are blocking;
-// everything else — P3, nit, suggestion, info, style, minor, low, "" — is
+// Exact P1 / P2 / P3 (any case) plus a small, well-known synonym set keep their
+// rank; everything else — nit, suggestion, info, style, minor, low, "" — is
 // OTHER and does not block.
 export function normalizeFindingSeverity(raw) {
   const text = collapse(raw);
   if (text === 'p1' || text === 'blocker' || text === 'critical') return 'P1';
   if (text === 'p2' || text === 'major') return 'P2';
+  if (text === 'p3') return 'P3';
   return 'OTHER';
 }
 

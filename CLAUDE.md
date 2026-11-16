@@ -8,8 +8,10 @@ Label every review finding with a severity prefix and lead each inline comment w
 - **P2** - blocking: unhandled edge cases with bounded blast radius, error paths that swallow context, real but unlikely races, missing test coverage for new branching logic.
 - **P3** - non-blocking nit: naming, structure, duplication, stale comments.
 
-ReviewLoop completion policy: **no P1 and no P2 → eligible for PASS**. P3 is
-reported (capped) but never blocks completion by default.
+ReviewLoop completion policy (D43): a **code** loop blocks on P1, P2 **and P3**
+by default (matching claude-review-bot, where an open P3 blocks READY); a
+**design** loop blocks on P1 and P2 only. `reviewloop_begin.blockingSeverities`
+overrides the default per task.
 
 Review output rules:
 

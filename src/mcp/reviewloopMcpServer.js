@@ -22,6 +22,35 @@ import { createAgyQuotaPreflight } from '../agy/agyQuotaProbe.js';
 import { probeReviewTransportRuntime } from '../reviewloop/adapters/cliReviewTransports.js';
 import { beginStatusLine } from '../reviewloop/statusLine.js';
 
+// The statusLine is its own first text block, so the person sees it in the
+// tool-call preview even when the Worker does not repeat it. The JSON block
+// after it is unchanged for clients that read `content` instead of
+// `structuredContent`.
+export function toolResultContent(result) {
+  const json = { type: 'text', text: JSON.stringify(result, null, 2) };
+  return typeof result?.statusLine === 'string' && result.statusLine
+    ? [{ type: 'text', text: result.statusLine }, json]
+    : [json];
+}
+
+// MCP progress may only use the token the client sent with this request
+// (a made-up token is dropped by the client) and must increase every time.
+// Without a token the client did not ask for progress, so nothing is sent.
+export function progressNotifier(extra, loopId) {
+  const progressToken = extra?._meta?.progressToken;
+  if (progressToken === undefined || typeof extra?.sendNotification !== 'function') return undefined;
+  let progress = 0;
+  return async (msg) => {
+    progress += 1;
+    try {
+      await extra.sendNotification({
+        method: 'notifications/progress',
+        params: { progressToken, progress, message: msg ?? `ReviewLoop ${loopId}: waiting (0 model tokens)` },
+      });
+    } catch { /* best effort */ }
+  };
+}
+
 export function createReviewLoopMcpServer({
   controller = null,
   cwd = process.cwd(),
@@ -81,7 +110,7 @@ export function createReviewLoopMcpServer({
         reviewTarget: z.string().min(1).optional().describe('design only: ONE repository-relative path (forward slashes, no "..") of the complete design file, at most 65536 UTF-8 bytes. It must NOT exist yet: call reviewloop_begin first, THEN create the file. Requires contractText (the complete Plan) and phases=[]. Every reviewloop_review round gives the Reviewer the whole current file; PASS returns designSha256'),
         designSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('code only, optional: the designSha256 returned by the Design PASS. reviewloop_begin refuses a contractText whose whitespace-trimmed UTF-8 content hashes differently. A content-consistency check, not proof of Design PASS or of user authorization'),
         verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
-        blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1 and P2'),
+        blockingSeverities: z.array(z.string().min(1)).min(1).optional().describe('finding severities that block this task; defaults to P1, P2 and P3 for code, P1 and P2 for design'),
         maxReviewRounds: z.number().int().positive().optional().describe('maximum fresh Reviewer rounds PER gate (each phase gate and the final gate); defaults to 3'),
         phases: z.array(z.object({
           id: z.string().min(1),
@@ -154,7 +183,7 @@ export function createReviewLoopMcpServer({
         ...(res.reviewTarget ? { reviewTarget: res.reviewTarget } : {}),
         ...(res.planWarnings?.length ? { planWarnings: res.planWarnings } : {}),
       };
-      return { content: [{ type: 'text', text: JSON.stringify(structured, null, 2) }], structuredContent: structured };
+      return { content: toolResultContent(structured), structuredContent: structured };
     },
   );
 
@@ -229,23 +258,10 @@ export function createReviewLoopMcpServer({
         loopId,
         evidence: evidence ?? [],
         signal: extra?.signal,
-        onHeartbeat: async (msg) => {
-          if (typeof extra?.sendNotification === 'function') {
-            try {
-              await extra.sendNotification({
-                method: 'notifications/progress',
-                params: {
-                  progressToken: extra?._meta?.progressToken ?? loopId,
-                  progress: 1,
-                  message: msg ?? `ReviewLoop ${loopId}: waiting (0 model tokens)`,
-                },
-              });
-            } catch { /* ignore */ }
-          }
-        },
+        onHeartbeat: progressNotifier(extra, loopId),
       });
       return {
-        content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        content: toolResultContent(res),
         structuredContent: res,
         isError: res.status === 'FAILED',
       };

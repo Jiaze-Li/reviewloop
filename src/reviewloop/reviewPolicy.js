@@ -1,7 +1,8 @@
 // ReviewLoop review normalization + deterministic convergence policy.
 //
-// Severity policy:  P1 = blocking, P2 = blocking, P3/OTHER = non-blocking.
-// Default completion rule: no P1 and no P2  ->  PASS.
+// Severity policy: the frozen objective's `blockingSeverities` decide what
+// blocks. Code tasks default to P1+P2+P3, design tasks to P1+P2; OTHER never
+// blocks. Completion rule: no blocking finding  ->  PASS.
 //
 // Convergence (§13) is epoch-based.
 //   Epoch 0 gets the frozen maxReviewRounds budget (default 3).
@@ -10,7 +11,7 @@
 //   rounds. At most 2 Supervisor escalations are automatic per gate.
 //   Only after the final supervised epoch still fails to converge does the gate
 //   become terminal HUMAN_REQUIRED. Task-wide round/spend/audit never reset.
-//   Any round with P1 = 0 and P2 = 0 -> PASS.
+//   Any round with no blocking finding -> PASS.
 //   Waiting/polling never consumes a round.
 
 import { createHash } from 'node:crypto';
@@ -127,7 +128,7 @@ export function decideConvergence({ loopState, review, reviewScope = null }) {
 
   const blockingCount = review.blockingFindings.length;
   if (blockingCount === 0) {
-    return { verdict: REVIEW_VERDICTS.PASS, reason: 'no P1/P2 findings', invokeSupervisor: false };
+    return { verdict: REVIEW_VERDICTS.PASS, reason: 'no blocking findings', invokeSupervisor: false };
   }
 
   const epochHistory = (loopState.findingSignatureHistory ?? [])
