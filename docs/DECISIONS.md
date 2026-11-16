@@ -18,7 +18,7 @@ history; GitHub PR review belongs to claude-review-bot.
 | D11 | Local waiting never wakes the Worker or a model. `WAITING_FOR_REVIEW` is a durable state. |
 | D13 | Same evidence in the same review scope cannot spend twice. `NO NEW INFORMATION → NO NEW MODEL CALL`, enforced at the authority boundary. A phase/final scope change is new review information and is fingerprinted into the review-state evidence. |
 | D14 | ReviewLoop never auto-merges and never force-pushes. |
-| D15 | The Worker-facing MCP surface is exactly two tools; COMMON ≤ 3.2 KB (raised from 2.5 KB by D39); result payloads are compact and never carry raw evidence blobs. |
+| D15 | The Worker-facing MCP surface is exactly two tools; COMMON ≤ 3.3 KB (raised from 2.5 KB by D39, to 3.3 KB by D41); result payloads are compact and never carry raw evidence blobs. |
 | D16 | `~/.reviewloop` is the runtime root. `~/.supergpt` is never read, written, or auto-resumed; a legacy V2 snapshot fails closed. |
 | D17 | Reviewer/Supervisor transports are narrow single-turn inference from one isolated empty scratch cwd — never a second coding Worker. One physical attempt per call; failover is the controller's, not the transport's. |
 | D18 | Stable model-family identity is preserved without concrete version pins: `agy:*` resolves from the runtime catalog, `codex:default` delegates to the Codex default, and `claude:opus` passes the stable provider alias `opus`; telemetry records the concrete model actually used. |
