@@ -250,6 +250,10 @@ export function createReviewObjective({
     }
     objective.reviewTarget = String(reviewTarget);
   }
+  // Explicit workflow mode (display/dispatch). NOT folded into the fingerprint:
+  // it is derived from fingerprinted fields, and resolveReviewMode() always
+  // re-derives it, so an older persisted objective without it behaves the same.
+  objective.reviewMode = resolveReviewMode(objective);
 
   objective.fingerprint = fingerprintFields(objective);
 
@@ -408,4 +412,21 @@ export function assertObjectiveNotWeakened(original, candidate) {
 // like Code. Supervisor is invoked only by the shared non-convergence policy.
 export function usesSupervisorPoolForReview(objective) {
   return objective?.taskType === TASK_TYPES.DESIGN && !objective?.reviewTarget;
+}
+
+// Explicit review workflow modes. `code` and `design-legacy` never enter the
+// two-stage design module. Always derived from fingerprinted fields so loops
+// persisted before this field existed (and any tampered stored value) resolve
+// identically: this is the single migration helper.
+export const REVIEW_WORKFLOWS = Object.freeze({
+  CODE: 'code',
+  DESIGN_LEGACY: 'design-legacy',
+  DESIGN_TWO_STAGE: 'design-two-stage',
+});
+
+export function resolveReviewMode(objective) {
+  if (objective?.taskType === TASK_TYPES.DESIGN) {
+    return objective.reviewTarget ? REVIEW_WORKFLOWS.DESIGN_TWO_STAGE : REVIEW_WORKFLOWS.DESIGN_LEGACY;
+  }
+  return REVIEW_WORKFLOWS.CODE;
 }

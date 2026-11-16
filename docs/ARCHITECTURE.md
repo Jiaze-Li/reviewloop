@@ -43,6 +43,8 @@ src/reviewloop/
     minimalAgyAgent.js      deterministic provisioning of the `reviewloop-minimal` AGY custom agent (inheritCustomizations:false) into the isolated gemini dir
     agyCustomAgentCapability.js  startup capability probe + per-call effective-loading verification (agy must actually LOAD reviewloop-minimal, not silently fall back)
   controller.js         reviewloop_begin + reviewloop_review
+  designTwoStage.js     two-stage Design review (reviewMode design-two-stage only): bounded context proxy, prompts, strict schemas, transition table
+  statusLine.js         deterministic one-line status for begin/review results
   phaseState.js         pure phase / convergence-state helpers (scope, proof chain, resume boundaries)
   providerFailover.js   bounded failover + same-family transient retry for one metered call
   finalDiffReducer.js   oversized final-gate diff reduction (cross-phase files only; D34)
@@ -125,6 +127,50 @@ escalates to Supervisor only when justified.
 A local Gate that changes the worktree must stabilize and reverify the
 post-Gate code. GitHub PR HEAD binding, detached PR worktrees, remote
 publication and PR audit sessions are intentionally absent.
+
+## Review modes (explicit workflow dispatch)
+
+`objective.reviewMode` is one of `code`, `design-legacy`, `design-two-stage`
+(`resolveReviewMode` in `objective.js`). It is always re-derived from the
+fingerprinted fields (`taskType`, `reviewTarget`), so loops persisted before
+the field existed behave identically and a tampered stored value is ignored.
+Shared infrastructure (pools, `meteredWithFailover`, spend/quota/accounting,
+persistence/lease, MCP transport) stays mode-agnostic; `code` and
+`design-legacy` never enter `designTwoStage.js`.
+
+### Two-stage Design review (`design-two-stage`)
+
+Per `reviewloop_review` round, after the Gate and drift-guarded file read:
+
+1. **Reviewer, independent proposal** (reviewer pool). The Reviewer sees the
+   Plan, the tracked-file tree and short architecture/package summaries,
+   **never** the design file (path and content are mechanically excluded).
+   Call 1 optionally requests up to 10 tracked files; the controller reads them
+   itself (symlink-safe, per-file and total byte caps, untracked/escaping paths
+   refused). Call 2 returns 1-2 proposals with their costs.
+2. **Supervisor, adjudication** (supervisor pool). It sees the Plan, the
+   proposals and the complete design file and returns two columns: the
+   comparison (`ALIGNED` / `MINOR_DIFF` / `MAJOR_DIFF` / `NEEDS_HUMAN`, plus an
+   optional `planConcern`) and the item-by-item design blocker checks. On a
+   passing verdict it writes `designPassComment`; the controller rewrites its
+   `designSha256:` line mechanically.
+3. **Transitions** (`decideDesignTransition`): `NEEDS_HUMAN` -> resumable
+   `HUMAN_REQUIRED` with `humanQuestions`; any blocking finding -> `REWORK`
+   (does not use the exchange budget); `MAJOR_DIFF` -> `REWORK` carrying
+   `reviewerProposals` (exchange 1, then 2), and a third `MAJOR_DIFF` -> terminal
+   `HUMAN_REQUIRED`; `ALIGNED`/`MINOR_DIFF` with a comment -> `PASS`.
+   Invalid output, a missing comment, provider failure or spend denial never
+   produce `PASS`. On exchange the Worker may keep an unchanged design (the
+   exchange cap bounds that instead of `NO_PROGRESS`); the Reviewer receives only
+   the Supervisor's neutral summary of the Worker's approach, never the raw file.
+4. **Call cap**: at most 2 Reviewer calls + 1 Supervisor call per round, each
+   metered through the normal spend path. Total design rounds are capped at
+   `maxReviewRounds + 2`.
+
+Progress: `notifications/progress` stages `gate_running`, `collecting_context`,
+`reviewer_proposing`, `supervisor_adjudicating`. Every `begin`/`review` result
+carries `statusLine` (`[ReviewLoop | <taskType> | 启动]` /
+`[ReviewLoop | <taskType> | 第 N 轮 → <status>]`) for the Worker to show.
 
 ## Active model roles
 

@@ -43,11 +43,13 @@ test('exactly two Worker-facing MCP tools', () => {
   assert.deepEqual(m.workerFacingTools.sort(), ['reviewloop_begin', 'reviewloop_review']);
 });
 
-test('COMMON stays under the 3.3KB Worker-context target', () => {
+test('COMMON stays under the 3.4KB Worker-context target', () => {
   // Budget raised from 2560 to 3200 bytes, deliberately: the unified Design flow
   // (reviewTarget + designSha256) and the personal-skills method entry add ~560 bytes.
   // Raised again from 3200 to 3300 (D41): the method entry became a hard stage gate.
-  assert.ok(measure().commonBytes <= 3300, `COMMON is ${measure().commonBytes} bytes`);
+  // Raised again from 3300 to 3400: two-stage Design review (verbatim designPassComment,
+  // reviewerProposals, statusLine surfacing); user-approved cap, see Design.md 5.3.
+  assert.ok(measure().commonBytes <= 3400, `COMMON is ${measure().commonBytes} bytes`);
 });
 
 test('PASS / REWORK payloads stay compact (no raw evidence blobs)', () => {

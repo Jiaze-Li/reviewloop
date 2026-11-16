@@ -70,14 +70,28 @@ test('real git: a subdirectory target is reviewable only where the runtime has a
 
 test('real git end-to-end through the controller: PASS with the exact digest of the reviewed file', async () => {
   const cwd = gitRepo();
-  let reviewerSaw = '';
+  let supervisorSaw = '';
   const ctl = createReviewLoopController({
     persistence: new MemoryPersistence(),
     runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'G', failureIdentities: [], results: [] }),
     discoverVerificationCommandsFn: ({ configured }) => ({ source: 'configured', commands: configured ?? ['git diff --check'], manifestFingerprint: 'fp' }),
-    reviewerFn: async (args) => {
-      reviewerSaw = String(args.diff ?? args.delta?.diff ?? '');
-      return { value: { findings: [] }, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
+    designReviewerFn: async (args) => ({
+      value: args.stage === 'files'
+        ? { requestedFiles: ['Prompt.md', 'README.md'] }
+        : { proposals: [{ title: 'A', summary: 's', tradeoffs: 't' }] },
+      usage: { input_tokens: 1, output_tokens: 1 },
+      model: 'm',
+    }),
+    designSupervisorFn: async (args) => {
+      supervisorSaw = String(args.prompt);
+      return {
+        value: {
+          comparison: { verdict: 'MINOR_DIFF', reason: 'close', workerSummary: 'w', planConcern: null },
+          blockingFindings: [], nonBlockingFindings: [], humanQuestions: [], designPassComment: 'Builds it.',
+        },
+        usage: { input_tokens: 1, output_tokens: 1 },
+        model: 'm',
+      };
     },
   });
   const b = await ctl.begin({
@@ -87,7 +101,8 @@ test('real git end-to-end through the controller: PASS with the exact digest of 
   const r = await ctl.review({ loopId: b.loopId });
   assert.equal(r.status, 'PASS');
   assert.equal(r.designSha256, designContentSha256(DESIGN));
-  assert.ok(reviewerSaw.includes(DESIGN.trim()));
+  assert.ok(supervisorSaw.includes(DESIGN.trim()));
+  assert.ok(r.designPassComment.endsWith(`designSha256: ${r.designSha256}`));
 
   // Code begin bound to that digest accepts the identical contract and refuses an edited one.
   const code = await ctl.begin({ goal: 'Implement', cwd, taskType: 'code', contractText: DESIGN, designSha256: r.designSha256 });
