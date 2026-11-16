@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T03:00:07.246Z",
+  "updatedAt": "2026-11-16T03:02:03.274Z",
   "task": {
     "id": "claude/engineering-stage-gate",
     "branch": "claude/engineering-stage-gate",
     "title": "claude/engineering-stage-gate",
     "task": "Development branch: claude/engineering-stage-gate",
     "started": "2026-11-16T10:58:28+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Fix D15 to state the current 3.3 KB COMMON budget (review F001)",
     "next": "",
     "history": [
@@ -32,13 +32,15 @@
     ],
     "pr": {
       "number": 44,
-      "state": "open",
+      "state": "closed",
       "title": "Engineering method as a hard stage gate in the Worker Policy (v13)",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/44",
-      "merged": false,
-      "updatedAt": "2026-11-16T02:59:52Z"
+      "merged": true,
+      "mergedAt": "2026-11-16T03:01:50Z",
+      "closedAt": "2026-11-16T03:01:50Z",
+      "updatedAt": "2026-11-16T03:01:50Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-16T03:01:50Z",
+    "outcome": "Merged"
   }
 }
