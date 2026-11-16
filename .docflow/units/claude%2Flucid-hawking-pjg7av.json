@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T15:30:13.682Z",
+  "updatedAt": "2026-11-16T15:36:10.701Z",
   "task": {
     "id": "claude/lucid-hawking-pjg7av",
     "branch": "claude/lucid-hawking-pjg7av",
     "title": "claude/lucid-hawking-pjg7av",
     "task": "Development branch: claude/lucid-hawking-pjg7av",
     "started": "2026-11-16T15:30:01Z",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Block on P3 in code loops and make loop progress visible",
     "next": "",
     "history": [],
@@ -19,8 +19,17 @@
         "message": "Block on P3 in code loops and make loop progress visible"
       }
     ],
-    "pr": null,
-    "completed": null,
-    "outcome": null
+    "pr": {
+      "number": 46,
+      "state": "closed",
+      "title": "Block on P3 in code loops and make loop progress visible",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/46",
+      "merged": true,
+      "mergedAt": "2026-11-16T15:35:56Z",
+      "closedAt": "2026-11-16T15:35:56Z",
+      "updatedAt": "2026-11-16T15:35:56Z"
+    },
+    "completed": "2026-11-16T15:35:56Z",
+    "outcome": "Merged"
   }
 }
