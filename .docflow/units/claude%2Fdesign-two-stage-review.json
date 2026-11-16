@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T03:32:14.602Z",
+  "updatedAt": "2026-11-16T03:49:08.768Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
@@ -9,7 +9,7 @@
     "started": "2026-11-16T11:31:44+08:00",
     "status": "In progress",
     "current": "Add the Plan for two-stage design review (independent proposal plus Supervisor adjudication)",
-    "next": "",
+    "next": "Start the Design stage in a fresh session based on the updated plan",
     "history": [],
     "commits": [
       {
