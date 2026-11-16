@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T02:58:42.224Z",
+  "updatedAt": "2026-11-16T03:00:00.185Z",
   "task": {
     "id": "claude/engineering-stage-gate",
     "branch": "claude/engineering-stage-gate",
@@ -8,15 +8,26 @@
     "task": "Development branch: claude/engineering-stage-gate",
     "started": "2026-11-16T10:58:28+08:00",
     "status": "In progress",
-    "current": "Make the Engineering method a hard stage gate in the Worker Policy (v13)",
+    "current": "Fix D15 to state the current 3.3 KB COMMON budget (review F001)",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-16T10:59:49+08:00",
+        "text": "Make the Engineering method a hard stage gate in the Worker Policy (v13)"
+      }
+    ],
     "commits": [
       {
         "sha": "70ad3a5a981d7314f10c577199f8d6e427cd49ed",
         "branch": "claude/engineering-stage-gate",
         "timestamp": "2026-11-16T10:58:28+08:00",
         "message": "Make the Engineering method a hard stage gate in the Worker Policy (v13)"
+      },
+      {
+        "sha": "0761f1c821c329c441fe44a176ed6601d9846e52",
+        "branch": "claude/engineering-stage-gate",
+        "timestamp": "2026-11-16T10:59:49+08:00",
+        "message": "Fix D15 to state the current 3.3 KB COMMON budget (review F001)"
       }
     ],
     "pr": {
