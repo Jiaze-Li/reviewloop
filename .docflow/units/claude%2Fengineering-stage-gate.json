@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T02:58:38.686Z",
+  "updatedAt": "2026-11-16T02:58:42.224Z",
   "task": {
     "id": "claude/engineering-stage-gate",
     "branch": "claude/engineering-stage-gate",
@@ -19,7 +19,14 @@
         "message": "Make the Engineering method a hard stage gate in the Worker Policy (v13)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 44,
+      "state": "open",
+      "title": "Engineering method as a hard stage gate in the Worker Policy (v13)",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/44",
+      "merged": false,
+      "updatedAt": "2026-11-16T02:58:33Z"
+    },
     "completed": null,
     "outcome": null
   }
