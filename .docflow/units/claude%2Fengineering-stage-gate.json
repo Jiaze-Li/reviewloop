@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-16T02:58:38.686Z",
+  "task": {
+    "id": "claude/engineering-stage-gate",
+    "branch": "claude/engineering-stage-gate",
+    "title": "claude/engineering-stage-gate",
+    "task": "Development branch: claude/engineering-stage-gate",
+    "started": "2026-11-16T10:58:28+08:00",
+    "status": "In progress",
+    "current": "Make the Engineering method a hard stage gate in the Worker Policy (v13)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "70ad3a5a981d7314f10c577199f8d6e427cd49ed",
+        "branch": "claude/engineering-stage-gate",
+        "timestamp": "2026-11-16T10:58:28+08:00",
+        "message": "Make the Engineering method a hard stage gate in the Worker Policy (v13)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
