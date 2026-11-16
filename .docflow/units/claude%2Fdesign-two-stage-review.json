@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T04:16:04.339Z",
+  "updatedAt": "2026-11-16T04:17:19.490Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
@@ -9,7 +9,7 @@
     "started": "2026-11-16T11:31:44+08:00",
     "status": "In progress",
     "current": "Make design review two-stage: independent proposal, then Supervisor adjudication",
-    "next": "Wait for user confirmation to start implementing the two-stage design review.",
+    "next": "你验收两阶段设计审查的试跑结果，再决定是否合并这个 PR；如想更放心，可再多跑几轮真实模型试跑。",
     "history": [
       {
         "at": "2026-11-16T11:49:01+08:00",
