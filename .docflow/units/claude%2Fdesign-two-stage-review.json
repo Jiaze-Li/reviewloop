@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T03:31:58.295Z",
+  "updatedAt": "2026-11-16T03:32:14.602Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
@@ -19,7 +19,14 @@
         "message": "Add the Plan for two-stage design review (independent proposal plus Supervisor adjudication)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 45,
+      "state": "open",
+      "title": "Plan: two-stage design review (independent proposal + Supervisor adjudication)",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/45",
+      "merged": false,
+      "updatedAt": "2026-11-16T03:31:55Z"
+    },
     "completed": null,
     "outcome": null
   }
