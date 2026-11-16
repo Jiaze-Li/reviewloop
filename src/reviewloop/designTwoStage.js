@@ -117,7 +117,7 @@ export function buildFileRequestPrompt({ plan, context, workerSummary }) {
     planBlock(plan),
     contextBlock(context),
     exchangeBlock(workerSummary),
-    `You may request up to ${DESIGN_LIMITS.maxRequestedFiles} files from the list above (each is truncated to ${DESIGN_LIMITS.maxFileBytes} bytes) so your proposals are grounded in real code.`,
+    `You may request up to ${DESIGN_LIMITS.maxRequestedFiles} files from the list above (a file larger than ${DESIGN_LIMITS.maxFileBytes} bytes is unavailable, not truncated; unavailable requests are reported back) so your proposals are grounded in real code.`,
     'Return JSON only: {"requestedFiles":["repo/relative/path"]}. Use an empty array if you need nothing more.',
   ].filter(Boolean).join('\n');
 }

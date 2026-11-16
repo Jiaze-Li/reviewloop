@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
-  validateAdjudication, validateProposals, validateFileRequest, decideDesignTransition, finalizePassComment,
+  buildFileRequestPrompt, validateAdjudication, validateProposals, validateFileRequest, decideDesignTransition, finalizePassComment,
   collectDesignContext, readRequestedFiles, DESIGN_LIMITS,
 } from '../src/reviewloop/designTwoStage.js';
 import { designContentSha256 } from '../src/reviewloop/designTarget.js';
@@ -283,5 +283,20 @@ test('stage heartbeats are emitted in order for a two-stage round', async () => 
   const stages = beats.map((m) => m.replace('ReviewLoop stage: ', ''));
   assert.deepEqual(stages.filter((s) => ['gate_running', 'collecting_context', 'reviewer_proposing', 'supervisor_adjudicating'].includes(s)),
     ['gate_running', 'collecting_context', 'reviewer_proposing', 'supervisor_adjudicating']);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('file-request prompt says oversize files are unavailable (not truncated) and the proposal prompt reports them', async () => {
+  const cwd = gitRepo();
+  writeFileSync(path.join(cwd, 'big.txt'), 'x'.repeat(DESIGN_LIMITS.maxFileBytes + 1));
+  execFileSync('git', ['add', 'big.txt'], { cwd });
+  execFileSync('git', ['commit', '-qm', 'big'], { cwd });
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const prompt = buildFileRequestPrompt({ plan: PLAN, context, workerSummary: null });
+  assert.match(prompt, /unavailable, not truncated/);
+  assert.doesNotMatch(prompt, /is truncated to/);
+  const r = await readRequestedFiles({ cwd, context, requested: ['big.txt'] });
+  assert.equal(r.files.length, 0);
+  assert.deepEqual(r.rejected.map((x) => x.path), ['big.txt']);
   rmSync(cwd, { recursive: true, force: true });
 });
