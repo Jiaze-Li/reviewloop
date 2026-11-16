@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T04:23:21.635Z",
+  "updatedAt": "2026-11-16T04:27:43.787Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
     "title": "claude/design-two-stage-review",
     "task": "Development branch: claude/design-two-stage-review",
     "started": "2026-11-16T11:31:44+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Update the stated Worker policy size limit in the decision log to 3.4 KB",
     "next": "你验收两阶段设计审查的试跑结果，再决定是否合并这个 PR；如想更放心，可再多跑几轮真实模型试跑。",
     "history": [
@@ -72,13 +72,15 @@
     ],
     "pr": {
       "number": 45,
-      "state": "open",
+      "state": "closed",
       "title": "Plan: two-stage design review (independent proposal + Supervisor adjudication)",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/45",
-      "merged": false,
-      "updatedAt": "2026-11-16T04:23:07Z"
+      "merged": true,
+      "mergedAt": "2026-11-16T04:27:33Z",
+      "closedAt": "2026-11-16T04:27:33Z",
+      "updatedAt": "2026-11-16T04:27:33Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-16T04:27:33Z",
+    "outcome": "Merged"
   }
 }
