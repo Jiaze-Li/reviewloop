@@ -8,15 +8,17 @@ import {
   normalizeReviewFinding,
 } from '../src/orchestrator/adapters/normalizedReview.js';
 
-test('P1/P2 findings are blocking and make the review ACTIONABLE', () => {
+test('P1/P2/P3 findings are candidate blockers and make the review ACTIONABLE', () => {
   const review = normalizeProviderReview({
-    raw: { findings: [{ severity: 'P2', file: 'a.js', title: 'Null deref' }, { severity: 'P3', title: 'nit' }] },
+    raw: { findings: [{ severity: 'P2', file: 'a.js', title: 'Null deref' }, { severity: 'P3', title: 'edge case' }, { severity: 'nit', title: 'rename' }] },
     reviewer: 'internal',
   });
   assert.equal(review.status, NORMALIZED_REVIEW_STATUS.ACTIONABLE);
-  assert.equal(review.blocking.length, 1);
+  assert.equal(review.blocking.length, 2);
+  assert.equal(review.findings[1].severity, 'P3');
+  assert.equal(review.findings[2].severity, 'OTHER');
   assert.equal(review.provider, 'internal');
-  assert.deepEqual(blockingSignatures(review), ['P2:a.js:null deref']);
+  assert.deepEqual(blockingSignatures(review), ['P2:a.js:null deref', 'P3::edge case']);
 });
 
 test('only non-blocking findings normalize to CLEAN', () => {

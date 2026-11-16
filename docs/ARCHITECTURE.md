@@ -516,7 +516,9 @@ Default automatic convergence is **epoch-based**:
 - At most **2** automatic Supervisor escalations occur per gate. With defaults,
   the longest automatic path is `3 reviews → Supervisor → 2 reviews →
   Supervisor → 2 reviews → HUMAN_REQUIRED`.
-- Any Reviewer round with no P1/P2 findings immediately PASSes the current gate.
+- Any Reviewer round with no blocking finding immediately PASSes the current
+  gate. Blocking = the objective's frozen `blockingSeverities`: P1/P2/P3 for
+  code, P1/P2 for design (D43).
   Waiting/polling and deterministic Gate repair never consume Reviewer rounds.
 
 The counters have different ownership:

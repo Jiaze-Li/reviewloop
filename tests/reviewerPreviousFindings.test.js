@@ -57,7 +57,7 @@ test('controller forwards previous blockers to every chunk: repaired old P2 neve
       calls.push({revision,chunk:args.chunk.index,prompt,diff:args.diff});
       const findings=revision===1&&args.diff.includes('b/shared.js')?[old]
         :revision===2&&args.diff.includes('b/consumer.js')?[fresh]
-        :revision===3?[{severity:'P3',file:'consumer.js',line:1,title:'Optional naming nit'}]:[];
+        :[];
       return {text:JSON.stringify({findings}),usage:{input_tokens:10,output_tokens:5}};
     }}),
   });

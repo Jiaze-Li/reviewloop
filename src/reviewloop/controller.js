@@ -1073,6 +1073,7 @@ export function createReviewLoopController({
         evidenceBundle: evidenceCheck.bundle,
         evidenceProofFingerprint: effectiveEvidenceFingerprint,
         signal,
+        onProgress: (stage) => emitHeartbeat(onHeartbeat, stage),
       });
     } catch (err) {
       if (err instanceof LeaseLostError) throw err; // read-only exit in review()
@@ -1142,6 +1143,7 @@ export function createReviewLoopController({
 
     let supervisorGuidance = null;
     if (decision.verdict === REVIEW_VERDICTS.REWORK && decision.invokeSupervisor) {
+      await emitHeartbeat(onHeartbeat, 'supervisor_running');
       const sup = await runSupervisor({
         spend, loopState, objective, review, gate, reviewScope, evidenceBundle: evidenceCheck.bundle, signal,
       });

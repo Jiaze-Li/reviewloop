@@ -47,7 +47,7 @@ test('NO_PROGRESS after a spending round still reports cumulative durable spend'
   const { controller } = makeHarness({
     deltas: [{ fingerprint: 'SAME', diff: 'x', changedFiles: ['a.js'] }],
     gates: [{ verdict: 'PASS', fingerprint: 'G' }],
-    reviews: [{ findings: [finding('P3')] }],
+    reviews: [{ findings: [] }],
   });
   const { loopId } = await controller.begin({ goal: 'g', cwd: '/r' });
   const r1 = await controller.review({ loopId });

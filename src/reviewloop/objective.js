@@ -12,7 +12,16 @@ import { normalizeContractText, normalizeEvidenceRequirements } from './contract
 export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL' });
 export const TASK_TYPES = Object.freeze({ CODE: 'code', DESIGN: 'design' });
 
-export const DEFAULT_BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2']);
+// Code tasks block on every concrete defect, P3 included, matching
+// claude-review-bot (a P3 left open there blocks READY). Design tasks keep
+// P3 non-blocking: the design Reviewer uses P3 for speculative concerns.
+export const DEFAULT_BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2', 'P3']);
+export const DEFAULT_DESIGN_BLOCKING_SEVERITIES = Object.freeze(['P1', 'P2']);
+export function defaultBlockingSeverities(taskType) {
+  return String(taskType ?? '').trim().toLowerCase() === TASK_TYPES.DESIGN
+    ? DEFAULT_DESIGN_BLOCKING_SEVERITIES
+    : DEFAULT_BLOCKING_SEVERITIES;
+}
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 function sha256(value) {
   return createHash('sha256').update(String(value)).digest('hex');
@@ -149,7 +158,7 @@ export function createReviewObjective({
   phases = [],
   contractText = '',
   evidenceRequirements = [],
-  blockingSeverities = DEFAULT_BLOCKING_SEVERITIES,
+  blockingSeverities = null,
   // In phase-aware mode this is the convergence budget PER review gate
   // (each phase gate and the final whole-task gate), not one budget shared
   // across the entire task.
@@ -181,7 +190,7 @@ export function createReviewObjective({
 
   const blocking = Array.isArray(blockingSeverities) && blockingSeverities.length
     ? [...new Set(blockingSeverities.map((s) => String(s).toUpperCase()))]
-    : [...DEFAULT_BLOCKING_SEVERITIES];
+    : [...defaultBlockingSeverities(resolvedTaskType)];
 
   const rounds = Number.isInteger(maxReviewRounds) && maxReviewRounds > 0
     ? maxReviewRounds

@@ -82,7 +82,7 @@ test('LOCAL is the only Reviewer evidence dispatch path', async () => {
   const controller = readFileSync(new URL('../src/reviewloop/controller.js', import.meta.url), 'utf8');
   // The retired PR pipeline must not dispatch any Reviewer calls.
   const sharedCalls = controller.match(
-    /runReviewerOverEvidence\(\{\s*spend, loopState, objective, delta, gate, reviewScope,\s*evidenceBundle: evidenceCheck\.bundle,\s*evidenceProofFingerprint: effectiveEvidenceFingerprint,\s*signal,?\s*\}\)/g,
+    /runReviewerOverEvidence\(\{\s*spend, loopState, objective, delta, gate, reviewScope,\s*evidenceBundle: evidenceCheck\.bundle,\s*evidenceProofFingerprint: effectiveEvidenceFingerprint,\s*signal,\s*(?:onProgress: \(stage\) => emitHeartbeat\(onHeartbeat, stage\),?\s*)?\}\)/g,
   ) ?? [];
   assert.equal(sharedCalls.length, 1, 'LOCAL must be the only Reviewer evidence dispatch path');
   assert.doesNotMatch(controller, /reviewPr\(|buildPrRoundEvidence\(|createPrReviewController|PR_REVIEW_OUTCOMES|ExternalModelTriggerAuthority/);
