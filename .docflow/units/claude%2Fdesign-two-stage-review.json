@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-16T04:00:46.975Z",
+  "updatedAt": "2026-11-16T04:00:50.777Z",
   "task": {
     "id": "claude/design-two-stage-review",
     "branch": "claude/design-two-stage-review",
@@ -9,7 +9,7 @@
     "started": "2026-11-16T11:31:44+08:00",
     "status": "In progress",
     "current": "docs: add approved Design for two-stage design review",
-    "next": "Start the Design stage in a fresh session based on the updated plan",
+    "next": "Wait for user confirmation to start implementing the two-stage design review.",
     "history": [
       {
         "at": "2026-11-16T11:49:01+08:00",
