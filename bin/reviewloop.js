@@ -15,7 +15,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { runDoctor } from '../scripts/doctor.js';
+import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
@@ -240,11 +240,12 @@ async function resume(rest) {
 }
 
 async function main() {
+  const legacyEnv = checkLegacyManagedEnv(process.env);
   applySettingsFile(process.env);
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case 'doctor': {
-      const report = runDoctor();
+      const report = runDoctor({ legacyEnv });
       process.exit(report.ok ? 0 : 1);
       break;
     }

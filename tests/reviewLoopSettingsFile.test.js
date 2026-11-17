@@ -207,7 +207,7 @@ test('Production entrypoints applySettingsFile before any resolver reads limits'
   const doctor = fs.readFileSync(path.join(REPO_ROOT, 'scripts/doctor.js'), 'utf8');
   const directIdx = doctor.indexOf('if (invokedDirectly)');
   const docApplyIdx = doctor.indexOf('applySettingsFile(process.env)', directIdx);
-  const runDocIdx = doctor.indexOf('runDoctor()', directIdx);
+  const runDocIdx = doctor.indexOf('runDoctor(', directIdx);
   assert.ok(docApplyIdx > directIdx && docApplyIdx < runDocIdx);
 
   for (const rel of ['scripts/live-reviewloop-certify.mjs', 'scripts/live-reviewloop-certify-candidates.mjs']) {

@@ -13,6 +13,7 @@ import {
   checkRepoInvariants,
   checkReviewerSupervisorPools,
   checkGlobalPolicy,
+  checkLegacyManagedEnv,
   runDoctor,
 } from '../scripts/doctor.js';
 import { installGlobal } from '../bin/install-plugin.js';
@@ -137,4 +138,23 @@ test('package.json exposes the reviewloop bins and doctor script', () => {
   assert.equal(pkg.name, 'reviewloop');
   assert.equal(pkg.scripts.doctor, 'node ./scripts/doctor.js');
   assert.ok(pkg.bin.reviewloop && pkg.bin['reviewloop-mcp']);
+});
+
+test('checkLegacyManagedEnv and runDoctor warn when a legacy managed REVIEWLOOP_* env var is present', () => {
+  const clean = checkLegacyManagedEnv({ UNRELATED: '1' });
+  assert.equal(clean.ok, true);
+  assert.deepEqual(clean.present, []);
+
+  const dirty = checkLegacyManagedEnv({ REVIEWLOOP_MAX_SINGLE_CALL_USAGE: '80000' });
+  assert.equal(dirty.ok, false);
+  assert.deepEqual(dirty.present, ['REVIEWLOOP_MAX_SINGLE_CALL_USAGE']);
+
+  const lines = [];
+  const report = runDoctor({
+    execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
+    log: (l) => lines.push(l),
+    env: { REVIEWLOOP_MAX_SINGLE_CALL_USAGE: '80000' },
+  });
+  assert.equal(report.ok, true);
+  assert.ok(lines.some((l) => /warn\s+legacy_env:\s+REVIEWLOOP_MAX_SINGLE_CALL_USAGE/.test(l)));
 });
