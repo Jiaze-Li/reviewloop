@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-17T03:47:27.112Z",
+  "task": {
+    "id": "docs/review-bot-links",
+    "branch": "docs/review-bot-links",
+    "title": "docs/review-bot-links",
+    "task": "Development branch: docs/review-bot-links",
+    "started": "2026-11-17T11:47:17+08:00",
+    "status": "In progress",
+    "current": "Point the review-bot links at the renamed review-bot repository",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "1ff566bc7d413b08fc344743f3c0881e4400823e",
+        "branch": "docs/review-bot-links",
+        "timestamp": "2026-11-17T11:47:17+08:00",
+        "message": "Point the review-bot links at the renamed review-bot repository"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
