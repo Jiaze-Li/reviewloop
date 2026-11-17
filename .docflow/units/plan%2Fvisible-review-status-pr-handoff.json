@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:33:18.402Z",
+  "updatedAt": "2026-11-17T04:40:14.790Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/visible-review-status-pr-handoff",
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
-    "current": "List recorded outcomes without guessing round types and require real handoff section headings",
+    "current": "Do not call a resumable HUMAN_REQUIRED loop final in the review record",
     "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-11-17T12:33:05+08:00",
         "text": "Revert \"Tag non-Reviewer REWORK transitions so the review record never counts them as rounds\""
+      },
+      {
+        "at": "2026-11-17T12:40:01+08:00",
+        "text": "List recorded outcomes without guessing round types and require real handoff section headings"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "plan/visible-review-status-pr-handoff",
         "timestamp": "2026-11-17T12:33:05+08:00",
         "message": "List recorded outcomes without guessing round types and require real handoff section headings"
+      },
+      {
+        "sha": "8b33489d4309964b714c5db4e981f91b52017da5",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:40:01+08:00",
+        "message": "Do not call a resumable HUMAN_REQUIRED loop final in the review record"
       }
     ],
     "pr": {
