@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T11:40:05.670Z",
+  "updatedAt": "2026-11-17T11:40:14.028Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -30,7 +30,14 @@
         "message": "Add the approved design for one shared settings source covering limits and timeouts"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 50,
+      "state": "open",
+      "title": "One shared settings file for review limits and timeouts",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/50",
+      "merged": false,
+      "updatedAt": "2026-11-17T11:39:56Z"
+    },
     "completed": null,
     "outcome": null
   }
