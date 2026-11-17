@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T03:53:21.686Z",
+  "updatedAt": "2026-11-17T03:53:50.788Z",
   "task": {
     "id": "chore/mcp-script-executable",
     "branch": "chore/mcp-script-executable",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T11:53:12+08:00",
     "status": "In progress",
     "current": "Make the MCP launcher script executable like the other bin scripts",
-    "next": "",
+    "next": "等这次小改动合并进主分支，然后重启 Claude Code 确认评审服务按新位置正常连接",
     "history": [],
     "commits": [
       {
