@@ -561,13 +561,13 @@ Supervisor) for LOCAL sessions. Worker usage is reported as
 
 Managed limits and timeouts (configured in `reviewloop.settings.json`; D45):
 - `MAX_COST_USD` (USD), `MAX_USAGE_VOLUME` (tokens), `MAX_REVIEW_ROUNDS` (rounds per gate), `MAX_REVIEWER_CALLS` (calls per gate), `MAX_SUPERVISOR_CALLS` (calls per gate)
-- `MAX_SINGLE_CALL_USAGE` (tokens, hard cap 250 000), `MAX_CONTEXT_OVERHEAD_TOKENS` (tokens, hard cap 200 000) — single-call Token Sentinel
+- `MAX_SINGLE_CALL_USAGE` (tokens, capped by `TOKEN_SENTINEL_HARD_CAPS.MAX_SINGLE_CALL_USAGE`), `MAX_CONTEXT_OVERHEAD_TOKENS` (tokens, capped by `TOKEN_SENTINEL_HARD_CAPS.MAX_CONTEXT_OVERHEAD_TOKENS`) — single-call Token Sentinel
 - `GATE_TIMEOUT_MS` (milliseconds), `MAX_GATE_REPAIRS` (deterministic Gate failures per gate; D36)
 - `MAX_REVIEW_DIFF_CHARS` (characters), `MAX_REVIEW_CHUNKS` (chunks)
-- `AUTH_PROBE_TIMEOUT_MS` (milliseconds, hard cap 60 000), `REVIEW_CALL_TIMEOUT_MS` (milliseconds, hard cap 600 000)
+- `AUTH_PROBE_TIMEOUT_MS` (milliseconds, capped by `MAX_AUTH_PROBE_TIMEOUT_MS`), `REVIEW_CALL_TIMEOUT_MS` (milliseconds, capped by `MAX_REVIEW_CALL_TIMEOUT_MS`)
 
 **Shared settings file.** `reviewloop.settings.json` at the repo root is the
-**only** source for all 13 managed limits and timeouts in production, so every
+**only** source for all managed limits and timeouts in production, so every
 MCP client that launches ReviewLoop (Claude Code, Antigravity, …) and every
 model family (AGY, Codex, Claude) gets the same values with one edit.
 At startup, `applySettingsFile` discards any legacy `REVIEWLOOP_<KEY>` env vars
@@ -603,7 +603,7 @@ either:
   (configured in `reviewloop.settings.json`).
 
 Both are clamped to `(0, hard-cap]`
-(`TOKEN_SENTINEL_HARD_CAPS` — 250 000 / 200 000): an illegal value (non-finite,
+(`TOKEN_SENTINEL_HARD_CAPS`): an illegal value (non-finite,
 `≤ 0`, unparseable) falls back to the built-in code default and can never *disable* the
 protection, and no value can inflate the ceiling to infinity.
 

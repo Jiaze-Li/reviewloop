@@ -178,6 +178,8 @@ test('AC3 & AC6: removed AGY/CLI timeout symbols and stale env/number references
     /\bdefault\s+(?:15|40[\s_]?000|30[\s_]?000|50[\s_]?000)\b/i,
     /\bsets\s+`?MAX_SINGLE_CALL_USAGE`?\s+to\s+50[\s_]?000\b/i,
     /\(40000\s+single-call/i,
+    /\bhard\s+cap\s+(?:250[\s_]?000|200[\s_]?000|60[\s_]?000|600[\s_]?000)\b/i,
+    /TOKEN_SENTINEL_HARD_CAPS[^\n]*(?:250[\s_]?000|200[\s_]?000)/,
   ];
   for (const rel of ['README.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'bin/reviewloop.js']) {
     const text = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
