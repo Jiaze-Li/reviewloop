@@ -18,7 +18,7 @@ test('HUMAN_REQUIRED then re-review then PASS (real sample shape)', () => {
 });
 
 test('HUMAN_REQUIRED and FAILED are never shown as PASS', () => {
-  const a = buildReviewRecord(loop('HUMAN_REQUIRED', [h('HUMAN_REQUIRED', 1)]), { status: 'HUMAN_REQUIRED' });
+  const a = buildReviewRecord({ ...loop('HUMAN_REQUIRED', [h('HUMAN_REQUIRED', 1)]), budgetExhausted: true }, { status: 'HUMAN_REQUIRED' });
   assert.match(a, /终态 HUMAN_REQUIRED/); assert.doesNotMatch(a, /PASS/);
   const b = buildReviewRecord(loop('FAILED', [h('FAILED', 1)]), { status: 'FAILED' });
   assert.match(b, /终态 FAILED/); assert.doesNotMatch(b, /PASS/);
@@ -89,4 +89,9 @@ test('handoff check: words inside prose, quotes or code do not count as sections
   assert.equal(run(['5'], gh({ headRefOid: SHA, body: fenced })).code, 1);
   const real = `${marker}\n**做了什么**\nx\n## Acceptance\ny\n- Verified: z\n**风险与偏离**\nw`;
   assert.equal(run(['5'], gh({ headRefOid: SHA, body: real })).code, 0);
+});
+
+test('HUMAN_REQUIRED that can still be re-reviewed is not labelled final', () => {
+  const r = buildReviewRecord({ ...loop('HUMAN_REQUIRED', [h('HUMAN_REQUIRED', 1)]), budgetExhausted: false }, { status: 'HUMAN_REQUIRED' });
+  assert.doesNotMatch(r, /终态/); assert.match(r, /可续审，未结束/); assert.doesNotMatch(r, /PASS/);
 });

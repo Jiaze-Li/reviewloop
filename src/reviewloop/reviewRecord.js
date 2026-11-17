@@ -3,7 +3,9 @@
 // Pure formatting: no state writes, no model calls, never throws, never
 // invents a result that history does not contain.
 
-const TERMINAL = new Set(['PASS', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED']);
+// HUMAN_REQUIRED is final only once the convergence budget is spent
+// (controller.js reviewInner); otherwise the same loop can be re-reviewed.
+const TERMINAL = new Set(['PASS', 'FAILED', 'STOPPED']);
 const RESULT_TO = new Set(['REWORK', 'PASS', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED']);
 const INCOMPLETE = '记录不完整';
 
@@ -44,7 +46,13 @@ export function buildReviewRecord(loopState, result) {
     parts.push(steps.length ? steps.join(' → ') : '尚无已记录的审查结果');
 
     const state = loopState.state;
-    parts.push(TERMINAL.has(state) ? `终态 ${state}` : `当前 ${state ?? '未知'}（未结束）`);
+    if (TERMINAL.has(state) || (state === 'HUMAN_REQUIRED' && loopState.budgetExhausted === true)) {
+      parts.push(`终态 ${state}`);
+    } else if (state === 'HUMAN_REQUIRED') {
+      parts.push('当前 HUMAN_REQUIRED（需人工，可续审，未结束）');
+    } else {
+      parts.push(`当前 ${state ?? '未知'}（未结束）`);
+    }
 
     // The reported status must be traceable to history; otherwise say so
     // rather than letting a reader assume it was recorded.
