@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T11:40:14.028Z",
+  "updatedAt": "2026-11-17T11:53:09.612Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -8,12 +8,16 @@
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
-    "current": "Add the approved design for one shared settings source covering limits and timeouts",
+    "current": "Unify all 13 managed limits and timeouts in reviewloop.settings.json",
     "next": "在新对话里按已通过的设计写代码，把所有参数统一到一个设置文件并清理旧设置",
     "history": [
       {
         "at": "2026-11-17T19:39:41+08:00",
         "text": "Read review limits from one shared settings file so every client gets the same values"
+      },
+      {
+        "at": "2026-11-17T19:52:58+08:00",
+        "text": "Add the approved design for one shared settings source covering limits and timeouts"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "feat/shared-settings-file",
         "timestamp": "2026-11-17T19:39:41+08:00",
         "message": "Add the approved design for one shared settings source covering limits and timeouts"
+      },
+      {
+        "sha": "2b7539cf3cd5c6cec035e95c52e16d3d67093de0",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T19:52:58+08:00",
+        "message": "Unify all 13 managed limits and timeouts in reviewloop.settings.json"
       }
     ],
     "pr": {
