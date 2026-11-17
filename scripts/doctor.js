@@ -16,6 +16,7 @@ import { extractManagedPolicy, resolveGlobalConfigDir, hasLegacyManagedPolicy } 
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 import { DEFAULT_ROLE_POLICY, PRODUCTION_ROLE_CAPABILITIES, QuotaPoolRegistry } from '../src/orchestrator/roleRouting.js';
 import { createReviewLoopProviderPool } from '../src/reviewloop/providerWiring.js';
+import { applySettingsFile } from '../src/reviewloop/settingsFile.js';
 
 const DEFAULT_POLICY_FILE = fileURLToPath(new URL('../agent-policy/COMMON.md', import.meta.url));
 // Computed from THIS repo/module — never hard-coded. This is the MCP entrypoint
@@ -306,6 +307,7 @@ export function runDoctor({ execSync, log, env } = {}) {
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
+  applySettingsFile(process.env);
   const report = runDoctor();
   process.exit(report.ok ? 0 : 1);
 }

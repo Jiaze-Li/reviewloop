@@ -273,8 +273,8 @@ test('a candidate call failure is reported FAIL and never reaches a second provi
 });
 
 test('single-call ceilings are declared', () => {
-  assert.equal(SINGLE_CALL_CEILINGS.REVIEWLOOP_MAX_REVIEWER_CALLS, '1');
-  assert.equal(SINGLE_CALL_CEILINGS.REVIEWLOOP_MAX_SUPERVISOR_CALLS, '1');
+  assert.equal(SINGLE_CALL_CEILINGS.MAX_REVIEWER_CALLS, 1);
+  assert.equal(SINGLE_CALL_CEILINGS.MAX_SUPERVISOR_CALLS, 1);
 });
 
 // ---- not wired into automated runs ---------------------------------

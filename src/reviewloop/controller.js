@@ -65,6 +65,7 @@ import {
   mergeScopedGateCommands,
 } from './phaseState.js';
 import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
+import { parsePositiveInt } from './settingsFile.js';
 import { DesignTargetError, readReviewTarget, assertTargetWithinOneChunk } from './designTarget.js';
 import {
   EvidenceValidationError,
@@ -648,8 +649,7 @@ export function createReviewLoopController({
   // failures in one gate the loop stops for a human; reopen-gate resets it.
   const DEFAULT_MAX_GATE_REPAIRS = 15;
   async function stopIfGateRepairsExhausted(loopState) {
-    const configured = Number(env?.REVIEWLOOP_MAX_GATE_REPAIRS);
-    const limit = Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_MAX_GATE_REPAIRS;
+    const limit = parsePositiveInt(env?.REVIEWLOOP_MAX_GATE_REPAIRS, DEFAULT_MAX_GATE_REPAIRS);
     if ((loopState.gateRepairCount ?? 0) <= limit) return null;
     loopState.budgetExhausted = true;
     recordTransition(

@@ -309,8 +309,9 @@ export async function resolveMcpStartupRuntimeInputs({
 }
 
 export async function startReviewLoopMcpServer(options = {}) {
-  // Shared settings file: fills limit env defaults (env > file > code default)
-  // before anything resolves limits, so every client gets the same values.
+  // Shared settings file: discards legacy managed env vars with a warning and
+  // populates limits/timeouts from reviewloop.settings.json before anything
+  // resolves them, so every client gets the same values.
   applySettingsFile(process.env);
   const { agyCatalog, transportRuntime, customAgentSupport } = await resolveMcpStartupRuntimeInputs();
   const server = createReviewLoopMcpServer({

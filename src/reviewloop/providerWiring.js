@@ -40,6 +40,12 @@ import {
 } from './adapters/agyCustomAgentCapability.js';
 import { evidencePromptLines, normalizeContractText } from './contractEvidence.js';
 import { usesSupervisorPoolForReview } from './objective.js';
+import {
+  DEFAULT_REVIEW_CALL_TIMEOUT_MS,
+  MAX_REVIEW_CALL_TIMEOUT_MS,
+  REVIEW_CALL_TIMEOUT_ENV,
+  resolveReviewCallTimeoutMs,
+} from './settingsFile.js';
 
 export const ACTIVE_ROLE_POOLS = Object.freeze(Object.keys(DEFAULT_ROLE_POLICY));
 
@@ -187,26 +193,12 @@ function normalizeAgyQuotaRejection(err, verdict) {
   return normalized;
 }
 
-/**
- * ReviewLoop-specific wall-clock bound for AGY-backed Reviewer/Supervisor calls.
- *
- * The generic callAgy() client intentionally keeps its historical 120s default,
- * but ReviewLoop's primary Reviewer is agy:opus -> Claude Opus Thinking. Real
- * complex diff reviews can legitimately exceed 120s, so the controller needs a
- * wider bound without making provider calls unbounded.
- */
-export const DEFAULT_AGY_REVIEW_TIMEOUT_MS = 240_000;
-export const MAX_AGY_REVIEW_TIMEOUT_MS = 600_000;
-export const AGY_REVIEW_TIMEOUT_ENV = 'REVIEWLOOP_AGY_TIMEOUT_MS';
-
-export function resolveAgyReviewTimeoutMs(env = process.env) {
-  const raw = env?.[AGY_REVIEW_TIMEOUT_ENV];
-  const override = raw == null ? NaN : Number(raw);
-  if (Number.isFinite(override) && override > 0) {
-    return Math.min(override, MAX_AGY_REVIEW_TIMEOUT_MS);
-  }
-  return DEFAULT_AGY_REVIEW_TIMEOUT_MS;
-}
+export {
+  DEFAULT_REVIEW_CALL_TIMEOUT_MS,
+  MAX_REVIEW_CALL_TIMEOUT_MS,
+  REVIEW_CALL_TIMEOUT_ENV,
+  resolveReviewCallTimeoutMs,
+};
 export { narrowReviewTransportCwd, narrowAgyGeminiDir, detectAgyCustomAgentSupport };
 
 // Each pool family is one of exactly two things (no "looks like fallback,
@@ -420,7 +412,7 @@ export function createReviewLoopProviderPool({
   healthRevalidator = null,
   staleHealthTtlMs = 10 * 60 * 1000,
 } = {}) {
-  const agyReviewTimeoutMs = resolveAgyReviewTimeoutMs(env);
+  const reviewCallTimeoutMs = resolveReviewCallTimeoutMs(env);
 
   // Resolve every registered family to a concrete model (or null = provider
   // default) at construction. Stable family identity in, concrete version out —
@@ -496,7 +488,7 @@ export function createReviewLoopProviderPool({
           logFile: logFile ?? undefined,
           disableSlashCommands: true,
           agent: MINIMAL_AGY_AGENT_NAME,
-          timeoutMs: agyReviewTimeoutMs,
+          timeoutMs: reviewCallTimeoutMs,
           signal,
         });
       } catch (err) {
@@ -581,7 +573,9 @@ export function createReviewLoopProviderPool({
       concreteVersionPinnedByDefault: resolution[family].concreteVersionPinned,
     };
     if (available) {
-      transports[family] = CLI_TRANSPORT_FACTORY[family]({ model: modelForFamily[family] ?? null, env, spawn });
+      transports[family] = CLI_TRANSPORT_FACTORY[family]({
+        model: modelForFamily[family] ?? null, env, spawn, timeoutMs: reviewCallTimeoutMs,
+      });
     } else {
       providerHealth.record(family, 'UNAVAILABLE', runtimeStatus[family].reason, { reasonCode: 'CLI_RUNTIME_UNAVAILABLE' });
     }

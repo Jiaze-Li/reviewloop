@@ -123,9 +123,9 @@ session: it names the loop, the current phase, its exit criteria and
 verification commands, any blocking findings and the frozen contract, and tells
 the new Worker to continue the SAME loop. ReviewLoop still never starts a Worker.
 
-A gate whose deterministic Gate fails more than `REVIEWLOOP_MAX_GATE_REPAIRS`
-times (default 15) also stops for a human, so a flaky test or a wrong
-verification command cannot loop forever.
+A gate whose deterministic Gate fails more than `MAX_GATE_REPAIRS`
+times (configured in `reviewloop.settings.json`) also stops for a human, so a
+flaky test or a wrong verification command cannot loop forever.
 
 A gate that exhausts its automatic convergence budget stops the Worker
 (`HUMAN_REQUIRED`, `budgetExhausted`). A human can run

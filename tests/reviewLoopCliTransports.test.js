@@ -241,14 +241,14 @@ test('probeReviewTransportRuntime: missing CLI or local unauthenticated status i
 
 // ---- auth-probe timeout: slow-but-valid is NOT unavailable -------------
 
-test('resolveAuthProbeTimeoutMs: generous per-CLI default, env override, hard cap', () => {
-  assert.equal(resolveAuthProbeTimeoutMs('claude', {}), DEFAULT_AUTH_PROBE_TIMEOUT_MS.claude);
-  assert.ok(DEFAULT_AUTH_PROBE_TIMEOUT_MS.claude >= 20_000, 'claude cold start + auth status routinely exceeds the old 5s');
-  assert.equal(resolveAuthProbeTimeoutMs('codex', {}), DEFAULT_AUTH_PROBE_TIMEOUT_MS.codex);
-  assert.equal(resolveAuthProbeTimeoutMs('claude', { REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: '15000' }), 15_000);
+test('resolveAuthProbeTimeoutMs: unified default (25s), env override, hard cap', () => {
+  assert.equal(typeof DEFAULT_AUTH_PROBE_TIMEOUT_MS, 'number');
+  assert.equal(DEFAULT_AUTH_PROBE_TIMEOUT_MS, 25_000);
+  assert.equal(resolveAuthProbeTimeoutMs({}), DEFAULT_AUTH_PROBE_TIMEOUT_MS);
+  assert.equal(resolveAuthProbeTimeoutMs({ REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: '15000' }), 15_000);
   // never unbounded
-  assert.equal(resolveAuthProbeTimeoutMs('claude', { REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: '999999999' }), MAX_AUTH_PROBE_TIMEOUT_MS);
-  assert.equal(resolveAuthProbeTimeoutMs('claude', { REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: 'nonsense' }), DEFAULT_AUTH_PROBE_TIMEOUT_MS.claude);
+  assert.equal(resolveAuthProbeTimeoutMs({ REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: '999999999' }), MAX_AUTH_PROBE_TIMEOUT_MS);
+  assert.equal(resolveAuthProbeTimeoutMs({ REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS: 'nonsense' }), DEFAULT_AUTH_PROBE_TIMEOUT_MS);
 });
 
 test('probeReviewTransportRuntime: a slow-but-valid claude auth status stays AVAILABLE', async () => {

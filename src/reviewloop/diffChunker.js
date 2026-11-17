@@ -7,16 +7,12 @@
 // requires every chunk to have been reviewed successfully.
 
 import { createHash } from 'node:crypto';
+import { parsePositiveNumber, parsePositiveInt } from './settingsFile.js';
 
 export const DEFAULT_MAX_REVIEW_DIFF_CHARS = 45_000;
 export const DEFAULT_MAX_REVIEW_CHUNKS = 12;
 
 function sha256(v) { return createHash('sha256').update(String(v)).digest('hex'); }
-
-function num(env, key, fallback) {
-  const n = Number(env?.[key]);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
 
 // Split on `diff --git` file boundaries, then (if a single file is still too
 // big) on `@@` hunk boundaries, then on raw lines. Fully deterministic.
@@ -44,19 +40,18 @@ function splitOversizedUnit(unit, limit) {
   return out;
 }
 
-// The effective per-call character limit and chunk ceiling (env-tunable).
+// The effective per-call character limit and chunk ceiling.
 export function reviewDiffBudget(env = process.env) {
   return {
-    limit: num(env, 'REVIEWLOOP_MAX_REVIEW_DIFF_CHARS', DEFAULT_MAX_REVIEW_DIFF_CHARS),
-    maxChunks: num(env, 'REVIEWLOOP_MAX_REVIEW_CHUNKS', DEFAULT_MAX_REVIEW_CHUNKS),
+    limit: parsePositiveNumber(env?.REVIEWLOOP_MAX_REVIEW_DIFF_CHARS, DEFAULT_MAX_REVIEW_DIFF_CHARS),
+    maxChunks: parsePositiveInt(env?.REVIEWLOOP_MAX_REVIEW_CHUNKS, DEFAULT_MAX_REVIEW_CHUNKS),
   };
 }
 
 // Returns { chunks: [{ index, total, text, hash }], oversized: bool, reason? }.
 export function chunkDiffForReview(diff, { env = process.env } = {}) {
   const text = String(diff ?? '');
-  const limit = num(env, 'REVIEWLOOP_MAX_REVIEW_DIFF_CHARS', DEFAULT_MAX_REVIEW_DIFF_CHARS);
-  const maxChunks = num(env, 'REVIEWLOOP_MAX_REVIEW_CHUNKS', DEFAULT_MAX_REVIEW_CHUNKS);
+  const { limit, maxChunks } = reviewDiffBudget(env);
 
   if (text.length <= limit) {
     return {

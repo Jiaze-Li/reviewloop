@@ -175,8 +175,8 @@ test('5. single-call ceilings: a first-call Supervisor failure does NOT fall bac
   assert.equal(exitCode, 1);
   assert.equal(output.status, 'FAIL');
   assert.equal(agyCalls.length, 1, 'exactly one physical Supervisor attempt — no Codex fallback');
-  assert.equal(MODE_CEILINGS.supervisor.REVIEWLOOP_MAX_SUPERVISOR_CALLS, '1');
-  assert.equal(MODE_CEILINGS.reviewer.REVIEWLOOP_MAX_REVIEWER_CALLS, '1');
+  assert.equal(MODE_CEILINGS.supervisor.MAX_SUPERVISOR_CALLS, 1);
+  assert.equal(MODE_CEILINGS.reviewer.MAX_REVIEWER_CALLS, 1);
 });
 
 // ---- certification target isolation --------------------------------------

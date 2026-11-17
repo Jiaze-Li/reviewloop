@@ -559,22 +559,23 @@ SETTLED_KNOWN | UNRESOLVED`. Scoped to ReviewLoop-owned spend (Reviewer,
 Supervisor) for LOCAL sessions. Worker usage is reported as
 `external / not observable by ReviewLoop` — never as zero.
 
-Limits (`REVIEWLOOP_*`): `MAX_COST_USD`, `MAX_USAGE_VOLUME`,
-`MAX_REVIEW_ROUNDS`, `MAX_REVIEWER_CALLS`, `MAX_SUPERVISOR_CALLS`,
-`MAX_REVIEW_DIFF_CHARS`, `MAX_REVIEW_CHUNKS`, `MAX_SINGLE_CALL_USAGE`,
-`MAX_CONTEXT_OVERHEAD_TOKENS` (single-call Token Sentinel — see below).
-`REVIEWLOOP_MAX_GATE_REPAIRS` (deterministic Gate failures per gate, default 15; D36).
+Managed limits and timeouts (configured in `reviewloop.settings.json`; D45):
+- `MAX_COST_USD` (USD), `MAX_USAGE_VOLUME` (tokens), `MAX_REVIEW_ROUNDS` (rounds per gate), `MAX_REVIEWER_CALLS` (calls per gate), `MAX_SUPERVISOR_CALLS` (calls per gate)
+- `MAX_SINGLE_CALL_USAGE` (tokens, hard cap 250 000), `MAX_CONTEXT_OVERHEAD_TOKENS` (tokens, hard cap 200 000) — single-call Token Sentinel
+- `GATE_TIMEOUT_MS` (milliseconds), `MAX_GATE_REPAIRS` (deterministic Gate failures per gate; D36)
+- `MAX_REVIEW_DIFF_CHARS` (characters), `MAX_REVIEW_CHUNKS` (chunks)
+- `AUTH_PROBE_TIMEOUT_MS` (milliseconds, hard cap 60 000), `REVIEW_CALL_TIMEOUT_MS` (milliseconds, hard cap 600 000)
 
-**Shared settings file.** The limits above can also be set once in
-`reviewloop.settings.json` at the repo root (keys = the names above without the
-`REVIEWLOOP_` prefix, positive numbers only), so every MCP client that launches
-ReviewLoop (Claude Code, Antigravity, …) gets the same values with one edit.
-Precedence: explicit `REVIEWLOOP_*` env > settings file > code default. The
-file only fills env defaults at server start, so values still pass through the
-same resolver and hard caps; a missing file is fine, and a malformed file,
-unknown key or illegal value is ignored with a stderr warning. The path can be
-overridden with `REVIEWLOOP_SETTINGS_FILE`. The shipped file sets
-`MAX_SINGLE_CALL_USAGE` to 50 000 (code default remains 40 000).
+**Shared settings file.** `reviewloop.settings.json` at the repo root is the
+**only** source for all 13 managed limits and timeouts in production, so every
+MCP client that launches ReviewLoop (Claude Code, Antigravity, …) and every
+model family (AGY, Codex, Claude) gets the same values with one edit.
+At startup, `applySettingsFile` discards any legacy `REVIEWLOOP_<KEY>` env vars
+for managed keys with a stderr warning, then populates the env-shaped map from
+the file alone. Values still pass through the same validators and hard caps; a
+missing file falls back to built-in code defaults, and a malformed file,
+unknown key, or illegal value is ignored with a stderr warning. The file path
+can be overridden with `REVIEWLOOP_SETTINGS_FILE`.
 
 The aggregate budget (call counts, `usageVolume`, `costUsd`) is **durable** and
 keyed by `loopId`: it accumulates across every `reviewloop_review` round, the
@@ -597,13 +598,13 @@ After a physical Reviewer/Supervisor call whose usage settled **reliably**
 UNRESOLVED fail-closed path and is never guessed at), the Sentinel trips when
 either:
 
-- `usageVolume > REVIEWLOOP_MAX_SINGLE_CALL_USAGE` (code default **40 000**; shipped `reviewloop.settings.json` sets 50 000), or
-- a *known* `contextOverheadTokens > REVIEWLOOP_MAX_CONTEXT_OVERHEAD_TOKENS`
-  (default **30 000**).
+- `usageVolume > MAX_SINGLE_CALL_USAGE` (configured in `reviewloop.settings.json`), or
+- a *known* `contextOverheadTokens > MAX_CONTEXT_OVERHEAD_TOKENS`
+  (configured in `reviewloop.settings.json`).
 
-Both are env-overridable but clamped to `(0, hard-cap]`
+Both are clamped to `(0, hard-cap]`
 (`TOKEN_SENTINEL_HARD_CAPS` — 250 000 / 200 000): an illegal value (non-finite,
-`≤ 0`, unparseable) falls back to the default and can never *disable* the
+`≤ 0`, unparseable) falls back to the built-in code default and can never *disable* the
 protection, and no value can inflate the ceiling to infinity.
 
 On a trip:
@@ -690,7 +691,7 @@ without touching state; a stale/expired/dead-pid lock is reclaimed.
 **Gate FAIL is a repair cycle, not a Reviewer round**: a deterministic Gate
 FAIL increments `gateRepairCount`, never `round`, so Gate-repair loops never
 exhaust the objective's max fresh Reviewer rounds. Each Gate command has a
-deterministic timeout (`REVIEWLOOP_GATE_TIMEOUT_MS`) with whole-process-tree
+deterministic timeout (`GATE_TIMEOUT_MS` in `reviewloop.settings.json`) with whole-process-tree
 teardown.
 
 **Frozen verification plan**: `reviewloop_begin` resolves and freezes the Gate

@@ -48,6 +48,7 @@ import {
 } from '../src/reviewloop/providerWiring.js';
 import { probeAgyModelCatalog } from '../src/agy/agyModelCatalog.js';
 import { probeReviewTransportRuntime } from '../src/reviewloop/adapters/cliReviewTransports.js';
+import { applySettingsOverridesToEnv } from '../src/reviewloop/settingsFile.js';
 
 export const OPT_IN_ENV = 'REVIEWLOOP_LIVE_CERTIFY';
 export const VALID_MODES = Object.freeze(['reviewer', 'supervisor']);
@@ -55,14 +56,14 @@ export const VALID_MODES = Object.freeze(['reviewer', 'supervisor']);
 // Single-call ceilings — one physical certification call, never a failover chain.
 export const MODE_CEILINGS = Object.freeze({
   reviewer: Object.freeze({
-    REVIEWLOOP_MAX_REVIEWER_CALLS: '1',
-    REVIEWLOOP_MAX_USAGE_VOLUME: '30000',
-    REVIEWLOOP_MAX_REVIEW_ROUNDS: '1',
+    MAX_REVIEWER_CALLS: 1,
+    MAX_USAGE_VOLUME: 30000,
+    MAX_REVIEW_ROUNDS: 1,
   }),
   supervisor: Object.freeze({
-    REVIEWLOOP_MAX_SUPERVISOR_CALLS: '1',
-    REVIEWLOOP_MAX_USAGE_VOLUME: '20000',
-    REVIEWLOOP_MAX_REVIEWER_CALLS: '4',
+    MAX_SUPERVISOR_CALLS: 1,
+    MAX_USAGE_VOLUME: 20000,
+    MAX_REVIEWER_CALLS: 4,
   }),
 });
 
@@ -149,7 +150,7 @@ export async function runReviewerCertification({ env = process.env, deps = {} } 
   const failures = [];
 
   try {
-    const baseEnv = { ...env, ...MODE_CEILINGS.reviewer };
+    const { env: baseEnv } = applySettingsOverridesToEnv(env, MODE_CEILINGS.reviewer, { dir: runtimeRoot });
     const agyCatalog = d.probeAgyModelCatalog();
     const transportRuntime = await d.probeReviewTransportRuntime();
     const customAgentSupport = await d.detectAgyCustomAgentSupport();
@@ -269,7 +270,7 @@ export async function runSupervisorCertification({ env = process.env, deps = {} 
   const failures = [];
 
   try {
-    const baseEnv = { ...env, ...MODE_CEILINGS.supervisor };
+    const { env: baseEnv } = applySettingsOverridesToEnv(env, MODE_CEILINGS.supervisor, { dir: runtimeRoot });
     const agyCatalog = d.probeAgyModelCatalog();
     const transportRuntime = await d.probeReviewTransportRuntime();
     const customAgentSupport = await d.detectAgyCustomAgentSupport();
