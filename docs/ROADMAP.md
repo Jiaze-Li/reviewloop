@@ -1,7 +1,7 @@
 # ReviewLoop roadmap
 
 **Current scope (2026-10-11): LOCAL-only.** GitHub PR review is delegated to
-[claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).
+[review-bot](https://github.com/Jiaze-Li/review-bot).
 The dated sections below are historical implementation and certification notes,
 not current PR functionality. Deleted code is preserved in Git history.
 

@@ -4,7 +4,7 @@ ReviewLoop verifies **LOCAL coding-agent work**. The Worker writes code;
 ReviewLoop freezes the task contract and pre-edit baseline, runs the
 mechanical Gate, and controls independent Reviewer/Supervisor and bounded repair.
 
-**GitHub PR review is owned by [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot).**
+**GitHub PR review is owned by [review-bot](https://github.com/Jiaze-Li/review-bot).**
 ReviewLoop's PR mode is retired under [decision D37](docs/DECISIONS.md). Saved
 PR sessions remain on disk but cannot be resumed as LOCAL; start a new PR review
 through the bot.
@@ -164,7 +164,7 @@ zero-model `doctor` checks.
 ## GitHub PR handoff
 
 The Worker pushes code and creates the PR using ordinary GitHub operations.
-The independent [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot)
+The independent [review-bot](https://github.com/Jiaze-Li/review-bot)
 then owns PR discovery, finding validation, post-push verification, final audit
 and GitHub review state. ReviewLoop has no GH PR transport or merge operation.
 
