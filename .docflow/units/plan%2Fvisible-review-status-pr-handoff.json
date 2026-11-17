@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:15:53.484Z",
+  "updatedAt": "2026-11-17T04:16:09.909Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
     "current": "Show a saved review record with every result and add a PR handoff check",
-    "next": "设计已通过审查，等你确认后再开始实施（Code）",
+    "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
     "history": [
       {
         "at": "2026-11-17T12:00:14+08:00",
