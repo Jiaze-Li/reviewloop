@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T09:17:45.392Z",
+  "updatedAt": "2026-11-17T11:39:54.636Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -8,15 +8,26 @@
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
-    "current": "Read review limits from one shared settings file so every client gets the same values",
+    "current": "Add the approved design for one shared settings source covering limits and timeouts",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-17T19:39:41+08:00",
+        "text": "Read review limits from one shared settings file so every client gets the same values"
+      }
+    ],
     "commits": [
       {
         "sha": "1571ea6a327c9c30b8cf1e9908dbdc55a83d719c",
         "branch": "feat/shared-settings-file",
         "timestamp": "2026-11-17T17:17:34+08:00",
         "message": "Read review limits from one shared settings file so every client gets the same values"
+      },
+      {
+        "sha": "e371ff24e509d92af4cc4115a1baee89a1355d64",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T19:39:41+08:00",
+        "message": "Add the approved design for one shared settings source covering limits and timeouts"
       }
     ],
     "pr": null,
