@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-17T09:17:45.392Z",
+  "task": {
+    "id": "feat/shared-settings-file",
+    "branch": "feat/shared-settings-file",
+    "title": "feat/shared-settings-file",
+    "task": "Development branch: feat/shared-settings-file",
+    "started": "2026-11-17T17:17:34+08:00",
+    "status": "In progress",
+    "current": "Read review limits from one shared settings file so every client gets the same values",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "1571ea6a327c9c30b8cf1e9908dbdc55a83d719c",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T17:17:34+08:00",
+        "message": "Read review limits from one shared settings file so every client gets the same values"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
