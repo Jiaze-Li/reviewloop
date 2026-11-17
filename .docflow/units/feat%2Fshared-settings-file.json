@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T12:08:37.596Z",
+  "updatedAt": "2026-11-17T12:55:56.367Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
     "title": "feat/shared-settings-file",
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Update D36 to reference MAX_GATE_REPAIRS and D45 instead of removed env knob",
     "next": "等 PR 50 的自动检查与评审完成后，由用户验收并决定是否合并",
     "history": [
@@ -72,13 +72,15 @@
     ],
     "pr": {
       "number": 50,
-      "state": "open",
+      "state": "closed",
       "title": "One shared settings file for review limits and timeouts",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/50",
-      "merged": false,
-      "updatedAt": "2026-11-17T12:08:25Z"
+      "merged": true,
+      "mergedAt": "2026-11-17T12:55:36Z",
+      "closedAt": "2026-11-17T12:55:36Z",
+      "updatedAt": "2026-11-17T12:55:36Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-17T12:55:36Z",
+    "outcome": "Merged"
   }
 }
