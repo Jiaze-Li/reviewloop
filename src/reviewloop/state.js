@@ -113,7 +113,10 @@ export function initialLoopState(objective) {
   };
 }
 
-export function recordTransition(loopState, to, reason) {
+// `meta.source` (optional) tags transitions that did not come from a Reviewer
+// decision (e.g. 'non-reviewer' for Gate repairs / human reopen) so the review
+// record never counts them as Reviewer rounds.
+export function recordTransition(loopState, to, reason, meta = null) {
   const from = loopState.state;
   if (from === to) {
     loopState.updatedAt = new Date().toISOString();
@@ -126,7 +129,10 @@ export function recordTransition(loopState, to, reason) {
   loopState.updatedAt = new Date().toISOString();
   loopState.history = [
     ...(loopState.history ?? []),
-    { from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt },
+    {
+      from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt,
+      ...(meta?.source ? { source: meta.source } : {}),
+    },
   ];
   return loopState;
 }

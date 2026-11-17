@@ -10,7 +10,8 @@ const INCOMPLETE = '记录不完整';
 // REWORK entries written by the controller for non-Reviewer reasons (Gate
 // repair loops, human reopen/override). They are real transitions but not
 // independent Reviewer rounds, so they are labelled apart and never counted
-// as one. Matched by the reason prefixes the controller writes.
+// as one. The controller tags them (`source: 'non-reviewer'`); older history
+// without the tag falls back to the reason prefixes the controller writes.
 const NON_REVIEWER_REWORK = [
   [/^(gate regression|verification plan drift)/, 'Gate修复'],
   [/^human (reopen|budget override)/, '人工重开'],
@@ -22,6 +23,7 @@ function entryLabel(e) {
     const reason = typeof e.reason === 'string' ? e.reason : '';
     const hit = NON_REVIEWER_REWORK.find(([re]) => re.test(reason));
     if (hit) return { label: hit[1], reviewer: false };
+    if (e.source === 'non-reviewer') return { label: '非审查返工', reviewer: false };
   }
   if (RESULT_TO.has(e.to)) return { label: e.to, reviewer: true };
   return null;
