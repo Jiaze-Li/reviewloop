@@ -37,8 +37,10 @@ export function run(argv, ghRead = defaultGh) {
   const pr = args.shift();
   let stage;
   const i = args.indexOf('--stage');
-  if (i >= 0) stage = args[i + 1];
-  if (!pr || !/^\d+$/.test(pr) || (stage !== undefined && !STAGES.includes(stage))) {
+  // A present-but-valueless --stage must fail, never silently skip the check.
+  const stageGiven = i >= 0;
+  if (stageGiven) stage = args[i + 1];
+  if (!pr || !/^\d+$/.test(pr) || (stageGiven && !STAGES.includes(stage))) {
     return { code: 2, out: '用法: check-pr-handoff.js <PR号> [--stage plan|design|code]' };
   }
   let data;

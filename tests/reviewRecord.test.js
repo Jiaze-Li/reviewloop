@@ -69,3 +69,17 @@ test('handoff check: unreadable PR or bad args never reports success', () => {
   assert.equal(run(['x']).code, 2);
   assert.equal(run(['5', '--stage', 'nope']).code, 2);
 });
+
+test('Gate repair / human reopen REWORK entries are not counted as Reviewer rounds', () => {
+  const gate = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'gate regression' };
+  const drift = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'verification plan drift' };
+  const human = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'human reopen: x' };
+  const r = buildReviewRecord(loop('PASS', [gate, drift, human, h('REWORK', 1), h('PASS', 2)]), { status: 'PASS' });
+  assert.match(r, /Gate修复 → Gate修复 → 人工重开 → 第1轮 REWORK → 第2轮 PASS \| 终态 PASS/);
+  const only = buildReviewRecord(loop('REWORK', [gate]), { status: 'REWORK' });
+  assert.doesNotMatch(only, /第\d+轮 REWORK/); assert.match(only, /本次结果 REWORK 未写入历史/);
+});
+
+test('handoff check: --stage without a value is a usage error, never a pass', () => {
+  assert.equal(run(['5', '--stage'], gh({ headRefOid: SHA, body: body() })).code, 2);
+});
