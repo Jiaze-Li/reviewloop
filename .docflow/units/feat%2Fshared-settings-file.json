@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T11:56:27.801Z",
+  "updatedAt": "2026-11-17T12:00:49.065Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
-    "current": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present",
+    "current": "Remove numeric hard caps from ARCHITECTURE.md and enforce in grep gate",
     "next": "等 PR 50 的自动检查与评审完成后，由用户验收并决定是否合并",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-17T19:56:03+08:00",
         "text": "Unify all 13 managed limits and timeouts in reviewloop.settings.json"
+      },
+      {
+        "at": "2026-11-17T20:00:35+08:00",
+        "text": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "feat/shared-settings-file",
         "timestamp": "2026-11-17T19:56:03+08:00",
         "message": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present"
+      },
+      {
+        "sha": "e73c7531c8ec0fb7bcc5bd8dca26c24655218677",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T20:00:35+08:00",
+        "message": "Remove numeric hard caps from ARCHITECTURE.md and enforce in grep gate"
       }
     ],
     "pr": {
