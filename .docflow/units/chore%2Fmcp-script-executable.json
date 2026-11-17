@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T03:53:50.788Z",
+  "updatedAt": "2026-11-17T03:53:59.276Z",
   "task": {
     "id": "chore/mcp-script-executable",
     "branch": "chore/mcp-script-executable",
@@ -19,7 +19,14 @@
         "message": "Make the MCP launcher script executable like the other bin scripts"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 49,
+      "state": "open",
+      "title": "Make the MCP launcher script executable like the other bin scripts",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/49",
+      "merged": false,
+      "updatedAt": "2026-11-17T03:53:49Z"
+    },
     "completed": null,
     "outcome": null
   }
