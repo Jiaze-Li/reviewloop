@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:25:09.758Z",
+  "updatedAt": "2026-11-17T04:33:14.138Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/visible-review-status-pr-handoff",
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
-    "current": "Tag non-Reviewer REWORK transitions so the review record never counts them as rounds",
+    "current": "List recorded outcomes without guessing round types and require real handoff section headings",
     "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
     "history": [
       {
@@ -26,6 +26,14 @@
       {
         "at": "2026-11-17T12:24:57+08:00",
         "text": "Fail on a valueless --stage and keep Gate repair loops out of review rounds"
+      },
+      {
+        "at": "2026-11-17T12:32:24+08:00",
+        "text": "Tag non-Reviewer REWORK transitions so the review record never counts them as rounds"
+      },
+      {
+        "at": "2026-11-17T12:33:05+08:00",
+        "text": "Revert \"Tag non-Reviewer REWORK transitions so the review record never counts them as rounds\""
       }
     ],
     "commits": [
@@ -58,6 +66,18 @@
         "branch": "plan/visible-review-status-pr-handoff",
         "timestamp": "2026-11-17T12:24:57+08:00",
         "message": "Tag non-Reviewer REWORK transitions so the review record never counts them as rounds"
+      },
+      {
+        "sha": "2ef9b78a8411e893413b40ede6896303004766fe",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:32:24+08:00",
+        "message": "Revert \"Tag non-Reviewer REWORK transitions so the review record never counts them as rounds\""
+      },
+      {
+        "sha": "d2ae44f6045e7ed9850121a5799b05b65531c7ac",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:33:05+08:00",
+        "message": "List recorded outcomes without guessing round types and require real handoff section headings"
       }
     ],
     "pr": {
