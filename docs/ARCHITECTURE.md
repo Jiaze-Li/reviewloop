@@ -1,6 +1,6 @@
 # ReviewLoop architecture
 
-LOCAL-only architecture as of 2026-10-11. [claude-review-bot](https://github.com/Jiaze-Li/claude-review-bot)
+LOCAL-only architecture as of 2026-10-11. [review-bot](https://github.com/Jiaze-Li/review-bot)
 owns PR code review, while GitHub CI owns post-push tests.
 
 The Worker owns code changes, commits and PR creation. ReviewLoop owns local
