@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T12:00:51.162Z",
+  "updatedAt": "2026-11-17T12:08:33.936Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
-    "current": "Remove numeric hard caps from ARCHITECTURE.md and enforce in grep gate",
+    "current": "Update D36 to reference MAX_GATE_REPAIRS and D45 instead of removed env knob",
     "next": "等 PR 50 的自动检查与评审完成后，由用户验收并决定是否合并",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-17T20:00:35+08:00",
         "text": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present"
+      },
+      {
+        "at": "2026-11-17T20:08:22+08:00",
+        "text": "Remove numeric hard caps from ARCHITECTURE.md and enforce in grep gate"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "feat/shared-settings-file",
         "timestamp": "2026-11-17T20:00:35+08:00",
         "message": "Remove numeric hard caps from ARCHITECTURE.md and enforce in grep gate"
+      },
+      {
+        "sha": "4ba1c45659bb78395d9362cc7e604e9553f75308",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T20:08:22+08:00",
+        "message": "Update D36 to reference MAX_GATE_REPAIRS and D45 instead of removed env knob"
       }
     ],
     "pr": {
