@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:21:58.346Z",
+  "updatedAt": "2026-11-17T04:25:06.702Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/visible-review-status-pr-handoff",
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
-    "current": "Fail on a valueless --stage and keep Gate repair loops out of review rounds",
+    "current": "Tag non-Reviewer REWORK transitions so the review record never counts them as rounds",
     "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-17T12:21:47+08:00",
         "text": "Show a saved review record with every result and add a PR handoff check"
+      },
+      {
+        "at": "2026-11-17T12:24:57+08:00",
+        "text": "Fail on a valueless --stage and keep Gate repair loops out of review rounds"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/visible-review-status-pr-handoff",
         "timestamp": "2026-11-17T12:21:47+08:00",
         "message": "Fail on a valueless --stage and keep Gate repair loops out of review rounds"
+      },
+      {
+        "sha": "9a39c097fd555fd13129658e4585a8a152908970",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:24:57+08:00",
+        "message": "Tag non-Reviewer REWORK transitions so the review record never counts them as rounds"
       }
     ],
     "pr": {
