@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:15:49.175Z",
+  "updatedAt": "2026-11-17T04:15:53.484Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -46,7 +46,7 @@
       "title": "Plan: make ReviewLoop rounds visible and PR handoff reliable",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/47",
       "merged": false,
-      "updatedAt": "2026-11-17T04:00:17Z"
+      "updatedAt": "2026-11-17T04:15:40Z"
     },
     "completed": null,
     "outcome": null
