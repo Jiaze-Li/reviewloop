@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
+import { buildReviewRecord } from './reviewRecord.js';
 import {
   createDesignTwoStageRunner, decideDesignTransition, finalizePassComment, initialDesignTwoStageState, DESIGN_LIMITS,
 } from './designTwoStage.js';
@@ -469,10 +470,18 @@ export function createReviewLoopController({
   async function withStatusLine(loopId, result) {
     if (!result || typeof result !== 'object') return result;
     let taskType = 'code';
-    try { taskType = (await loadLoop(loopId)).objective?.taskType ?? 'code'; } catch { /* keep default */ }
+    let reviewRecord;
+    try {
+      const loaded = await loadLoop(loopId);
+      taskType = loaded.objective?.taskType ?? 'code';
+      reviewRecord = buildReviewRecord(loaded, result);
+    } catch {
+      reviewRecord = buildReviewRecord(null, { ...result, loopId });
+    }
     return {
       ...result,
       statusLine: reviewStatusLine({ taskType, loopId, round: result.round, status: result.status }),
+      reviewRecord,
     };
   }
 
