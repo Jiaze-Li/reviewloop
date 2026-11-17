@@ -565,6 +565,17 @@ Limits (`REVIEWLOOP_*`): `MAX_COST_USD`, `MAX_USAGE_VOLUME`,
 `MAX_CONTEXT_OVERHEAD_TOKENS` (single-call Token Sentinel — see below).
 `REVIEWLOOP_MAX_GATE_REPAIRS` (deterministic Gate failures per gate, default 15; D36).
 
+**Shared settings file.** The limits above can also be set once in
+`reviewloop.settings.json` at the repo root (keys = the names above without the
+`REVIEWLOOP_` prefix, positive numbers only), so every MCP client that launches
+ReviewLoop (Claude Code, Antigravity, …) gets the same values with one edit.
+Precedence: explicit `REVIEWLOOP_*` env > settings file > code default. The
+file only fills env defaults at server start, so values still pass through the
+same resolver and hard caps; a missing file is fine, and a malformed file,
+unknown key or illegal value is ignored with a stderr warning. The path can be
+overridden with `REVIEWLOOP_SETTINGS_FILE`. The shipped file sets
+`MAX_SINGLE_CALL_USAGE` to 50 000 (code default remains 40 000).
+
 The aggregate budget (call counts, `usageVolume`, `costUsd`) is **durable** and
 keyed by `loopId`: it accumulates across every `reviewloop_review` round, the
 Supervisor call, and a process restart. A crash after provider settlement
@@ -586,7 +597,7 @@ After a physical Reviewer/Supervisor call whose usage settled **reliably**
 UNRESOLVED fail-closed path and is never guessed at), the Sentinel trips when
 either:
 
-- `usageVolume > REVIEWLOOP_MAX_SINGLE_CALL_USAGE` (default **40 000**), or
+- `usageVolume > REVIEWLOOP_MAX_SINGLE_CALL_USAGE` (code default **40 000**; shipped `reviewloop.settings.json` sets 50 000), or
 - a *known* `contextOverheadTokens > REVIEWLOOP_MAX_CONTEXT_OVERHEAD_TOKENS`
   (default **30 000**).
 
