@@ -28,9 +28,14 @@ import { beginStatusLine } from '../reviewloop/statusLine.js';
 // `structuredContent`.
 export function toolResultContent(result) {
   const json = { type: 'text', text: JSON.stringify(result, null, 2) };
-  return typeof result?.statusLine === 'string' && result.statusLine
-    ? [{ type: 'text', text: result.statusLine }, json]
-    : [json];
+  if (!(typeof result?.statusLine === 'string' && result.statusLine)) return [json];
+  const blocks = [{ type: 'text', text: result.statusLine }, json];
+  // Appended AFTER the JSON block so index 0 (statusLine) and index 1 (JSON)
+  // stay exactly as older clients/tests expect.
+  if (typeof result.reviewRecord === 'string' && result.reviewRecord) {
+    blocks.push({ type: 'text', text: result.reviewRecord });
+  }
+  return blocks;
 }
 
 // MCP progress may only use the token the client sent with this request
@@ -204,6 +209,7 @@ export function createReviewLoopMcpServer({
         status: z.string(),
         loopId: z.string(),
         statusLine: z.string().optional().describe('fixed one-line status; show it to the user verbatim'),
+        reviewRecord: z.string().optional().describe('read-only record of recorded review results from persisted history; include it in the final reply when the loop ends'),
         round: z.number().optional(),
         gateRound: z.number().optional(),
         // Diagnostics the controller emits on REWORK / PASS / HUMAN_REQUIRED /

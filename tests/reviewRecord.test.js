@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { buildReviewRecord } from '../src/reviewloop/reviewRecord.js';
+import { run, checkHandoff } from '../scripts/check-pr-handoff.js';
+import { toolResultContent } from '../src/mcp/reviewloopMcpServer.js';
+
+const h = (to, round, from = 'REVIEWING') => ({ from, to, round });
+const loop = (state, history, taskType = 'design') => ({ loopId: 'rl-1', state, objective: { taskType }, history });
+
+test('REWORK -> REWORK -> PASS is listed in order with terminal PASS', () => {
+  const r = buildReviewRecord(loop('PASS', [h('REVIEWING', 0, 'READY_FOR_WORK'), h('REWORK', 1), h('REVIEWING', 1, 'REWORK'), h('REWORK', 2), h('REVIEWING', 2, 'REWORK'), h('PASS', 3)]), { status: 'PASS' });
+  assert.equal(r, '[ReviewLoop 记录 | design | loopId=rl-1 | 第1轮 REWORK → 第2轮 REWORK → 第3轮 PASS | 终态 PASS]');
+});
+
+test('HUMAN_REQUIRED then re-review then PASS (real sample shape)', () => {
+  const r = buildReviewRecord(loop('PASS', [h('REVIEWING', 0, 'READY_FOR_WORK'), h('HUMAN_REQUIRED', 1), h('REVIEWING', 1, 'HUMAN_REQUIRED'), h('PASS', 2)]), { status: 'PASS' });
+  assert.match(r, /第1轮 HUMAN_REQUIRED → 第2轮 PASS \| 终态 PASS/);
+});
+
+test('HUMAN_REQUIRED and FAILED are never shown as PASS', () => {
+  const a = buildReviewRecord(loop('HUMAN_REQUIRED', [h('HUMAN_REQUIRED', 1)]), { status: 'HUMAN_REQUIRED' });
+  assert.match(a, /终态 HUMAN_REQUIRED/); assert.doesNotMatch(a, /PASS/);
+  const b = buildReviewRecord(loop('FAILED', [h('FAILED', 1)]), { status: 'FAILED' });
+  assert.match(b, /终态 FAILED/); assert.doesNotMatch(b, /PASS/);
+});
+
+test('PHASE_PASS is labelled and the loop is not terminal', () => {
+  const r = buildReviewRecord(loop('READY_FOR_WORK', [h('READY_FOR_WORK', 1)]), { status: 'PHASE_PASS' });
+  assert.match(r, /第1轮 PHASE_PASS \| 当前 READY_FOR_WORK（未结束）/);
+});
+
+test('status not present in history is flagged, not invented', () => {
+  const r = buildReviewRecord(loop('REWORK', [h('REWORK', 1)]), { status: 'NO_PROGRESS' });
+  assert.match(r, /本次结果 NO_PROGRESS 未写入历史/);
+});
+
+test('missing / corrupt history says 记录不完整 and never PASS', () => {
+  assert.match(buildReviewRecord(loop('PASS', undefined), { status: 'PASS' }), /记录不完整/);
+  assert.match(buildReviewRecord(null, { loopId: 'x', status: 'PASS' }), /记录不完整/);
+  assert.match(buildReviewRecord(loop('REWORK', [null, { to: 5 }, h('REWORK', 1)]), { status: 'REWORK' }), /记录不完整: 有损坏/);
+});
+
+test('record is a third block; statusLine and JSON keep positions 0 and 1', () => {
+  const c = toolResultContent({ status: 'REWORK', statusLine: 'S', reviewRecord: 'R' });
+  assert.deepEqual(c.map((b) => b.text === 'S' || b.text === 'R'), [true, false, true]);
+  assert.equal(c[0].text, 'S'); assert.equal(JSON.parse(c[1].text).status, 'REWORK'); assert.equal(c[2].text, 'R');
+});
+
+const SHA = 'a'.repeat(40);
+const body = (sha = SHA, stage = 'code') => `<!-- reviewloop-handoff head=${sha} stage=${stage} loop=rl-1 -->\n做了什么: x\n验收清单: y\n已验证: z\n风险: w`;
+const gh = (d) => () => d;
+
+test('handoff check: good sample passes with the not-a-review-PASS wording', () => {
+  const r = run(['5', '--stage', 'code'], gh({ headRefOid: SHA, body: body() }));
+  assert.equal(r.code, 0); assert.match(r.out, /不代表审查 PASS/);
+});
+
+test('handoff check: marker, HEAD, stage and section failures are non-zero', () => {
+  assert.equal(run(['5'], gh({ headRefOid: SHA, body: '做了什么 验收清单 已验证 风险' })).code, 1);
+  assert.match(run(['5'], gh({ headRefOid: 'b'.repeat(40), body: body() })).out, /不是 PR 当前 HEAD/);
+  assert.match(run(['5', '--stage', 'design'], gh({ headRefOid: SHA, body: body() })).out, /阶段 code 与要求的 design 不符/);
+  assert.match(run(['5'], gh({ headRefOid: SHA, body: body().replace('风险: w', '') })).out, /缺少「风险」/);
+  assert.match(checkHandoff({ headRefOid: SHA, body: null }).join(), /缺少 reviewloop-handoff/);
+});
+
+test('handoff check: unreadable PR or bad args never reports success', () => {
+  const boom = () => { throw new Error('no gh'); };
+  const r = run(['5'], boom); assert.equal(r.code, 3); assert.match(r.out, /无法核实/);
+  assert.equal(run(['x']).code, 2);
+  assert.equal(run(['5', '--stage', 'nope']).code, 2);
+});
