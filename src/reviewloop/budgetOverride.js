@@ -198,7 +198,7 @@ export async function overrideLoopBudget({
 
       if (canRestore) {
         recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human budget override: ${reason}`);
-        recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human budget override: ${reason}`, { source: 'non-reviewer' });
+        recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human budget override: ${reason}`);
         loop.budgetExhausted = false;
         stateRestored = true;
       }

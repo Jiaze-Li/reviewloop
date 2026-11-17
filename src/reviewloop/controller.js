@@ -201,7 +201,7 @@ export function createReviewLoopController({
   }
 
   async function evidenceRework({ loopState, gate, head = null, reason, missing = [], receipt = null }) {
-    recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason, { source: 'non-reviewer' });
+    recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, reason);
     await saveLoop(loopState);
     return {
       ...compactReworkPayload({
@@ -771,7 +771,7 @@ export function createReviewLoopController({
       loopState.gateRepairCount = (loopState.gateRepairCount ?? 0) + 1;
       const driftStop = await stopIfGateRepairsExhausted(loopState);
       if (driftStop) return driftStop;
-      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift', { source: 'non-reviewer' });
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'verification plan drift');
       await saveLoop(loopState);
       return {
         ...compactReworkPayload({
@@ -987,7 +987,7 @@ export function createReviewLoopController({
       if (gateStop) return gateStop;
       loopState.lastReviewedFingerprint = gateFp;
       loopState.lastGateFingerprint = gate.fingerprint;
-      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression', { source: 'non-reviewer' });
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, 'gate regression');
       await saveLoop(loopState);
       return {
         ...compactReworkPayload({ loopState, review: { blockingFindings: [], nonBlockingFindings: [], nonBlockingOmitted: 0 }, gate }),

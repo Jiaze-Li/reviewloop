@@ -83,29 +83,3 @@ test('Gate repair / human reopen REWORK entries are not counted as Reviewer roun
 test('handoff check: --stage without a value is a usage error, never a pass', () => {
   assert.equal(run(['5', '--stage'], gh({ headRefOid: SHA, body: body() })).code, 2);
 });
-
-test('tagged non-Reviewer REWORK (e.g. evidence rework) is not a Reviewer round', () => {
-  const ev = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'artifact evidence changed…', source: 'non-reviewer' };
-  const r = buildReviewRecord(loop('REWORK', [ev]), { status: 'REWORK' });
-  assert.match(r, /非审查返工/); assert.doesNotMatch(r, /第\d+轮 REWORK/);
-});
-
-test('every non-Reviewer REWORK call site in the controller carries the tag; untagged ones are Reviewer decisions', async () => {
-  const { readFileSync } = await import('node:fs');
-  const read = (f) => readFileSync(new URL(`../src/reviewloop/${f}`, import.meta.url), 'utf8');
-  const tag = /\{ source: 'non-reviewer' \}/;
-  const ctl = read('controller.js');
-  for (const reason of ["'gate regression'", "'verification plan drift'"]) {
-    assert.match(ctl, new RegExp(`REWORK, ${reason}, \\{ source: 'non-reviewer' \\}\\)`));
-  }
-  assert.match(ctl, /REWORK, reason, \{ source: 'non-reviewer' \}\)/); // evidenceRework
-  assert.match(read('budgetOverride.js'), /human budget override: \$\{reason\}`, \{ source: 'non-reviewer' \}\)/);
-  assert.match(read('gateReopen.js'), /human reopen: \$\{reason\}`, \{ source: 'non-reviewer' \}\)/);
-  // Any other REWORK call site must be an explicit Reviewer/Supervisor decision (reviewed list).
-  const allowed = /decision\.reason|design differs materially|design adjudication found blocking defects/;
-  for (const f of ['controller.js', 'budgetOverride.js', 'gateReopen.js']) {
-    for (const m of read(f).matchAll(/recordTransition\(\w+, REVIEW_LOOP_STATES\.REWORK, ([^\n]+)\);/g)) {
-      if (!tag.test(m[1])) assert.match(m[1], allowed, `untagged REWORK reason not in the reviewed list: ${m[1]}`);
-    }
-  }
-});

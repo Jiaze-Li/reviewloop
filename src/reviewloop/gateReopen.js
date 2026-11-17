@@ -34,7 +34,7 @@ export async function reopenExhaustedGate({ persistence, loopId, reason, now = (
   const at = now().toISOString();
   // HUMAN_REQUIRED -> REVIEWING -> REWORK is the only legal path back.
   recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human reopen: ${reason}`);
-  recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human reopen: ${reason}`, { source: 'non-reviewer' });
+  recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human reopen: ${reason}`);
   Object.assign(loop, {
     budgetExhausted: false,
     gateRound: 0,
