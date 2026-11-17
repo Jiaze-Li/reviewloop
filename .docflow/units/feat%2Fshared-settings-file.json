@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T11:39:54.636Z",
+  "updatedAt": "2026-11-17T11:40:05.670Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
     "current": "Add the approved design for one shared settings source covering limits and timeouts",
-    "next": "",
+    "next": "在新对话里按已通过的设计写代码，把所有参数统一到一个设置文件并清理旧设置",
     "history": [
       {
         "at": "2026-11-17T19:39:41+08:00",
