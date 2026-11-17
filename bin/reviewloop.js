@@ -15,7 +15,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
-import { runDoctor } from '../scripts/doctor.js';
+import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
@@ -26,6 +26,7 @@ import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenPr
 import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInspect.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
+import { applySettingsFile } from '../src/reviewloop/settingsFile.js';
 
 async function listSessions() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
@@ -113,7 +114,7 @@ async function reopenGate(rest) {
     console.log('Gate reopened with a fresh convergence budget.');
     console.log(`  loop: ${result.loopId}  (human reopen ${result.reopens})`);
     console.log('  kept: objective, baseline, completed phases, model spend, call ceilings');
-    console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; raise REVIEWLOOP_MAX_REVIEWER_CALLS / REVIEWLOOP_MAX_SUPERVISOR_CALLS if they are the limit');
+    console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; raise MAX_REVIEWER_CALLS / MAX_SUPERVISOR_CALLS in reviewloop.settings.json if they are the limit');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
   } finally {
     await lease.release();
@@ -239,10 +240,12 @@ async function resume(rest) {
 }
 
 async function main() {
+  const legacyEnv = checkLegacyManagedEnv(process.env);
+  applySettingsFile(process.env);
   const [command, ...rest] = process.argv.slice(2);
   switch (command) {
     case 'doctor': {
-      const report = runDoctor();
+      const report = runDoctor({ legacyEnv });
       process.exit(report.ok ? 0 : 1);
       break;
     }

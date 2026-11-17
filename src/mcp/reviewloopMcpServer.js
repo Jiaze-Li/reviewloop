@@ -21,6 +21,7 @@ import { probeAgyModelCatalog } from '../agy/agyModelCatalog.js';
 import { createAgyQuotaPreflight } from '../agy/agyQuotaProbe.js';
 import { probeReviewTransportRuntime } from '../reviewloop/adapters/cliReviewTransports.js';
 import { beginStatusLine } from '../reviewloop/statusLine.js';
+import { applySettingsFile } from '../reviewloop/settingsFile.js';
 
 // The statusLine is its own first text block, so the person sees it in the
 // tool-call preview even when the Worker does not repeat it. The JSON block
@@ -308,6 +309,10 @@ export async function resolveMcpStartupRuntimeInputs({
 }
 
 export async function startReviewLoopMcpServer(options = {}) {
+  // Shared settings file: discards legacy managed env vars with a warning and
+  // populates limits/timeouts from reviewloop.settings.json before anything
+  // resolves them, so every client gets the same values.
+  applySettingsFile(process.env);
   const { agyCatalog, transportRuntime, customAgentSupport } = await resolveMcpStartupRuntimeInputs();
   const server = createReviewLoopMcpServer({
     agyCatalog, transportRuntime, customAgentSupport, ...options,

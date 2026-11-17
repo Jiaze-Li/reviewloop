@@ -28,38 +28,31 @@ import path from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { narrowReviewTransportCwd } from './scratchCwd.js';
 import { runBoundedCli, classifyCliFailure, CliTransportError, CLI_FAILURE, probeCli } from './boundedCli.js';
+import {
+  MANAGED_SETTINGS_KEYS,
+  parseBoundedNumber,
+  resolveReviewCallTimeoutMs,
+} from '../settingsFile.js';
 
-// Wall-clock bound for the zero-token local auth preflight, per executable.
-//
-// The old flat 5s bound produced a FALSE "auth probe timed out" -> UNAVAILABLE
-// for `claude`: Claude Code is a heavy Node CLI whose cold start plus
-// `claude auth status` (keychain read, config load) routinely runs past 5s on a
-// perfectly authenticated machine, while `codex login status` is a fast native
-// binary. Widen the bound so a merely-slow-but-valid probe is NOT mistaken for a
-// missing account — without ever waiting unbounded (still capped, still
-// fail-closed: a real timeout, a non-zero exit, or a spawn error are all still
-// UNAVAILABLE).
-export const DEFAULT_AUTH_PROBE_TIMEOUT_MS = Object.freeze({
-  codex: 10_000,
-  claude: 25_000,
-});
-const FALLBACK_AUTH_PROBE_TIMEOUT_MS = 10_000;
+// Unified wall-clock bound for the zero-token local auth preflight across all
+// CLI executables (codex, claude). The 25s value covers Claude Code's heavy
+// Node cold start + `claude auth status`, without ever waiting unbounded.
+export const DEFAULT_AUTH_PROBE_TIMEOUT_MS = 25_000;
 export const MAX_AUTH_PROBE_TIMEOUT_MS = 60_000;
-export const AUTH_PROBE_TIMEOUT_ENV = 'REVIEWLOOP_AUTH_PROBE_TIMEOUT_MS';
+export const AUTH_PROBE_TIMEOUT_ENV = MANAGED_SETTINGS_KEYS.AUTH_PROBE_TIMEOUT_MS;
 
-export function resolveAuthProbeTimeoutMs(executable, env = process.env) {
-  const raw = env?.[AUTH_PROBE_TIMEOUT_ENV];
-  const override = raw == null ? NaN : Number(raw);
-  if (Number.isFinite(override) && override > 0) {
-    return Math.min(override, MAX_AUTH_PROBE_TIMEOUT_MS);
-  }
-  return DEFAULT_AUTH_PROBE_TIMEOUT_MS[executable] ?? FALLBACK_AUTH_PROBE_TIMEOUT_MS;
+export function resolveAuthProbeTimeoutMs(env = process.env) {
+  return parseBoundedNumber(
+    env?.[AUTH_PROBE_TIMEOUT_ENV],
+    DEFAULT_AUTH_PROBE_TIMEOUT_MS,
+    MAX_AUTH_PROBE_TIMEOUT_MS,
+  );
 }
 
 async function probeAuthenticatedCli(executable, authArgs, { spawn, env = process.env, timeoutMs } = {}) {
   const bound = Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
-    : resolveAuthProbeTimeoutMs(executable, env);
+    : resolveAuthProbeTimeoutMs(env);
   const version = await probeCli(executable, { spawn, timeoutMs: bound });
   if (!version.available) return version;
 
@@ -84,8 +77,6 @@ export async function probeReviewTransportRuntime({ spawn, env = process.env } =
   return { 'codex:default': codex, 'claude:opus': claude };
 }
 
-export const DEFAULT_CLI_TRANSPORT_TIMEOUT_MS = 180_000;
-
 function firstNumber(...vals) {
   for (const v of vals) if (Number.isFinite(v)) return v;
   return undefined;
@@ -104,7 +95,7 @@ function firstNumber(...vals) {
 //   -o <file>              final agent message written here (used for the reply)
 
 export function makeCodexReviewTransport({
-  model = null, spawn = nodeSpawn, timeoutMs = DEFAULT_CLI_TRANSPORT_TIMEOUT_MS, env = process.env,
+  model = null, spawn = nodeSpawn, env = process.env, timeoutMs = resolveReviewCallTimeoutMs(env),
 } = {}) {
   return async (prompt, { signal } = {}) => {
     const cwd = narrowReviewTransportCwd();
@@ -208,7 +199,7 @@ export function makeCodexReviewTransport({
 // binary directly (argv, not a shell) never sees that alias.
 
 export function makeClaudeReviewTransport({
-  model = null, spawn = nodeSpawn, timeoutMs = DEFAULT_CLI_TRANSPORT_TIMEOUT_MS, env = process.env,
+  model = null, spawn = nodeSpawn, env = process.env, timeoutMs = resolveReviewCallTimeoutMs(env),
 } = {}) {
   return async (prompt, { signal } = {}) => {
     const cwd = narrowReviewTransportCwd();

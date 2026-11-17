@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { chunkDiffForReview } from './diffChunker.js';
+import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 
 export const DESIGN_TARGET_MAX_BYTES = 64 * 1024;
 const PATH_MAX_CHARS = 512;
@@ -164,14 +164,9 @@ export function assertTargetWithinOneChunk({ diff, target, env = process.env }) 
   fail(
     'DESIGN_TARGET_SPLIT',
     `the full text of ${target.path} is not inside a single Reviewer request (the review diff is split into ${chunks.length} chunk(s) of at most `
-    + `${reviewDiffLimit(env)} characters, or the file is missing from the evidence). Shorten the design file or keep other changes out of this loop so it fits one request. PASS is not possible until a single request contains the whole file.`,
+    + `${reviewDiffBudget(env).limit} characters, or the file is missing from the evidence). Shorten the design file or keep other changes out of this loop so it fits one request. PASS is not possible until a single request contains the whole file.`,
   );
   return false;
-}
-
-function reviewDiffLimit(env) {
-  const n = Number(env?.REVIEWLOOP_MAX_REVIEW_DIFF_CHARS);
-  return Number.isFinite(n) && n > 0 ? n : 45_000;
 }
 
 // Safe, bounded, strict-UTF-8 read of an arbitrary repository file for the

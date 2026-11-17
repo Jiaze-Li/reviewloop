@@ -49,6 +49,7 @@
 // redirected gemini dir), production routing / DEFAULT_ROLE_POLICY / accounting
 // / controller are untouched.
 
+import { rmSync } from 'node:fs';
 import {
   createProductionReviewLoopProviders,
   detectAgyCustomAgentSupport,
@@ -64,6 +65,7 @@ import {
 import { DEFAULT_ROLE_POLICY } from '../src/orchestrator/roleRouting.js';
 import { probeAgyModelCatalog } from '../src/agy/agyModelCatalog.js';
 import { probeReviewTransportRuntime } from '../src/reviewloop/adapters/cliReviewTransports.js';
+import { applySettingsOverridesToEnv } from '../src/reviewloop/settingsFile.js';
 
 export const OPT_IN_ENV = 'REVIEWLOOP_LIVE_CERTIFY';
 export const VALID_ROLES = Object.freeze(['reviewer', 'supervisor']);
@@ -89,10 +91,10 @@ export const ALL_CANDIDATES = Object.freeze(
 // harness makes exactly one transport call by construction and never touches the
 // RoleRouter, but the ceilings are still exported so a wrapper can assert them.
 export const SINGLE_CALL_CEILINGS = Object.freeze({
-  REVIEWLOOP_MAX_REVIEWER_CALLS: '1',
-  REVIEWLOOP_MAX_SUPERVISOR_CALLS: '1',
-  REVIEWLOOP_MAX_REVIEW_ROUNDS: '1',
-  REVIEWLOOP_MAX_USAGE_VOLUME: '40000',
+  MAX_REVIEWER_CALLS: 1,
+  MAX_SUPERVISOR_CALLS: 1,
+  MAX_REVIEW_ROUNDS: 1,
+  MAX_USAGE_VOLUME: 40000,
 });
 
 export const HARNESS_TIMEOUT_MS = 300_000;
@@ -193,7 +195,8 @@ function summary({
 export async function runCandidateCertification({ role, family, env = process.env, deps = {} } = {}) {
   const d = { ...defaultDeps, ...deps };
   const isAgy = family.startsWith('agy:');
-  const baseEnv = { ...env, ...SINGLE_CALL_CEILINGS };
+  const { env: baseEnv, filePath: settingsFile } = applySettingsOverridesToEnv(env, SINGLE_CALL_CEILINGS);
+  try {
 
   const agyCatalog = d.probeAgyModelCatalog();
   const transportRuntime = await d.probeReviewTransportRuntime();
@@ -336,6 +339,9 @@ export async function runCandidateCertification({ role, family, env = process.en
       failures,
     }),
   };
+  } finally {
+    try { rmSync(settingsFile, { force: true }); } catch { /* best effort */ }
+  }
 }
 
 export async function main({ argv = process.argv.slice(2), env = process.env, deps = {} } = {}) {

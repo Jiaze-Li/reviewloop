@@ -83,13 +83,13 @@ benchmark:transports` green. No real-provider calls.
   `agy:gemini-supervisor`.
 - **Single-call Token Sentinel** (post-settlement circuit breaker): a physical
   Reviewer/Supervisor call whose usage settled reliably but whose
-  `usageVolume > REVIEWLOOP_MAX_SINGLE_CALL_USAGE` (default 40 000) or whose
-  known `contextOverheadTokens > REVIEWLOOP_MAX_CONTEXT_OVERHEAD_TOKENS`
-  (default 30 000) is fully accounted, raises a BLOCKING
+  `usageVolume > MAX_SINGLE_CALL_USAGE` or whose
+  known `contextOverheadTokens > MAX_CONTEXT_OVERHEAD_TOKENS`
+  (configured in `reviewloop.settings.json`) is fully accounted, raises a BLOCKING
   `MODEL_SPEND_TOKEN_ANOMALY` event, and durably latches the loop —
   `MODEL_SPEND_TOKEN_ANOMALY_BLOCKED` refuses all further model spend at the
   authorization stage, across a restart. No auto-failover, no provider
-  health/quota mutation. Env overrides clamped to `(0, hard-cap]`; an illegal
+  health/quota mutation. Configured values clamped to `(0, hard-cap]`; an illegal
   value can never disable the protection.
 
 ## V2 pre-freeze final pass (this change)
@@ -145,7 +145,7 @@ doctor` green. NOT real-provider E2E.
 - Unknown provider dollar cost → `costKnown: false` (never a real `$0`); cost
   ceiling semantics adjusted.
 - Deterministic Gate FAIL → `gateRepairCount`, not a fresh Reviewer round.
-- All public `REVIEWLOOP_MAX_*` env knobs wired (`MAX_REVIEW_ROUNDS` →
+- All public managed limit/timeout settings wired (`MAX_REVIEW_ROUNDS` →
   objective; `MAX_EXTERNAL_REVIEW_TRIGGERS` → trigger authority).
 - Deterministic Gate command timeout + process-tree teardown.
 - Durable per-chunk review checkpoint / crash-resume.
@@ -270,7 +270,7 @@ reviewed HEAD inside an isolated worktree, one real Reviewer call.
   **0**.
 - Controller verdict: **PASS**, round 1, "no P1/P2 findings".
 - `usageVolume` **16759**, `contextOverheadTokens` **16460** — below both
-  Token Sentinel thresholds (40000 single-call / 30000 context-overhead); not
+  Token Sentinel thresholds (`MAX_SINGLE_CALL_USAGE` / `MAX_CONTEXT_OVERHEAD_TOKENS` in `reviewloop.settings.json`); not
   tripped.
 - This closes the "PR external-review mode NOT CERTIFIED" gap recorded
   earlier in this document for the PR-target path specifically. The real

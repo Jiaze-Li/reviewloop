@@ -26,6 +26,7 @@ import { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageV
 export { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageVolumeOf, accountingProvenanceOf, usageBreakdownOf, payloadMetaOf, effectiveContextInputTokens, contextOverheadTokens } from './usageAccounting.js';
 import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../orchestrator/modelSpendReservation.js';
 import { AuthorizationError, AUTHORIZATION_ERROR_CODES, isAuthorizationFailure } from '../orchestrator/errors.js';
+import { parsePositiveNumber, parsePositiveInt, parseBoundedNumber } from './settingsFile.js';
 import {
   NewInformationLedger,
   InformationStore,
@@ -130,51 +131,31 @@ export function isMechanicallyZeroPreSend(err) {
   return true;
 }
 
-function num(env, key, fallback) {
-  const raw = env?.[key];
-  const n = raw == null ? NaN : Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
-
-// Token Sentinel threshold: positive-finite env override, clamped to a hard
-// cap. An illegal value can never DISABLE the protection (it falls back to the
-// default) and can never be inflated past the hard cap.
-function boundedThreshold(env, key, fallback, hardCap) {
-  const raw = env?.[key];
-  if (raw == null) return fallback;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.min(n, hardCap);
-}
-
 export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budgetOverrides = null } = {}) {
   const gates = Number.isInteger(gateCount) && gateCount > 0 ? gateCount : 1;
   const resolved = {
     // Cost / aggregate usage remain TASK-WIDE across all phase gates.
-    maxCostUsd: num(env, REVIEWLOOP_ENV.MAX_COST_USD, REVIEWLOOP_DEFAULTS.MAX_COST_USD),
-    maxUsageVolume: num(env, REVIEWLOOP_ENV.MAX_USAGE_VOLUME, REVIEWLOOP_DEFAULTS.MAX_USAGE_VOLUME),
+    maxCostUsd: parsePositiveNumber(env?.[REVIEWLOOP_ENV.MAX_COST_USD], REVIEWLOOP_DEFAULTS.MAX_COST_USD),
+    maxUsageVolume: parsePositiveNumber(env?.[REVIEWLOOP_ENV.MAX_USAGE_VOLUME], REVIEWLOOP_DEFAULTS.MAX_USAGE_VOLUME),
     // maxReviewRounds is the INITIAL convergence-epoch Reviewer budget per gate;
     // Supervisor-guided epochs add their own bounded 2-round budgets. Coarse
     // physical-call ceilings gain headroom proportional to the frozen number
-    // of gates. Explicit env
-    // overrides remain absolute operator limits.
-    maxReviewRounds: num(env, REVIEWLOOP_ENV.MAX_REVIEW_ROUNDS, REVIEWLOOP_DEFAULTS.MAX_REVIEW_ROUNDS),
-    maxReviewerCalls: num(
-      env,
-      REVIEWLOOP_ENV.MAX_REVIEWER_CALLS,
+    // of gates.
+    maxReviewRounds: parsePositiveInt(env?.[REVIEWLOOP_ENV.MAX_REVIEW_ROUNDS], REVIEWLOOP_DEFAULTS.MAX_REVIEW_ROUNDS),
+    maxReviewerCalls: parsePositiveInt(
+      env?.[REVIEWLOOP_ENV.MAX_REVIEWER_CALLS],
       REVIEWLOOP_DEFAULTS.MAX_REVIEWER_CALLS * gates,
     ),
-    maxSupervisorCalls: num(
-      env,
-      REVIEWLOOP_ENV.MAX_SUPERVISOR_CALLS,
+    maxSupervisorCalls: parsePositiveInt(
+      env?.[REVIEWLOOP_ENV.MAX_SUPERVISOR_CALLS],
       REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS * gates,
     ),
-    maxSingleCallUsage: boundedThreshold(
-      env, REVIEWLOOP_ENV.MAX_SINGLE_CALL_USAGE,
+    maxSingleCallUsage: parseBoundedNumber(
+      env?.[REVIEWLOOP_ENV.MAX_SINGLE_CALL_USAGE],
       REVIEWLOOP_DEFAULTS.MAX_SINGLE_CALL_USAGE, TOKEN_SENTINEL_HARD_CAPS.MAX_SINGLE_CALL_USAGE,
     ),
-    maxContextOverheadTokens: boundedThreshold(
-      env, REVIEWLOOP_ENV.MAX_CONTEXT_OVERHEAD_TOKENS,
+    maxContextOverheadTokens: parseBoundedNumber(
+      env?.[REVIEWLOOP_ENV.MAX_CONTEXT_OVERHEAD_TOKENS],
       REVIEWLOOP_DEFAULTS.MAX_CONTEXT_OVERHEAD_TOKENS, TOKEN_SENTINEL_HARD_CAPS.MAX_CONTEXT_OVERHEAD_TOKENS,
     ),
   };

@@ -20,17 +20,17 @@ import path from 'node:path';
 import { collectFailureIdentities } from '../orchestrator/gateFailureIdentity.js';
 import { diffBaselineFailures, BASELINE_DIFF_VERDICTS } from '../orchestrator/baselineDiffGate.js';
 import { PROCESS_GROUP_SPAWN_OPTS, terminateProcessTree } from '../orchestrator/processTree.js';
+import { parsePositiveNumber } from './settingsFile.js';
 
 export const GATE_VERDICTS = Object.freeze({ PASS: 'PASS', FAIL: 'FAIL', WARN: 'WARN' });
 
 // A hung Gate command must terminate deterministically rather than block the
-// review forever. Deployment-overridable via REVIEWLOOP_GATE_TIMEOUT_MS.
+// review forever. Configured via GATE_TIMEOUT_MS in reviewloop.settings.json.
 export const DEFAULT_GATE_TIMEOUT_MS = 10 * 60_000;
 export const GATE_TIMEOUT_EXIT_CODE = 124;
 
 function resolveGateTimeoutMs(env) {
-  const n = Number(env?.REVIEWLOOP_GATE_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_GATE_TIMEOUT_MS;
+  return parsePositiveNumber(env?.REVIEWLOOP_GATE_TIMEOUT_MS, DEFAULT_GATE_TIMEOUT_MS);
 }
 
 // `manifestFingerprint` digests exactly the bytes/values the plan was derived

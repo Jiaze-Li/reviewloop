@@ -16,6 +16,7 @@ import { extractManagedPolicy, resolveGlobalConfigDir, hasLegacyManagedPolicy } 
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 import { DEFAULT_ROLE_POLICY, PRODUCTION_ROLE_CAPABILITIES, QuotaPoolRegistry } from '../src/orchestrator/roleRouting.js';
 import { createReviewLoopProviderPool } from '../src/reviewloop/providerWiring.js';
+import { applySettingsFile, MANAGED_SETTINGS_KEYS } from '../src/reviewloop/settingsFile.js';
 
 const DEFAULT_POLICY_FILE = fileURLToPath(new URL('../agent-policy/COMMON.md', import.meta.url));
 // Computed from THIS repo/module — never hard-coded. This is the MCP entrypoint
@@ -235,10 +236,28 @@ export function checkReviewTransportRuntime({ execSync, env } = {}) {
   return { name: 'review_transports', ok: true, families: runtimeStatus };
 }
 
-export function runDoctor({ execSync, log, env } = {}) {
+export function checkLegacyManagedEnv(env = process.env) {
+  const present = [];
+  for (const envName of Object.values(MANAGED_SETTINGS_KEYS)) {
+    if (Object.hasOwn(env, envName) && env[envName] != null && String(env[envName]) !== '') {
+      present.push(envName);
+    }
+  }
+  return {
+    name: 'legacy_env',
+    ok: present.length === 0,
+    present,
+    issues: present.map(
+      (n) => `${n} is ignored in production; remove it from your client/shell config and use reviewloop.settings.json`,
+    ),
+  };
+}
+
+export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv } = {}) {
   const exec = execSync || nodeExecSync;
   const write = log || console.log;
   const environment = env || process.env;
+  const legacyEnv = precheckedLegacyEnv || checkLegacyManagedEnv(environment);
 
   const core = [
     checkNode({ env: environment }),
@@ -296,16 +315,20 @@ export function runDoctor({ execSync, log, env } = {}) {
   const quota = new QuotaPoolRegistry();
   for (const pool of quota.summary()) write(`  info  quota ${pool.poolId}: ${pool.status}`);
 
+  for (const issue of legacyEnv.issues) write(`  warn  legacy_env: ${issue}`);
+
   write(ok ? 'doctor: all core prerequisites satisfied' : 'doctor: missing core prerequisites');
   return {
     ok,
     status: ok ? 'pass' : 'fail',
-    results: Object.fromEntries([...core, pools, transports, policy, mcpBinding].map((r) => [r.name, r])),
+    results: Object.fromEntries([...core, pools, transports, policy, mcpBinding, legacyEnv].map((r) => [r.name, r])),
   };
 }
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
-  const report = runDoctor();
+  const legacyEnv = checkLegacyManagedEnv(process.env);
+  applySettingsFile(process.env);
+  const report = runDoctor({ legacyEnv });
   process.exit(report.ok ? 0 : 1);
 }
