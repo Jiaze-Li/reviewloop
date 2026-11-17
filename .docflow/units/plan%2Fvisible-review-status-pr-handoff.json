@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-17T03:46:13.155Z",
+  "task": {
+    "id": "plan/visible-review-status-pr-handoff",
+    "branch": "plan/visible-review-status-pr-handoff",
+    "title": "plan/visible-review-status-pr-handoff",
+    "task": "Development branch: plan/visible-review-status-pr-handoff",
+    "started": "2026-11-17T11:46:05+08:00",
+    "status": "In progress",
+    "current": "docs(plan): define visible review status and PR handoff requirements",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "2ebf6c2be11b517840b8d0477b4115ec6e6013c2",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T11:46:05+08:00",
+        "message": "docs(plan): define visible review status and PR handoff requirements"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
