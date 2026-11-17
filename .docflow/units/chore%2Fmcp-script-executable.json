@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-17T03:53:21.686Z",
+  "task": {
+    "id": "chore/mcp-script-executable",
+    "branch": "chore/mcp-script-executable",
+    "title": "chore/mcp-script-executable",
+    "task": "Development branch: chore/mcp-script-executable",
+    "started": "2026-11-17T11:53:12+08:00",
+    "status": "In progress",
+    "current": "Make the MCP launcher script executable like the other bin scripts",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "f3ff1c2dd613edd1d9656b3f65a2292d651cb6c9",
+        "branch": "chore/mcp-script-executable",
+        "timestamp": "2026-11-17T11:53:12+08:00",
+        "message": "Make the MCP launcher script executable like the other bin scripts"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
