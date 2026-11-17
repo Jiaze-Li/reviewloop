@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:42:37.965Z",
+  "updatedAt": "2026-11-17T04:43:44.948Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
     "current": "Accept the plural Risks heading in the handoff check",
-    "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
+    "next": "审查已通过；等你重新加载后在 Claude Code 里做真实多轮验收，再决定是否合并",
     "history": [
       {
         "at": "2026-11-17T12:00:14+08:00",
