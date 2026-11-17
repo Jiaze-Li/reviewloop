@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T03:53:59.276Z",
+  "updatedAt": "2026-11-17T03:54:57.869Z",
   "task": {
     "id": "chore/mcp-script-executable",
     "branch": "chore/mcp-script-executable",
     "title": "chore/mcp-script-executable",
     "task": "Development branch: chore/mcp-script-executable",
     "started": "2026-11-17T11:53:12+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Make the MCP launcher script executable like the other bin scripts",
     "next": "等这次小改动合并进主分支，然后重启 Claude Code 确认评审服务按新位置正常连接",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 49,
-      "state": "open",
+      "state": "closed",
       "title": "Make the MCP launcher script executable like the other bin scripts",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/49",
-      "merged": false,
-      "updatedAt": "2026-11-17T03:53:49Z"
+      "merged": true,
+      "mergedAt": "2026-11-17T03:54:47Z",
+      "closedAt": "2026-11-17T03:54:47Z",
+      "updatedAt": "2026-11-17T03:54:47Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-17T03:54:47Z",
+    "outcome": "Merged"
   }
 }
