@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T11:53:22.056Z",
+  "updatedAt": "2026-11-17T11:56:14.556Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -8,7 +8,7 @@
     "task": "Development branch: feat/shared-settings-file",
     "started": "2026-11-17T17:17:34+08:00",
     "status": "In progress",
-    "current": "Unify all 13 managed limits and timeouts in reviewloop.settings.json",
+    "current": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present",
     "next": "等 PR 50 的自动检查与评审完成后，由用户验收并决定是否合并",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-17T19:52:58+08:00",
         "text": "Add the approved design for one shared settings source covering limits and timeouts"
+      },
+      {
+        "at": "2026-11-17T19:56:03+08:00",
+        "text": "Unify all 13 managed limits and timeouts in reviewloop.settings.json"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "feat/shared-settings-file",
         "timestamp": "2026-11-17T19:52:58+08:00",
         "message": "Unify all 13 managed limits and timeouts in reviewloop.settings.json"
+      },
+      {
+        "sha": "8677a7b53f30caf50d72953a9ac97bacc2e1e537",
+        "branch": "feat/shared-settings-file",
+        "timestamp": "2026-11-17T19:56:03+08:00",
+        "message": "Warn in doctor when legacy managed REVIEWLOOP_* env vars are present"
       }
     ],
     "pr": {
