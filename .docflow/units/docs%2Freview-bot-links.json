@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T03:47:30.771Z",
+  "updatedAt": "2026-11-17T03:48:18.110Z",
   "task": {
     "id": "docs/review-bot-links",
     "branch": "docs/review-bot-links",
     "title": "docs/review-bot-links",
     "task": "Development branch: docs/review-bot-links",
     "started": "2026-11-17T11:47:17+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Point the review-bot links at the renamed review-bot repository",
     "next": "",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 48,
-      "state": "open",
+      "state": "closed",
       "title": "docs: point review-bot links at the renamed repository",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/48",
-      "merged": false,
-      "updatedAt": "2026-11-17T03:47:21Z"
+      "merged": true,
+      "mergedAt": "2026-11-17T03:48:08Z",
+      "closedAt": "2026-11-17T03:48:08Z",
+      "updatedAt": "2026-11-17T03:48:08Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-17T03:48:08Z",
+    "outcome": "Merged"
   }
 }
