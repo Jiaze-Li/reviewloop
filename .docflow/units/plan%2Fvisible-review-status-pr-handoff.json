@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:40:14.790Z",
+  "updatedAt": "2026-11-17T04:42:37.965Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/visible-review-status-pr-handoff",
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
-    "current": "Do not call a resumable HUMAN_REQUIRED loop final in the review record",
+    "current": "Accept the plural Risks heading in the handoff check",
     "next": "在 Claude Code 里重新加载后做真实多轮验收，再等 bot 审查与自动检查结果",
     "history": [
       {
@@ -38,6 +38,10 @@
       {
         "at": "2026-11-17T12:40:01+08:00",
         "text": "List recorded outcomes without guessing round types and require real handoff section headings"
+      },
+      {
+        "at": "2026-11-17T12:42:23+08:00",
+        "text": "Do not call a resumable HUMAN_REQUIRED loop final in the review record"
       }
     ],
     "commits": [
@@ -88,6 +92,12 @@
         "branch": "plan/visible-review-status-pr-handoff",
         "timestamp": "2026-11-17T12:40:01+08:00",
         "message": "Do not call a resumable HUMAN_REQUIRED loop final in the review record"
+      },
+      {
+        "sha": "8dec7ff2df6fc812b15eecf3bf34b0d02b5c5f55",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:42:23+08:00",
+        "message": "Accept the plural Risks heading in the handoff check"
       }
     ],
     "pr": {
