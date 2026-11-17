@@ -9,12 +9,12 @@ const loop = (state, history, taskType = 'design') => ({ loopId: 'rl-1', state, 
 
 test('REWORK -> REWORK -> PASS is listed in order with terminal PASS', () => {
   const r = buildReviewRecord(loop('PASS', [h('REVIEWING', 0, 'READY_FOR_WORK'), h('REWORK', 1), h('REVIEWING', 1, 'REWORK'), h('REWORK', 2), h('REVIEWING', 2, 'REWORK'), h('PASS', 3)]), { status: 'PASS' });
-  assert.equal(r, '[ReviewLoop 记录 | design | loopId=rl-1 | 第1轮 REWORK → 第2轮 REWORK → 第3轮 PASS | 终态 PASS]');
+  assert.equal(r, '[ReviewLoop 记录 | design | loopId=rl-1 | REWORK@已审1轮 → REWORK@已审2轮 → PASS@已审3轮 | 终态 PASS | 条目含 Gate 修复与人工操作，不等于审查轮数]');
 });
 
 test('HUMAN_REQUIRED then re-review then PASS (real sample shape)', () => {
   const r = buildReviewRecord(loop('PASS', [h('REVIEWING', 0, 'READY_FOR_WORK'), h('HUMAN_REQUIRED', 1), h('REVIEWING', 1, 'HUMAN_REQUIRED'), h('PASS', 2)]), { status: 'PASS' });
-  assert.match(r, /第1轮 HUMAN_REQUIRED → 第2轮 PASS \| 终态 PASS/);
+  assert.match(r, /HUMAN_REQUIRED@已审1轮 → PASS@已审2轮 \| 终态 PASS/);
 });
 
 test('HUMAN_REQUIRED and FAILED are never shown as PASS', () => {
@@ -26,7 +26,7 @@ test('HUMAN_REQUIRED and FAILED are never shown as PASS', () => {
 
 test('PHASE_PASS is labelled and the loop is not terminal', () => {
   const r = buildReviewRecord(loop('READY_FOR_WORK', [h('READY_FOR_WORK', 1)]), { status: 'PHASE_PASS' });
-  assert.match(r, /第1轮 PHASE_PASS \| 当前 READY_FOR_WORK（未结束）/);
+  assert.match(r, /PHASE_PASS@已审1轮 \| 当前 READY_FOR_WORK（未结束）/);
 });
 
 test('status not present in history is flagged, not invented', () => {
@@ -70,16 +70,23 @@ test('handoff check: unreadable PR or bad args never reports success', () => {
   assert.equal(run(['5', '--stage', 'nope']).code, 2);
 });
 
-test('Gate repair / human reopen REWORK entries are not counted as Reviewer rounds', () => {
-  const gate = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'gate regression' };
-  const drift = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'verification plan drift' };
-  const human = { from: 'REVIEWING', to: 'REWORK', round: 1, reason: 'human reopen: x' };
-  const r = buildReviewRecord(loop('PASS', [gate, drift, human, h('REWORK', 1), h('PASS', 2)]), { status: 'PASS' });
-  assert.match(r, /Gate修复 → Gate修复 → 人工重开 → 第1轮 REWORK → 第2轮 PASS \| 终态 PASS/);
-  const only = buildReviewRecord(loop('REWORK', [gate]), { status: 'REWORK' });
-  assert.doesNotMatch(only, /第\d+轮 REWORK/); assert.match(only, /本次结果 REWORK 未写入历史/);
-});
-
 test('handoff check: --stage without a value is a usage error, never a pass', () => {
   assert.equal(run(['5', '--stage'], gh({ headRefOid: SHA, body: body() })).code, 2);
+});
+
+test('record never claims entries are Reviewer rounds (no 第N轮 wording, note present)', () => {
+  const r = buildReviewRecord(loop('HUMAN_REQUIRED', [{ from: 'REVIEWING', to: 'HUMAN_REQUIRED', round: 2, reason: 'baseline attribution incomplete' }]), { status: 'HUMAN_REQUIRED' });
+  assert.doesNotMatch(r, /第\d+轮/); assert.match(r, /不等于审查轮数/);
+});
+
+test('handoff check: words inside prose, quotes or code do not count as sections', () => {
+  const marker = `<!-- reviewloop-handoff head=${SHA} stage=code loop=rl-1 -->`;
+  const prose = `${marker}\nThis is unverified and rebuilt, with some risk and acceptance noise.`;
+  const r = run(['5'], gh({ headRefOid: SHA, body: prose }));
+  assert.equal(r.code, 1);
+  for (const n of ['做了什么', '验收清单', '已验证', '风险']) assert.match(r.out, new RegExp(`缺少「${n}」`));
+  const fenced = `${marker}\n\`\`\`\n做了什么 验收清单 已验证 风险\n\`\`\``;
+  assert.equal(run(['5'], gh({ headRefOid: SHA, body: fenced })).code, 1);
+  const real = `${marker}\n**做了什么**\nx\n## Acceptance\ny\n- Verified: z\n**风险与偏离**\nw`;
+  assert.equal(run(['5'], gh({ headRefOid: SHA, body: real })).code, 0);
 });

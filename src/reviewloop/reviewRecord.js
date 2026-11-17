@@ -7,24 +7,17 @@ const TERMINAL = new Set(['PASS', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED']);
 const RESULT_TO = new Set(['REWORK', 'PASS', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED']);
 const INCOMPLETE = '记录不完整';
 
-// REWORK entries written by the controller for non-Reviewer reasons (Gate
-// repair loops, human reopen/override). They are real transitions but not
-// independent Reviewer rounds, so they are labelled apart and never counted
-// as one. Matched by the reason prefixes the controller writes.
-const NON_REVIEWER_REWORK = [
-  [/^(gate regression|verification plan drift)/, 'Gate修复'],
-  [/^human (reopen|budget override)/, '人工重开'],
-];
+// Entries are listed as recorded, tagged with `round` = the number of
+// Reviewer rounds COMPLETED when the transition was written. History also holds
+// transitions that ran no Reviewer (Gate repairs, human reopen/override,
+// preflight stops). Telling them apart would mean guessing from free-text
+// reasons, so the record does NOT classify: it lists every outcome and states
+// that entries are not a count of Reviewer rounds.
+const NOT_ROUNDS_NOTE = '条目含 Gate 修复与人工操作，不等于审查轮数';
 
 function entryLabel(e) {
-  if (e.from === 'REVIEWING' && e.to === 'READY_FOR_WORK') return { label: 'PHASE_PASS', reviewer: true };
-  if (e.to === 'REWORK') {
-    const reason = typeof e.reason === 'string' ? e.reason : '';
-    const hit = NON_REVIEWER_REWORK.find(([re]) => re.test(reason));
-    if (hit) return { label: hit[1], reviewer: false };
-  }
-  if (RESULT_TO.has(e.to)) return { label: e.to, reviewer: true };
-  return null;
+  if (e.from === 'REVIEWING' && e.to === 'READY_FOR_WORK') return 'PHASE_PASS';
+  return RESULT_TO.has(e.to) ? e.to : null;
 }
 
 export function buildReviewRecord(loopState, result) {
@@ -36,15 +29,15 @@ export function buildReviewRecord(loopState, result) {
     if (!Array.isArray(history)) return `${head(taskType, loopId)} | ${INCOMPLETE}: 历史不可读]`;
 
     const steps = [];
-    let lastReviewerLabel = null;
+    let lastLabel = null;
     let malformed = false;
     for (const e of history) {
       if (!e || typeof e !== 'object' || typeof e.to !== 'string') { malformed = true; continue; }
-      const hit = entryLabel(e);
-      if (!hit) continue;
+      const label = entryLabel(e);
+      if (!label) continue;
       const r = Number.isInteger(e.round) && e.round > 0 ? e.round : 0;
-      steps.push(hit.reviewer ? `第${r}轮 ${hit.label}` : hit.label);
-      if (hit.reviewer) lastReviewerLabel = hit.label;
+      steps.push(`${label}@已审${r}轮`);
+      lastLabel = label;
     }
 
     const parts = [head(taskType, loopId)];
@@ -56,9 +49,10 @@ export function buildReviewRecord(loopState, result) {
     // The reported status must be traceable to history; otherwise say so
     // rather than letting a reader assume it was recorded.
     const status = result?.status;
-    if (typeof status === 'string' && status && lastReviewerLabel !== status) {
+    if (typeof status === 'string' && status && lastLabel !== status) {
       parts.push(`本次结果 ${status} 未写入历史（如 Gate 修复循环、等待或无进展），未逐条列出`);
     }
+    if (steps.length) parts.push(NOT_ROUNDS_NOTE);
     if (malformed) parts.push(`${INCOMPLETE}: 有损坏的历史条目被跳过`);
     return `${parts.join(' | ')}]`;
   } catch {

@@ -7,12 +7,21 @@ import { pathToFileURL } from 'node:url';
 
 const STAGES = ['plan', 'design', 'code'];
 const MARKER = /<!--\s*reviewloop-handoff\s+head=([0-9a-fA-F]{40})\s+stage=(\w+)\s+loop=(\S+)\s*-->/;
+// A section counts only when its name opens a line (optionally after #, ** or
+// a list dash) outside fenced code, so words like "unverified" or a stray
+// "risk" inside prose or the marker comment do not satisfy it.
 const SECTIONS = [
-  ['做了什么', /做了什么|built/i],
-  ['验收清单', /验收清单|acceptance/i],
-  ['已验证', /已验证|verified/i],
-  ['风险', /风险|risk/i],
+  ['做了什么', ['做了什么', 'built']],
+  ['验收清单', ['验收清单', 'acceptance']],
+  ['已验证', ['已验证', 'verified']],
+  ['风险', ['风险', 'risk']],
 ];
+
+function hasSection(text, names) {
+  const body = text.replace(/```[\s\S]*?```/g, '');
+  const alt = names.join('|');
+  return new RegExp(`^[ \\t]*(?:#{1,6}[ \\t]*|[-*][ \\t]+)?(?:\\*\\*|__)?[ \\t]*(?:${alt})(?![A-Za-z])`, 'im').test(body);
+}
 
 export function checkHandoff({ headRefOid, body }, { stage } = {}) {
   const problems = [];
@@ -26,8 +35,8 @@ export function checkHandoff({ headRefOid, body }, { stage } = {}) {
     }
     if (stage && m[2] !== stage) problems.push(`标记阶段 ${m[2]} 与要求的 ${stage} 不符`);
   }
-  for (const [name, re] of SECTIONS) {
-    if (!re.test(text)) problems.push(`缺少「${name}」部分`);
+  for (const [name, names] of SECTIONS) {
+    if (!hasSection(text, names)) problems.push(`缺少「${name}」部分`);
   }
   return problems;
 }
