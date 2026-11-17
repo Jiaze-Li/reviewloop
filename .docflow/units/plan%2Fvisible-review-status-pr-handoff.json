@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:00:29.091Z",
+  "updatedAt": "2026-11-17T04:00:51.527Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
     "current": "Add reviewed Design for visible review status and PR handoff checks",
-    "next": "",
+    "next": "设计已通过审查，等你确认后再开始实施（Code）",
     "history": [
       {
         "at": "2026-11-17T12:00:14+08:00",
