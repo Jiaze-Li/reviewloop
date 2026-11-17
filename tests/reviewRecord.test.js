@@ -95,3 +95,10 @@ test('HUMAN_REQUIRED that can still be re-reviewed is not labelled final', () =>
   const r = buildReviewRecord({ ...loop('HUMAN_REQUIRED', [h('HUMAN_REQUIRED', 1)]), budgetExhausted: false }, { status: 'HUMAN_REQUIRED' });
   assert.doesNotMatch(r, /终态/); assert.match(r, /可续审，未结束/); assert.doesNotMatch(r, /PASS/);
 });
+
+test('handoff check: the exact wording of the policy (built / acceptance / verified / risks/deviations) passes', () => {
+  const marker = `<!-- reviewloop-handoff head=${SHA} stage=code loop=rl-1 -->`;
+  const text = `${marker}\nBuilt: x\nAcceptance checklist: y\nVerified: z\nRisks/deviations: w`;
+  assert.equal(run(['5', '--stage', 'code'], gh({ headRefOid: SHA, body: text })).code, 0);
+  assert.equal(run(['5'], gh({ headRefOid: SHA, body: text.replace('Risks/deviations: w', 'Riskier things') })).code, 1);
+});

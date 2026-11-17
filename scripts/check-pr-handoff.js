@@ -14,7 +14,7 @@ const SECTIONS = [
   ['做了什么', ['做了什么', 'built']],
   ['验收清单', ['验收清单', 'acceptance']],
   ['已验证', ['已验证', 'verified']],
-  ['风险', ['风险', 'risk']],
+  ['风险', ['风险', 'risks?']],
 ];
 
 function hasSection(text, names) {
