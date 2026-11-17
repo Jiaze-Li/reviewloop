@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T12:55:56.367Z",
+  "updatedAt": "2026-11-17T12:57:00.791Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -9,7 +9,7 @@
     "started": "2026-11-17T17:17:34+08:00",
     "status": "Completed",
     "current": "Update D36 to reference MAX_GATE_REPAIRS and D45 instead of removed env knob",
-    "next": "等 PR 50 的自动检查与评审完成后，由用户验收并决定是否合并",
+    "next": "",
     "history": [
       {
         "at": "2026-11-17T19:39:41+08:00",
