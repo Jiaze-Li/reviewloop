@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T12:08:33.936Z",
+  "updatedAt": "2026-11-17T12:08:37.596Z",
   "task": {
     "id": "feat/shared-settings-file",
     "branch": "feat/shared-settings-file",
@@ -76,7 +76,7 @@
       "title": "One shared settings file for review limits and timeouts",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/50",
       "merged": false,
-      "updatedAt": "2026-11-17T12:00:38Z"
+      "updatedAt": "2026-11-17T12:08:25Z"
     },
     "completed": null,
     "outcome": null
