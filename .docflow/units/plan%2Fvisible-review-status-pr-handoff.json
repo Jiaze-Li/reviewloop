@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-17T04:00:51.527Z",
+  "updatedAt": "2026-11-17T04:15:49.175Z",
   "task": {
     "id": "plan/visible-review-status-pr-handoff",
     "branch": "plan/visible-review-status-pr-handoff",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/visible-review-status-pr-handoff",
     "started": "2026-11-17T11:46:05+08:00",
     "status": "In progress",
-    "current": "Add reviewed Design for visible review status and PR handoff checks",
+    "current": "Show a saved review record with every result and add a PR handoff check",
     "next": "设计已通过审查，等你确认后再开始实施（Code）",
     "history": [
       {
         "at": "2026-11-17T12:00:14+08:00",
         "text": "docs(plan): define visible review status and PR handoff requirements"
+      },
+      {
+        "at": "2026-11-17T12:15:33+08:00",
+        "text": "Add reviewed Design for visible review status and PR handoff checks"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/visible-review-status-pr-handoff",
         "timestamp": "2026-11-17T12:00:14+08:00",
         "message": "Add reviewed Design for visible review status and PR handoff checks"
+      },
+      {
+        "sha": "15e9191299ea8ef016dc59337d86023dcc07c1da",
+        "branch": "plan/visible-review-status-pr-handoff",
+        "timestamp": "2026-11-17T12:15:33+08:00",
+        "message": "Show a saved review record with every result and add a PR handoff check"
       }
     ],
     "pr": {
