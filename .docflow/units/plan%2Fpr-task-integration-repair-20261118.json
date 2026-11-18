@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T07:14:49.498Z",
+  "updatedAt": "2026-11-18T07:16:24.351Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
     "title": "plan/pr-task-integration-repair-20261118",
     "task": "Development branch: plan/pr-task-integration-repair-20261118",
     "started": "2026-11-18T13:49:49+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "fix(pr-task): treat stale REWORK bot sessions as waiting for review",
     "next": "等待 PR 53 机器人复审最终审计新发现的 P2 问题并确认是否就绪",
     "history": [
@@ -82,13 +82,15 @@
     ],
     "pr": {
       "number": 53,
-      "state": "open",
+      "state": "closed",
       "title": "docs(plan): close PR Task integration and E2E gaps from #51",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/53",
-      "merged": false,
-      "updatedAt": "2026-11-18T07:14:32Z"
+      "merged": true,
+      "mergedAt": "2026-11-18T07:16:15Z",
+      "closedAt": "2026-11-18T07:16:15Z",
+      "updatedAt": "2026-11-18T07:16:15Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-18T07:16:15Z",
+    "outcome": "Merged"
   }
 }
