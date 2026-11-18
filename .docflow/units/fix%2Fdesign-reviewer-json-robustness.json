@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:33:20.416Z",
+  "updatedAt": "2026-11-18T05:33:26.584Z",
   "task": {
     "id": "fix/design-reviewer-json-robustness",
     "branch": "fix/design-reviewer-json-robustness",
@@ -19,7 +19,14 @@
         "message": "Retry design review once when the reviewer's reply is unusable and show why it failed"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 52,
+      "state": "open",
+      "title": "Retry design review once when the reviewer's reply is unusable and show why it failed",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/52",
+      "merged": false,
+      "updatedAt": "2026-11-18T05:33:15Z"
+    },
     "completed": null,
     "outcome": null
   }
