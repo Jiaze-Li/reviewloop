@@ -27,6 +27,7 @@ import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInsp
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 import { applySettingsFile } from '../src/reviewloop/settingsFile.js';
+import { formatPrStatusEntry, buildPrResumeText, stopPrTask } from '../src/reviewloop/prCli.js';
 
 async function listSessions() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
@@ -239,6 +240,67 @@ async function resume(rest) {
   console.log('------------------------------------------------------------');
 }
 
+async function handlePrCommand(rest) {
+  const [sub, ...args] = rest;
+  const loopId = flagValue(args, '--loop');
+  const root = REVIEWLOOP_RUNTIME_ROOT;
+
+  if (sub === 'status') {
+    const entries = [];
+    if (existsSync(root)) {
+      for (const d of await readdir(root).catch(() => [])) {
+        if (loopId && d !== loopId) continue;
+        try {
+          const state = JSON.parse(await readFile(path.join(root, d, 'workflow.json'), 'utf8'));
+          if (state.reviewLoop?.objective?.mode === 'PR') continue;
+          if (state.reviewLoop?.objective?.taskType === 'pr' && state.prTask) {
+            entries.push(formatPrStatusEntry({ loopState: state.reviewLoop, prTask: state.prTask }));
+          }
+        } catch { /* skip */ }
+      }
+    }
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(entries, null, 2));
+      return;
+    }
+    if (!entries.length) {
+      console.log('No PR Task sessions found.');
+      return;
+    }
+    for (const e of entries) {
+      console.log(
+        `  ${e.loopId}  PR #${e.prNumber} (${e.repoFullName})  state=${e.state}  bot=${e.botStatus}  findings=${e.openFindingsCount}  triggers=${e.postedReviewTriggers}/3  head=${String(e.boundHeadSha).slice(0, 8)}${e.watcherPid ? `  watcherPid=${e.watcherPid}` : ''}${e.wakeStatus ? `  wake=${e.wakeStatus}` : ''}`,
+      );
+    }
+    return;
+  }
+
+  if (sub === 'resume') {
+    if (!loopId) throw new Error('usage: reviewloop pr resume --loop <loopId>');
+    const state = await new Persistence(root).readWorkflowState(loopId);
+    console.log(buildPrResumeText({ loopState: state?.reviewLoop, prTask: state?.prTask }));
+    return;
+  }
+
+  if (sub === 'stop') {
+    if (!loopId) throw new Error('usage: reviewloop pr stop --loop <loopId> [--reason "<reason>"]');
+    const reason = flagValue(args, '--reason') ?? 'stopped by user';
+    const lease = await acquireLoopFileLease({ runtimeRoot: root, loopId, reason: 'pr-stop' });
+    if (!lease.ok) {
+      throw new Error(`cannot stop PR task while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
+    }
+    try {
+      const res = await stopPrTask({ persistence: new Persistence(root), loopId, reason });
+      console.log(`Stopped PR Task ${res.loopId} (state=${res.state}, reason=${res.reason}).`);
+    } finally {
+      await lease.release();
+    }
+    return;
+  }
+
+  throw new Error('usage: reviewloop pr <status|resume|stop> [--loop <loopId>]');
+}
+
 async function main() {
   const legacyEnv = checkLegacyManagedEnv(process.env);
   applySettingsFile(process.env);
@@ -269,6 +331,9 @@ async function main() {
       break;
     case 'resume':
       await resume(rest);
+      break;
+    case 'pr':
+      await handlePrCommand(rest);
       break;
     case 'install': {
       const res = await installGlobal();

@@ -58,6 +58,33 @@ export function isTerminal(state) {
 }
 
 const STATE_KEY = 'reviewLoop';
+export const PR_TASK_KEY = 'prTask';
+
+export function initialPrTaskState(objective) {
+  const ctx = objective?.prContext ?? {};
+  return {
+    loopId: objective.loopId,
+    prNumber: ctx.prNumber ?? null,
+    repoFullName: ctx.repoFullName ?? null,
+    repoRoot: ctx.repoRoot ?? null,
+    baseBranch: ctx.baseBranch ?? null,
+    headBranch: ctx.headBranch ?? null,
+    boundHeadSha: ctx.boundHeadSha ?? null,
+    originLoopId: ctx.originLoopId ?? null,
+    originPolicySha: ctx.originPolicySha ?? 'unknown',
+    originContractText: ctx.originContractText ?? null,
+    originDesignSha256: ctx.originDesignSha256 ?? null,
+    permissions: { ...(ctx.permissions ?? {}) },
+    trustedBotLogins: [...(ctx.trustedBotLogins ?? ['claude-review-bot[bot]'])],
+    reviewTriggers: [],
+    latestBotSession: null,
+    sharedBoundaryStreak: { count: 0, boundaryKey: null, roundHistory: [] },
+    watcher: null,
+    stopReason: null,
+    createdAt: objective.createdAt,
+    updatedAt: objective.createdAt,
+  };
+}
 
 export function initialLoopState(objective) {
   return {
@@ -148,6 +175,19 @@ export class ReviewLoopStore {
   async save(loopId, loopState) {
     if (!loopId || !this._persistence || typeof this._persistence.updateWorkflowState !== 'function') return;
     await this._persistence.updateWorkflowState(loopId, { [STATE_KEY]: loopState });
+  }
+
+  async loadPrTask(loopId) {
+    if (!loopId || !this._persistence || typeof this._persistence.readWorkflowState !== 'function') {
+      return null;
+    }
+    const state = await this._persistence.readWorkflowState(loopId);
+    return state?.[PR_TASK_KEY] ?? null;
+  }
+
+  async savePrTask(loopId, prTaskState) {
+    if (!loopId || !this._persistence || typeof this._persistence.updateWorkflowState !== 'function') return;
+    await this._persistence.updateWorkflowState(loopId, { [PR_TASK_KEY]: prTaskState });
   }
 }
 
