@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T06:13:22.921Z",
+  "updatedAt": "2026-11-18T06:13:24.850Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
     "current": "fix(pr-task): keep stopPrTask idempotent and clean up duplicate guard blocks",
-    "next": "等待 PR 53 机器人复审 F001 至 F004 修复并确认测试 PR 授权",
+    "next": "等待 PR 53 机器人复审 F005 修复并确认测试 PR 授权",
     "history": [
       {
         "at": "2026-11-18T14:03:40+08:00",
