@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-18T03:41:31.770Z",
+  "task": {
+    "id": "plan/pr-task-20261118",
+    "branch": "plan/pr-task-20261118",
+    "title": "plan/pr-task-20261118",
+    "task": "Development branch: plan/pr-task-20261118",
+    "started": "2026-11-18T11:41:22+08:00",
+    "status": "In progress",
+    "current": "docs(plan): define bounded event-driven PR repair task",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "a0090cfe7cd4c9539afd979b0223e038e6ac7558",
+        "branch": "plan/pr-task-20261118",
+        "timestamp": "2026-11-18T11:41:22+08:00",
+        "message": "docs(plan): define bounded event-driven PR repair task"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
