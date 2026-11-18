@@ -289,6 +289,88 @@ test('triggerGeminiReview enforces max 3 posted triggers, ignores failed/dismiss
   });
   assert.equal(fourthBlocked.posted, false);
   assert.equal(fourthBlocked.reason, 'TRIGGER_LIMIT_REACHED');
+
+  // 7. Orphaned PENDING trigger expires after pendingTtlMs and allows re-triggering the same head
+  const orphanTask = makePrTask({
+    loopId: 'rl-orphan',
+    reviewTriggers: [{
+      idempotencyKey: 'rl-orphan-1',
+      headSha: HEAD_A,
+      status: 'PENDING',
+      commentId: null,
+      commentUrl: null,
+      createdAt: '2026-11-18T00:00:00.000Z',
+      postedAt: null,
+      error: null,
+    }],
+  });
+  await store.savePrTask('rl-orphan', orphanTask);
+  const orphanRecovered = await triggerGeminiReview({
+    loopId: 'rl-orphan',
+    prTask: orphanTask,
+    prState: { state: 'OPEN', headRefOid: HEAD_A },
+    comments: [],
+    store,
+    pendingTtlMs: 60_000,
+    nowFn: () => '2026-11-18T00:05:00.000Z',
+    postCommentFn: async () => ({ commentId: 'gh-retriggered' }),
+  });
+  assert.equal(orphanRecovered.posted, true);
+  assert.equal(orphanRecovered.trigger.commentId, 'gh-retriggered');
+  const afterOrphan = await store.loadPrTask('rl-orphan');
+  assert.equal(afterOrphan.reviewTriggers[0].status, 'FAILED');
+  assert.equal(afterOrphan.reviewTriggers[0].error, 'PENDING_EXPIRED_WITHOUT_COMMENT');
+  assert.equal(afterOrphan.reviewTriggers[1].status, 'POSTED');
+
+  // 8. True overlapping Promise.all concurrency with lease serialization enforces <= 3 triggers
+  const raceTask = makePrTask({
+    loopId: 'rl-promise-all',
+    reviewTriggers: [
+      { idempotencyKey: 'p1', headSha: '1'.repeat(40), status: 'POSTED' },
+      { idempotencyKey: 'p2', headSha: '2'.repeat(40), status: 'POSTED' },
+    ],
+  });
+  await store.savePrTask('rl-promise-all', raceTask);
+  let leaseChain = Promise.resolve();
+  const serializedLease = (fn) => {
+    const run = leaseChain.then(fn, fn);
+    leaseChain = run.catch(() => {});
+    return run;
+  };
+  let racePostCount = 0;
+  const [rA, rB] = await Promise.all([
+    triggerGeminiReview({
+      loopId: 'rl-promise-all',
+      prTask: raceTask,
+      prState: { state: 'OPEN', headRefOid: HEAD_A },
+      comments: [],
+      store,
+      withLeaseFn: serializedLease,
+      postCommentFn: async () => {
+        racePostCount += 1;
+        await new Promise((r) => setTimeout(r, 15));
+        return { commentId: `gh-race-${racePostCount}` };
+      },
+    }),
+    triggerGeminiReview({
+      loopId: 'rl-promise-all',
+      prTask: raceTask,
+      prState: { state: 'OPEN', headRefOid: HEAD_A },
+      comments: [],
+      store,
+      withLeaseFn: serializedLease,
+      postCommentFn: async () => {
+        racePostCount += 1;
+        await new Promise((r) => setTimeout(r, 15));
+        return { commentId: `gh-race-${racePostCount}` };
+      },
+    }),
+  ]);
+  const postedResults = [rA, rB].filter((r) => r.posted);
+  const blockedResults = [rA, rB].filter((r) => !r.posted);
+  assert.equal(postedResults.length, 1);
+  assert.equal(blockedResults.length, 1);
+  assert.equal(racePostCount, 1);
 });
 
 test('assertPrActionAuthorized and recordPrFixRound enforce per-action permissions and 2-round shared boundary escalation', () => {

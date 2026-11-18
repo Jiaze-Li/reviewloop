@@ -12,6 +12,7 @@ import { DEFAULT_TRUSTED_BOT_LOGINS } from './objective.js';
 const execFileAsync = promisify(execFile);
 
 export const MAX_REVIEW_TRIGGERS = 3;
+export const PENDING_TRIGGER_TTL_MS = 2 * 60 * 1000;
 export const BOT_SESSION_MARKER = '<!-- jiaze-review-session:v1 -->';
 export const TRIGGER_MARKER_PREFIX = '<!-- reviewloop-trigger:';
 
@@ -325,14 +326,19 @@ export async function triggerGeminiReview({
   store,
   postCommentFn,
   withLeaseFn = async (fn) => fn(),
+  pendingTtlMs = PENDING_TRIGGER_TTL_MS,
   nowFn = () => new Date().toISOString(),
 }) {
   const phaseA = await withLeaseFn(async () => {
     const freshTask = (await store.loadPrTask(loopId)) ?? prTask;
     const triggers = Array.isArray(freshTask.reviewTriggers) ? [...freshTask.reviewTriggers] : [];
     freshTask.reviewTriggers = triggers;
+    const nowIso = nowFn();
+    const nowMs = Date.parse(nowIso) || Date.now();
+    let expiredAny = false;
 
-    // Crash recovery: reconcile any PENDING trigger against existing PR comments first
+    // Crash recovery: reconcile any PENDING trigger against existing PR comments first,
+    // and expire orphaned PENDING records that never reached GitHub past pendingTtlMs.
     for (const pending of triggers.filter((t) => t.status === 'PENDING')) {
       const marker = triggerMarker(pending.idempotencyKey);
       const existing = (Array.isArray(comments) ? comments : []).find((c) => String(c?.body ?? '').includes(marker));
@@ -340,8 +346,8 @@ export async function triggerGeminiReview({
         pending.status = 'POSTED';
         pending.commentId = existing.id ?? pending.commentId ?? null;
         pending.commentUrl = existing.url ?? pending.commentUrl ?? null;
-        pending.postedAt = existing.createdAt ?? nowFn();
-        freshTask.updatedAt = nowFn();
+        pending.postedAt = existing.createdAt ?? nowIso;
+        freshTask.updatedAt = nowIso;
         await store.savePrTask(loopId, freshTask);
         if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
         return {
@@ -354,6 +360,17 @@ export async function triggerGeminiReview({
           },
         };
       }
+      const createdMs = Date.parse(pending.createdAt ?? '');
+      if (Number.isFinite(createdMs) && (nowMs - createdMs) >= pendingTtlMs) {
+        pending.status = 'FAILED';
+        pending.error = 'PENDING_EXPIRED_WITHOUT_COMMENT';
+        expiredAny = true;
+      }
+    }
+    if (expiredAny) {
+      freshTask.updatedAt = nowIso;
+      await store.savePrTask(loopId, freshTask);
+      if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
     }
 
     const session = parseTrustedBotSession({ comments, trustedBotLogins: freshTask.trustedBotLogins });
