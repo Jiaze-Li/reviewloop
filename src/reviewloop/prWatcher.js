@@ -93,6 +93,9 @@ export async function pollPrOnce({
     freshPrTask.watcher = {
       ...(freshPrTask.watcher ?? {}),
       lastPollAt: nowIso,
+      consecutiveErrors: 0,
+      lastError: null,
+      lastErrorAt: null,
     };
     freshPrTask.updatedAt = nowIso;
 

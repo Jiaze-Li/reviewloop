@@ -323,8 +323,9 @@ test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error 
   assert.equal(trigRes.posted, true);
   assert.equal(trigRes.postedCount, 1);
 
-  // Watcher survives transient network error and recovers on next poll
+  // Watcher survives transient network error, increments consecutiveErrors, and resets it on recovery
   let calls = 0;
+  let observedConsecutiveErrorsDuringOutage = 0;
   let now = 0;
   const watchRes = await runPrWatcher({
     loopId: loopState.loopId,
@@ -334,6 +335,7 @@ test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error 
     fetchPrSnapshotFn: async () => {
       calls += 1;
       if (calls === 1) throw new Error('gh network timeout');
+      observedConsecutiveErrorsDuringOutage = (await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors;
       return {
         prState: { state: 'OPEN', headRefOid: HEAD_A },
         comments: [{
@@ -350,7 +352,9 @@ test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error 
   });
   assert.equal(watchRes.status, 'PASS');
   assert.equal(calls, 2);
-  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors, 1);
+  assert.equal(observedConsecutiveErrorsDuringOutage, 1);
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors, 0);
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.lastError, null);
 
   // stopPrTask remains idempotent on already-STOPPED / HUMAN_REQUIRED / PASS loops,
   // while bindPrAgent and triggerPrReviewCli reject with their own operation errors.
