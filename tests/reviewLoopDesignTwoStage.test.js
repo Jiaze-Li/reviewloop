@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
   buildFileRequestPrompt, validateAdjudication, validateProposals, validateFileRequest, decideDesignTransition, finalizePassComment,
-  collectDesignContext, readRequestedFiles, DESIGN_LIMITS,
+  collectDesignContext, readRequestedFiles, DESIGN_LIMITS, buildProposalPrompt, buildAdjudicationPrompt,
 } from '../src/reviewloop/designTwoStage.js';
 import { designContentSha256 } from '../src/reviewloop/designTarget.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
@@ -298,5 +298,92 @@ test('file-request prompt says oversize files are unavailable (not truncated) an
   const r = await readRequestedFiles({ cwd, context, requested: ['big.txt'] });
   assert.equal(r.files.length, 0);
   assert.deepEqual(r.rejected.map((x) => x.path), ['big.txt']);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+// ------------------------------------------------- malformed-output retry
+
+const OK_USAGE = { input_tokens: 1, output_tokens: 1 };
+
+test('prompts state field rules and carry a concrete example JSON', () => {
+  const ctx = { tree: [], treeOmitted: 0, architecture: null, packageJson: null };
+  const f = buildFileRequestPrompt({ plan: PLAN, context: ctx, workerSummary: null });
+  const p = buildProposalPrompt({ plan: PLAN, context: ctx, files: [], rejected: [], workerSummary: null });
+  const a = buildAdjudicationPrompt({ plan: PLAN, proposals: PROPOSALS.proposals, designText: DESIGN, history: [], exchangeCount: 0 });
+  for (const [name, prompt] of Object.entries({ f, p, a })) {
+    assert.match(prompt, /ONE JSON object and nothing else/, name);
+    const ex = prompt.split('\n').find((l) => l.startsWith('Example: '));
+    assert.ok(ex, `${name} has an example`);
+    assert.doesNotThrow(() => JSON.parse(ex.slice('Example: '.length)), name);
+    assert.ok(!ex.includes('P1|P2'), name);
+  }
+  assert.match(p, /title, summary and tradeoffs/);
+  assert.match(a, /MUST be non-empty when verdict is NEEDS_HUMAN/);
+  assert.match(a, /severity exactly "P1" or "P2"/);
+  assert.match(a, /non-empty strings/);
+});
+
+test('one malformed Reviewer proposal output is retried once with the concrete error, then the round succeeds', async () => {
+  const cwd = gitRepo();
+  let proposalCalls = 0;
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      reviewer: (a) => {
+        if (a.stage === 'files') return { value: { requestedFiles: [] }, usage: OK_USAGE, model: 'm' };
+        proposalCalls += 1;
+        if (proposalCalls === 1) return { value: { malformed: true, reason: 'model output is not a JSON object', raw: 'Sure! Here is my plan' }, usage: OK_USAGE, model: 'm' };
+        return { value: PROPOSALS, usage: OK_USAGE, model: 'm' };
+      },
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  const proposalPrompts = log.reviewer.filter((x) => x.stage === 'proposal').map((x) => x.prompt);
+  assert.equal(proposalPrompts.length, 2);
+  assert.ok(!proposalPrompts[0].includes('PREVIOUS REPLY WAS REJECTED'));
+  assert.ok(proposalPrompts[1].startsWith(proposalPrompts[0]));
+  assert.match(proposalPrompts[1], /PREVIOUS REPLY WAS REJECTED: proposal output is not a JSON object/);
+  assert.equal(r.telemetry.reviewerCalls, 3);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('a malformed Supervisor adjudication is retried once and can then PASS', async () => {
+  const cwd = gitRepo();
+  const { ctl, log } = makeCtl({ cwd, fakes: { supervisor: (n) => (n === 1 ? { comparison: { verdict: 'NEEDS_HUMAN', reason: 'r', workerSummary: 'w' }, blockingFindings: [] } : adj()) } });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  assert.equal(log.supervisor.length, 2);
+  assert.match(log.supervisor[1].prompt, /NEEDS_HUMAN requires humanQuestions/);
+  assert.equal(r.telemetry.supervisorCalls, 2);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('two malformed outputs in a row fail closed with the concrete reason and a bounded raw excerpt', async () => {
+  const cwd = gitRepo();
+  const long = `Sure, here is my answer ${'x'.repeat(1000)}`;
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      reviewer: (a) => (a.stage === 'files'
+        ? { value: { requestedFiles: [] }, usage: OK_USAGE, model: 'm' }
+        : { value: { malformed: true, reason: 'model output is not a JSON object', raw: long }, usage: OK_USAGE, model: 'm' }),
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'HUMAN_REQUIRED');
+  assert.equal(r.designSha256, undefined);
+  assert.equal(log.reviewer.filter((x) => x.stage === 'proposal').length, 2, 'exactly one retry, no more');
+  assert.equal(log.supervisor.length, 0);
+  const text = JSON.stringify(r);
+  assert.match(text, /Reviewer proposals unusable \(proposal output is not a JSON object\)/);
+  assert.match(text, /Sure, here is my answer/);
+  assert.ok(!text.includes('x'.repeat(400)), 'excerpt is bounded');
   rmSync(cwd, { recursive: true, force: true });
 });
