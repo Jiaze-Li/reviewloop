@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:16:24.400Z",
+  "updatedAt": "2026-11-18T05:18:03.451Z",
   "task": {
     "id": "plan/pr-task-20261118",
     "branch": "plan/pr-task-20261118",
     "title": "plan/pr-task-20261118",
     "task": "Development branch: plan/pr-task-20261118",
     "started": "2026-11-18T11:41:22+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "fix(pr-task): expire orphaned PENDING triggers and add concurrent Promise.all cap test",
     "next": "等待 PR 51 机器人重新验证 F007 与 F008 修复结果，随后决定真实端到端验证与合并",
     "history": [
@@ -62,13 +62,15 @@
     ],
     "pr": {
       "number": 51,
-      "state": "open",
+      "state": "closed",
       "title": "docs(plan): event-driven PR repair task with bounded review triggers",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/51",
-      "merged": false,
-      "updatedAt": "2026-11-18T05:16:05Z"
+      "merged": true,
+      "mergedAt": "2026-11-18T05:17:54Z",
+      "closedAt": "2026-11-18T05:17:54Z",
+      "updatedAt": "2026-11-18T05:17:54Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-18T05:17:54Z",
+    "outcome": "Merged"
   }
 }
