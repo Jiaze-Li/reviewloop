@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-18T05:33:14.151Z",
+  "task": {
+    "id": "fix/design-reviewer-json-robustness",
+    "branch": "fix/design-reviewer-json-robustness",
+    "title": "fix/design-reviewer-json-robustness",
+    "task": "Development branch: fix/design-reviewer-json-robustness",
+    "started": "2026-11-18T13:33:02+08:00",
+    "status": "In progress",
+    "current": "Retry design review once when the reviewer's reply is unusable and show why it failed",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "aa89aadee0be9993565ae1dd219af6a7431b3c6c",
+        "branch": "fix/design-reviewer-json-robustness",
+        "timestamp": "2026-11-18T13:33:02+08:00",
+        "message": "Retry design review once when the reviewer's reply is unusable and show why it failed"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
