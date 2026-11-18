@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:33:26.584Z",
+  "updatedAt": "2026-11-18T05:39:36.685Z",
   "task": {
     "id": "fix/design-reviewer-json-robustness",
     "branch": "fix/design-reviewer-json-robustness",
     "title": "fix/design-reviewer-json-robustness",
     "task": "Development branch: fix/design-reviewer-json-robustness",
     "started": "2026-11-18T13:33:02+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Retry design review once when the reviewer's reply is unusable and show why it failed",
     "next": "等评审机器人审完这个草稿 PR，通过后合并；合并后观察设计评审是否还会因格式问题中断",
     "history": [],
@@ -21,13 +21,15 @@
     ],
     "pr": {
       "number": 52,
-      "state": "open",
+      "state": "closed",
       "title": "Retry design review once when the reviewer's reply is unusable and show why it failed",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/52",
-      "merged": false,
-      "updatedAt": "2026-11-18T05:33:15Z"
+      "merged": true,
+      "mergedAt": "2026-11-18T05:39:27Z",
+      "closedAt": "2026-11-18T05:39:27Z",
+      "updatedAt": "2026-11-18T05:39:28Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-18T05:39:27Z",
+    "outcome": "Merged"
   }
 }
