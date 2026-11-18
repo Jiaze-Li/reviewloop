@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:11:27.437Z",
+  "updatedAt": "2026-11-18T05:16:12.963Z",
   "task": {
     "id": "plan/pr-task-20261118",
     "branch": "plan/pr-task-20261118",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/pr-task-20261118",
     "started": "2026-11-18T11:41:22+08:00",
     "status": "In progress",
-    "current": "fix(pr-task): resolve PR 51 concurrency, lease retry, PID check, and trigger cap findings",
+    "current": "fix(pr-task): expire orphaned PENDING triggers and add concurrent Promise.all cap test",
     "next": "等待 PR 51 机器人重新验证 F001-F006 修复结果，随后决定真实端到端验证与合并",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-18T13:11:07+08:00",
         "text": "feat(pr-task): implement event-driven PR repair orchestration (taskType: pr)"
+      },
+      {
+        "at": "2026-11-18T13:16:02+08:00",
+        "text": "fix(pr-task): resolve PR 51 concurrency, lease retry, PID check, and trigger cap findings"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/pr-task-20261118",
         "timestamp": "2026-11-18T13:11:07+08:00",
         "message": "fix(pr-task): resolve PR 51 concurrency, lease retry, PID check, and trigger cap findings"
+      },
+      {
+        "sha": "10d974eeeb9d9d0f71c875a1fd85deb3588187bb",
+        "branch": "plan/pr-task-20261118",
+        "timestamp": "2026-11-18T13:16:02+08:00",
+        "message": "fix(pr-task): expire orphaned PENDING triggers and add concurrent Promise.all cap test"
       }
     ],
     "pr": {
