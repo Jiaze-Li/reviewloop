@@ -354,6 +354,16 @@ export function evaluatePrStatus({ prState, prTask, comments = [] }) {
   }
 
   if (session.sessionStatus === BOT_SESSION_STATUSES.REWORK) {
+    if (session.lastReviewedHead !== liveHeadSha || session.staleFor === liveHeadSha) {
+      return {
+        verdict: 'WAITING_FOR_REVIEW',
+        reason: 'STALE_BOT_REWORK',
+        prStatus: 'OPEN',
+        liveHeadSha,
+        boundHeadSha,
+        session,
+      };
+    }
     return {
       verdict: 'REWORK',
       reason: 'BOT_REWORK',

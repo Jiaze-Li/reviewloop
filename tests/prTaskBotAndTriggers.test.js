@@ -587,6 +587,41 @@ test('AC-01: parses real jiaze-claude-review-bot[bot] jiaze-review-state base64u
   });
   assert.equal(staleMarked.verdict, 'WAITING_FOR_REVIEW');
   assert.equal(staleMarked.reason, 'STALE_BOT_READY');
+
+  // Stale REWORK on an old HEAD or marked staleFor -> WAITING_FOR_REVIEW (STALE_BOT_REWORK), not REWORK
+  const staleReworkOldHead = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-stale-rework-head',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({
+        ...realReadyState,
+        status: 'REWORK',
+        lastReviewedHead: HEAD_B,
+        findings: [{ id: 'F005', severity: 'P2', status: 'OPEN', title: 'Old head finding' }],
+      }, 'REWORK'),
+    }],
+  });
+  assert.equal(staleReworkOldHead.verdict, 'WAITING_FOR_REVIEW');
+  assert.equal(staleReworkOldHead.reason, 'STALE_BOT_REWORK');
+
+  const staleReworkMarked = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-stale-rework-marked',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({
+        ...realReadyState,
+        status: 'REWORK',
+        staleFor: HEAD_A,
+        findings: [{ id: 'F006', severity: 'P2', status: 'OPEN', title: 'Stale-marked finding' }],
+      }, 'REWORK'),
+    }],
+  });
+  assert.equal(staleReworkMarked.verdict, 'WAITING_FOR_REVIEW');
+  assert.equal(staleReworkMarked.reason, 'STALE_BOT_REWORK');
 });
 
 test('AC-02: pushPrHead advances prTask.boundHeadSha after fast-forward push and rejects drift/rebase/unauthorized', async () => {
