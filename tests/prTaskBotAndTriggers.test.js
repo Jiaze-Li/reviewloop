@@ -619,6 +619,34 @@ test('AC-02: pushPrHead advances prTask.boundHeadSha after fast-forward push and
   assert.equal(pushed.pushed, true);
   assert.equal(pushed.oldHeadSha, HEAD_A);
   assert.equal(pushed.newHeadSha, HEAD_B);
+  assert.equal(pushed.remoteVerified, true);
+
+  // Post-push GitHub lag/transient fetch failure still commits boundHeadSha after git push succeeds
+  const lagTask = makePrTask({ loopId: 'rl-lag-push' });
+  await store.savePrTask(lagTask.loopId, lagTask);
+  let lagFetchCalls = 0;
+  const lagPushed = await pushPrHead({
+    loopId: lagTask.loopId,
+    store,
+    postPushRetries: 1,
+    postPushRetryDelayMs: 0,
+    fetchPrSnapshotFn: async () => {
+      lagFetchCalls += 1;
+      if (lagFetchCalls === 1) {
+        return { prState: { state: 'OPEN', headRefOid: HEAD_A, headRefName: 'feat/pr-task' }, comments: [] };
+      }
+      throw new Error('transient gh timeout');
+    },
+    execFn: async (_cmd, args) => {
+      if (args.includes('--abbrev-ref')) return { stdout: 'feat/pr-task\n' };
+      if (args.includes('HEAD') && args.includes('rev-parse')) return { stdout: `${HEAD_B}\n` };
+      return { stdout: '' };
+    },
+  });
+  assert.equal(lagPushed.pushed, true);
+  assert.equal(lagPushed.newHeadSha, HEAD_B);
+  assert.equal(lagPushed.remoteVerified, false);
+  assert.equal((await store.loadPrTask(lagTask.loopId)).boundHeadSha, HEAD_B);
 
   const reloaded = await store.loadPrTask(prTask.loopId);
   assert.equal(reloaded.boundHeadSha, HEAD_B);

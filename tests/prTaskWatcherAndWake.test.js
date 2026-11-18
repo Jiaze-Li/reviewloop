@@ -259,6 +259,29 @@ test('prCli formats status, builds resume text, stops watcher/loop, and rejects 
   assert.equal(raceOutcome.reason, 'STATE_CHANGED_DURING_POLL');
   assert.equal((await sRace.load(raceSetup.loopState.loopId)).state, 'STOPPED');
 
+  // Concurrent boundHeadSha advance during slow fetchPrSnapshotFn does NOT trigger spurious HEAD_DRIFT
+  const pPushRace = new MemoryPersistence();
+  const sPushRace = new ReviewLoopStore(pPushRace);
+  const pushRaceSetup = setupPrLoop({ watcher: { pid: 22222 } });
+  await sPushRace.save(pushRaceSetup.loopState.loopId, pushRaceSetup.loopState);
+  await sPushRace.savePrTask(pushRaceSetup.loopState.loopId, pushRaceSetup.prTask);
+  const pushRaceOutcome = await pollPrOnce({
+    loopId: pushRaceSetup.loopState.loopId,
+    store: sPushRace,
+    fetchPrSnapshotFn: async () => {
+      const updated = await sPushRace.loadPrTask(pushRaceSetup.loopState.loopId);
+      updated.boundHeadSha = 'b'.repeat(40);
+      await sPushRace.savePrTask(pushRaceSetup.loopState.loopId, updated);
+      return {
+        prState: { state: 'OPEN', headRefOid: HEAD_A },
+        comments: [],
+      };
+    },
+  });
+  assert.equal(pushRaceOutcome.done, false);
+  assert.equal(pushRaceOutcome.reason, 'BOUND_HEAD_CHANGED_DURING_POLL');
+  assert.equal((await sPushRace.load(pushRaceSetup.loopState.loopId)).state, 'WAITING_FOR_REVIEW');
+
   // Retired mode=PR rejected
   assert.throws(
     () => buildPrResumeText({ loopState: { loopId: 'old', objective: { mode: 'PR' } }, prTask }),

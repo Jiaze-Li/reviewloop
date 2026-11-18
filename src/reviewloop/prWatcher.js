@@ -48,6 +48,7 @@ export async function pollPrOnce({
       done: false,
       repoFullName: prTask.repoFullName,
       prNumber: prTask.prNumber,
+      boundHeadSha: String(prTask.boundHeadSha ?? '').trim().toLowerCase(),
     };
   });
 
@@ -71,6 +72,14 @@ export async function pollPrOnce({
     }
     if (freshLoopState.state !== REVIEW_LOOP_STATES.WAITING_FOR_REVIEW) {
       return { done: true, status: freshLoopState.state, reason: 'STATE_CHANGED_DURING_POLL' };
+    }
+    const freshBoundHeadSha = String(freshPrTask.boundHeadSha ?? '').trim().toLowerCase();
+    if (freshBoundHeadSha !== initialTarget.boundHeadSha) {
+      return {
+        done: false,
+        status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW,
+        reason: 'BOUND_HEAD_CHANGED_DURING_POLL',
+      };
     }
 
     const evaluated = evaluatePrStatus({

@@ -653,6 +653,9 @@ export async function pushPrHead({
   fetchPrSnapshotFn = fetchPrSnapshotViaGh,
   withLeaseFn = async (fn) => fn(),
   nowFn = () => new Date().toISOString(),
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  postPushRetries = 2,
+  postPushRetryDelayMs = 1000,
 }) {
   return withLeaseFn(async () => {
     const freshLoopState = typeof store.load === 'function' ? await store.load(loopId) : null;
@@ -711,13 +714,30 @@ export async function pushPrHead({
 
     await execFn('git', ['-C', repoRoot, 'push', 'origin', `HEAD:${headBranch}`], { encoding: 'utf8' });
 
-    const postSnapshot = await fetchPrSnapshotFn({
-      repoFullName: freshTask.repoFullName,
-      prNumber: freshTask.prNumber,
-    });
-    const postRemoteSha = String(postSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
-    if (postRemoteSha !== localHead) {
-      throw new Error(`ReviewLoop PR: remote HEAD after push (${postRemoteSha || 'missing'}) does not match pushed commit (${localHead})`);
+    let remoteVerified = false;
+    let postRemoteSha = '';
+    for (let attempt = 0; attempt <= postPushRetries; attempt += 1) {
+      try {
+        const postSnapshot = await fetchPrSnapshotFn({
+          repoFullName: freshTask.repoFullName,
+          prNumber: freshTask.prNumber,
+        });
+        postRemoteSha = String(postSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
+        if (postRemoteSha === localHead) {
+          remoteVerified = true;
+          break;
+        }
+        if (postRemoteSha && postRemoteSha !== oldSha) {
+          throw new Error(`ReviewLoop PR: remote HEAD after push (${postRemoteSha}) does not match pushed commit (${localHead})`);
+        }
+      } catch (err) {
+        if (String(err?.message ?? '').includes('does not match pushed commit')) {
+          throw err;
+        }
+      }
+      if (attempt < postPushRetries && postPushRetryDelayMs > 0) {
+        await sleepFn(postPushRetryDelayMs);
+      }
     }
 
     const checkTask = await store.loadPrTask(loopId);
@@ -730,7 +750,7 @@ export async function pushPrHead({
     checkTask.boundHeadSha = localHead;
     checkTask.headHistory = [
       ...(Array.isArray(checkTask.headHistory) ? checkTask.headHistory : []),
-      { fromSha: oldSha, toSha: localHead, pushedAt, actor: 'worker' },
+      { fromSha: oldSha, toSha: localHead, pushedAt, actor: 'worker', remoteVerified },
     ];
     checkTask.updatedAt = pushedAt;
     await store.savePrTask(loopId, checkTask);
@@ -739,6 +759,7 @@ export async function pushPrHead({
       oldHeadSha: oldSha,
       newHeadSha: localHead,
       headBranch,
+      remoteVerified,
     };
   });
 }
