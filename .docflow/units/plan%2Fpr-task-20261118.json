@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:18:03.451Z",
+  "updatedAt": "2026-11-18T05:18:37.784Z",
   "task": {
     "id": "plan/pr-task-20261118",
     "branch": "plan/pr-task-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T11:41:22+08:00",
     "status": "Completed",
     "current": "fix(pr-task): expire orphaned PENDING triggers and add concurrent Promise.all cap test",
-    "next": "等待 PR 51 机器人重新验证 F007 与 F008 修复结果，随后决定真实端到端验证与合并",
+    "next": "",
     "history": [
       {
         "at": "2026-11-18T11:55:51+08:00",
