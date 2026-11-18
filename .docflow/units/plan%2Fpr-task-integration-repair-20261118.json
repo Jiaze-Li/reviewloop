@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T06:56:49.610Z",
+  "updatedAt": "2026-11-18T07:07:31.719Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/pr-task-integration-repair-20261118",
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
-    "current": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag",
+    "current": "fix(pr-task): reset watcher consecutiveErrors after a successful poll",
     "next": "确认 PR 53 的人工复审或手动触发复检，并授权测试 PR 运行真实闭环验收",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-18T14:56:29+08:00",
         "text": "fix(pr-task): keep stopPrTask idempotent and clean up duplicate guard blocks"
+      },
+      {
+        "at": "2026-11-18T15:07:20+08:00",
+        "text": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "plan/pr-task-integration-repair-20261118",
         "timestamp": "2026-11-18T14:56:29+08:00",
         "message": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag"
+      },
+      {
+        "sha": "7f1e2f1d2a4127dc52ecd9458fca5a15d9994b39",
+        "branch": "plan/pr-task-integration-repair-20261118",
+        "timestamp": "2026-11-18T15:07:20+08:00",
+        "message": "fix(pr-task): reset watcher consecutiveErrors after a successful poll"
       }
     ],
     "pr": {
