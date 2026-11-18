@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T07:14:44.600Z",
+  "updatedAt": "2026-11-18T07:14:49.498Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
     "current": "fix(pr-task): treat stale REWORK bot sessions as waiting for review",
-    "next": "等待 PR 53 机器人复审 P3 修复并确认是否开始真实测试 PR 闭环验收",
+    "next": "等待 PR 53 机器人复审最终审计新发现的 P2 问题并确认是否就绪",
     "history": [
       {
         "at": "2026-11-18T14:03:40+08:00",
