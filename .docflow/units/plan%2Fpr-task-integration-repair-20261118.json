@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T06:56:44.028Z",
+  "updatedAt": "2026-11-18T06:56:49.610Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
     "current": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag",
-    "next": "等待 PR 53 机器人复审 F005 修复并确认测试 PR 授权",
+    "next": "确认 PR 53 的人工复审或手动触发复检，并授权测试 PR 运行真实闭环验收",
     "history": [
       {
         "at": "2026-11-18T14:03:40+08:00",
