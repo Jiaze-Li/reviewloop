@@ -77,12 +77,12 @@
 `{ idempotencyKey, headSha, status: 'PENDING' | 'POSTED' | 'FAILED', commentId, commentUrl, createdAt, postedAt, error }`
 
 1. **发送前前置门禁（全部满足才允许发）**：
-   - `postedCount = reviewTriggers.filter(t => t.status === 'POSTED').length < 3`；
+   - `activeCount = reviewTriggers.filter(t => t.status === 'POSTED' || t.status === 'PENDING').length < 3`（在 `loopLease` 内与 `PENDING` 写入原子完成）；
    - 用户已授予 `comment` 权限；
    - PR 实时状态为 `OPEN` 且 `liveHeadSha === boundHeadSha`；
    - 最新可信 Bot 会话不是 `READY`（在当前 HEAD）、不是 `REVIEW_IN_PROGRESS` / `AUDIT_PENDING` / `PARTIAL`、也不是同一 `lastReviewedHead === liveHeadSha` 上未提交新代码前的重复 `REWORK`；
    - 不存在同 `headSha` 的 `PENDING` 或 `POSTED` 记录。
-2. **两阶段幂等写入**：先在 `loopLease` 内写入 `PENDING`（含唯一 `idempotencyKey` 标记）并落盘 `workflow.json`，再调用 `gh pr comment`；成功后更新为 `POSTED` 与真实 `commentId`；失败记 `FAILED`（不计入 3 次上限）。崩溃恢复时先按 `idempotencyKey` 检索 PR 评论，已存在则直接补记 `POSTED`，绝不重复发表。
+2. **两阶段幂等写入**：先在 `loopLease` 内重读最新 `prTask` 并写入 `PENDING`（含唯一 `idempotencyKey` 标记）落盘 `workflow.json`，再在锁外调用 `gh pr comment`；完成后再次在 `loopLease` 内重读最新 `prTask` 并仅更新对应 `idempotencyKey` 条目为 `POSTED`（含真实 `commentId`）或 `FAILED`（不计入 3 次上限），避免覆盖并发更新。崩溃恢复时先按 `idempotencyKey` 检索 PR 评论，已存在则直接补记 `POSTED`，绝不重复发表。
 3. **不计入上限的操作**：`@gemini dismiss <Fxxx>`、Bot 内部 verification/audit/续跑、人类用户评论、重复 webhook 均不写入 `reviewTriggers`。
 
 ### 5.3 核心数据流与状态转换

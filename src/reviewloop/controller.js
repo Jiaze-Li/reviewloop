@@ -9,6 +9,7 @@ import {
   fetchPrSnapshotViaGh,
   postPrCommentViaGh,
 } from './prTaskEngine.js';
+import { isPidAlive } from './prWatcher.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
 import { buildReviewRecord } from './reviewRecord.js';
@@ -630,7 +631,12 @@ export function createReviewLoopController({
 
     if (evaluated.verdict === 'WAITING_FOR_REVIEW') {
       recordTransition(loopState, REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, evaluated.reason);
-      if (typeof spawnPrWatcherFn === 'function' && !prTask.watcher?.pid) {
+      const existingPid = prTask.watcher?.pid ?? null;
+      const watcherAlive = isPidAlive(existingPid);
+      if (!watcherAlive && existingPid) {
+        prTask.watcher = { ...(prTask.watcher ?? {}), pid: null };
+      }
+      if (typeof spawnPrWatcherFn === 'function' && !watcherAlive) {
         const spawned = spawnPrWatcherFn({ loopId: loopState.loopId, runtimeRoot, env });
         prTask.watcher = {
           ...(prTask.watcher ?? {}),

@@ -171,6 +171,7 @@ test('triggerGeminiReview enforces max 3 posted triggers, ignores failed/dismiss
   for (let i = 1; i <= MAX_REVIEW_TRIGGERS; i += 1) {
     const sha = `${String(i).repeat(40)}`;
     prTask.boundHeadSha = sha;
+    await store.savePrTask(prTask.loopId, prTask);
     const res = await triggerGeminiReview({
       loopId: prTask.loopId,
       prTask,
@@ -248,6 +249,46 @@ test('triggerGeminiReview enforces max 3 posted triggers, ignores failed/dismiss
   assert.equal(recovered.recovered, true);
   assert.equal(recovered.trigger.commentId, 'gh-recovered');
   assert.equal(crashPostCalls, 0);
+
+  // 6. Cap counts PENDING + POSTED, and re-reading after postCommentFn preserves concurrent updates
+  const concurrentTask = makePrTask({
+    loopId: 'rl-concurrent',
+    reviewTriggers: [
+      { idempotencyKey: 'k1', headSha: '1'.repeat(40), status: 'POSTED' },
+      { idempotencyKey: 'k2', headSha: '2'.repeat(40), status: 'PENDING' },
+    ],
+  });
+  await store.savePrTask('rl-concurrent', concurrentTask);
+  const thirdRes = await triggerGeminiReview({
+    loopId: 'rl-concurrent',
+    prTask: concurrentTask,
+    prState: { state: 'OPEN', headRefOid: HEAD_A },
+    comments: [],
+    store,
+    postCommentFn: async () => {
+      const latest = await store.loadPrTask('rl-concurrent');
+      latest.latestBotSession = { sessionStatus: 'AUDIT_PENDING' };
+      await store.savePrTask('rl-concurrent', latest);
+      return { commentId: 'gh-3' };
+    },
+  });
+  assert.equal(thirdRes.posted, true);
+  const afterConcurrent = await store.loadPrTask('rl-concurrent');
+  assert.equal(afterConcurrent.latestBotSession.sessionStatus, 'AUDIT_PENDING');
+
+  // Now 2 POSTED + 1 PENDING = 3 active -> 4th head is blocked
+  afterConcurrent.boundHeadSha = '4'.repeat(40);
+  await store.savePrTask('rl-concurrent', afterConcurrent);
+  const fourthBlocked = await triggerGeminiReview({
+    loopId: 'rl-concurrent',
+    prTask: afterConcurrent,
+    prState: { state: 'OPEN', headRefOid: '4'.repeat(40) },
+    comments: [],
+    store,
+    postCommentFn: async () => ({ commentId: 'should-not-post' }),
+  });
+  assert.equal(fourthBlocked.posted, false);
+  assert.equal(fourthBlocked.reason, 'TRIGGER_LIMIT_REACHED');
 });
 
 test('assertPrActionAuthorized and recordPrFixRound enforce per-action permissions and 2-round shared boundary escalation', () => {

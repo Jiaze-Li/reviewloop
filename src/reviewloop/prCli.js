@@ -1,8 +1,23 @@
 // CLI helpers for `reviewloop pr <status|resume|stop>`.
 // Keeps retired `mode === 'PR'` sessions strictly isolated.
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { buildPrWakeContextPrompt } from './prWakeAdapter.js';
 import { REVIEW_LOOP_STATES, ReviewLoopStore, recordTransition, isTerminal } from './state.js';
+
+const execFileAsync = promisify(execFile);
+
+export async function isVerifiedWatcherPid(pid, loopId, execFn = execFileAsync) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    const { stdout } = await execFn('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
+    const cmd = String(stdout ?? '').trim();
+    return cmd.includes('prWatcher.js') && cmd.includes(String(loopId));
+  } catch {
+    return false;
+  }
+}
 
 export function formatPrStatusEntry({ loopState, prTask }) {
   const posted = (prTask.reviewTriggers ?? []).filter((t) => t.status === 'POSTED').length;
@@ -47,6 +62,7 @@ export async function stopPrTask({
   persistence,
   loopId,
   reason = 'stopped by user',
+  verifyWatcherPidFn = isVerifiedWatcherPid,
   killFn = (pid) => process.kill(pid, 'SIGTERM'),
 }) {
   const store = new ReviewLoopStore(persistence);
@@ -56,8 +72,15 @@ export async function stopPrTask({
     throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
   }
   const watcherPid = prTask.watcher?.pid ?? null;
+  let watcherStopped = null;
   if (Number.isInteger(watcherPid) && watcherPid > 0) {
-    try { killFn(watcherPid); } catch { /* process may have already exited */ }
+    const verified = await verifyWatcherPidFn(watcherPid, loopId);
+    if (verified) {
+      try {
+        killFn(watcherPid);
+        watcherStopped = watcherPid;
+      } catch { /* process may have already exited */ }
+    }
   }
   prTask.watcher = {
     ...(prTask.watcher ?? {}),
@@ -70,5 +93,5 @@ export async function stopPrTask({
   }
   await store.save(loopId, loopState);
   await store.savePrTask(loopId, prTask);
-  return { loopId, state: loopState.state, watcherStopped: watcherPid, reason };
+  return { loopId, state: loopState.state, watcherStopped, reason };
 }

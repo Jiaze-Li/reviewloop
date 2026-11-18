@@ -284,36 +284,37 @@ export function assertPrActionAuthorized({ action, prTask, prState }) {
 export function canTriggerGeminiReview({ prTask, prState, session }) {
   const triggers = Array.isArray(prTask?.reviewTriggers) ? prTask.reviewTriggers : [];
   const postedCount = triggers.filter((t) => t.status === 'POSTED').length;
-  if (postedCount >= MAX_REVIEW_TRIGGERS) {
-    return { allowed: false, reason: 'TRIGGER_LIMIT_REACHED', postedCount };
+  const activeCount = triggers.filter((t) => t.status === 'POSTED' || t.status === 'PENDING').length;
+  if (activeCount >= MAX_REVIEW_TRIGGERS) {
+    return { allowed: false, reason: 'TRIGGER_LIMIT_REACHED', postedCount, activeCount };
   }
   if (prTask?.permissions?.comment !== true) {
-    return { allowed: false, reason: 'PERMISSION_DENIED_COMMENT', postedCount };
+    return { allowed: false, reason: 'PERMISSION_DENIED_COMMENT', postedCount, activeCount };
   }
   const prStatus = String(prState?.state ?? '').trim().toUpperCase();
   if (prStatus !== 'OPEN') {
-    return { allowed: false, reason: 'PR_NOT_OPEN', postedCount };
+    return { allowed: false, reason: 'PR_NOT_OPEN', postedCount, activeCount };
   }
   const liveHeadSha = String(prState?.headRefOid ?? '').trim().toLowerCase();
   const boundHeadSha = String(prTask?.boundHeadSha ?? '').trim().toLowerCase();
   if (!liveHeadSha || liveHeadSha !== boundHeadSha) {
-    return { allowed: false, reason: 'HEAD_DRIFT', postedCount };
+    return { allowed: false, reason: 'HEAD_DRIFT', postedCount, activeCount };
   }
   if (triggers.some((t) => t.headSha === boundHeadSha && (t.status === 'POSTED' || t.status === 'PENDING'))) {
-    return { allowed: false, reason: 'ALREADY_TRIGGERED_FOR_HEAD', postedCount };
+    return { allowed: false, reason: 'ALREADY_TRIGGERED_FOR_HEAD', postedCount, activeCount };
   }
   if (session?.found) {
     if (WAITING_BOT_STATUSES.has(session.sessionStatus)) {
-      return { allowed: false, reason: `BOT_${session.sessionStatus}`, postedCount };
+      return { allowed: false, reason: `BOT_${session.sessionStatus}`, postedCount, activeCount };
     }
     if (session.sessionStatus === BOT_SESSION_STATUSES.READY && session.lastReviewedHead === liveHeadSha) {
-      return { allowed: false, reason: 'ALREADY_READY_ON_HEAD', postedCount };
+      return { allowed: false, reason: 'ALREADY_READY_ON_HEAD', postedCount, activeCount };
     }
     if (session.sessionStatus === BOT_SESSION_STATUSES.REWORK && session.lastReviewedHead === liveHeadSha) {
-      return { allowed: false, reason: 'UNCHANGED_REWORK_HEAD', postedCount };
+      return { allowed: false, reason: 'UNCHANGED_REWORK_HEAD', postedCount, activeCount };
     }
   }
-  return { allowed: true, reason: 'OK', postedCount };
+  return { allowed: true, reason: 'OK', postedCount, activeCount };
 }
 
 export async function triggerGeminiReview({
@@ -323,87 +324,130 @@ export async function triggerGeminiReview({
   comments = [],
   store,
   postCommentFn,
+  withLeaseFn = async (fn) => fn(),
   nowFn = () => new Date().toISOString(),
 }) {
-  const triggers = Array.isArray(prTask.reviewTriggers) ? prTask.reviewTriggers : [];
-  prTask.reviewTriggers = triggers;
+  const phaseA = await withLeaseFn(async () => {
+    const freshTask = (await store.loadPrTask(loopId)) ?? prTask;
+    const triggers = Array.isArray(freshTask.reviewTriggers) ? [...freshTask.reviewTriggers] : [];
+    freshTask.reviewTriggers = triggers;
 
-  // Crash recovery: reconcile any PENDING trigger against existing PR comments first
-  for (const pending of triggers.filter((t) => t.status === 'PENDING')) {
-    const marker = triggerMarker(pending.idempotencyKey);
-    const existing = (Array.isArray(comments) ? comments : []).find((c) => String(c?.body ?? '').includes(marker));
-    if (existing) {
-      pending.status = 'POSTED';
-      pending.commentId = existing.id ?? pending.commentId ?? null;
-      pending.commentUrl = existing.url ?? pending.commentUrl ?? null;
-      pending.postedAt = existing.createdAt ?? nowFn();
-      prTask.updatedAt = nowFn();
-      await store.savePrTask(loopId, prTask);
+    // Crash recovery: reconcile any PENDING trigger against existing PR comments first
+    for (const pending of triggers.filter((t) => t.status === 'PENDING')) {
+      const marker = triggerMarker(pending.idempotencyKey);
+      const existing = (Array.isArray(comments) ? comments : []).find((c) => String(c?.body ?? '').includes(marker));
+      if (existing) {
+        pending.status = 'POSTED';
+        pending.commentId = existing.id ?? pending.commentId ?? null;
+        pending.commentUrl = existing.url ?? pending.commentUrl ?? null;
+        pending.postedAt = existing.createdAt ?? nowFn();
+        freshTask.updatedAt = nowFn();
+        await store.savePrTask(loopId, freshTask);
+        if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
+        return {
+          done: true,
+          result: {
+            posted: true,
+            recovered: true,
+            trigger: pending,
+            postedCount: triggers.filter((t) => t.status === 'POSTED').length,
+          },
+        };
+      }
+    }
+
+    const session = parseTrustedBotSession({ comments, trustedBotLogins: freshTask.trustedBotLogins });
+    const gate = canTriggerGeminiReview({ prTask: freshTask, prState, session });
+    if (!gate.allowed) {
+      return {
+        done: true,
+        result: { posted: false, reason: gate.reason, postedCount: gate.postedCount },
+      };
+    }
+
+    const headSha = String(freshTask.boundHeadSha).trim().toLowerCase();
+    const attemptIndex = triggers.filter((t) => t.headSha === headSha).length;
+    const idempotencyKey = `rl-${sha256Hex(`${loopId}:${headSha}:${attemptIndex}`).slice(0, 16)}`;
+    const now = nowFn();
+
+    const record = {
+      idempotencyKey,
+      headSha,
+      status: 'PENDING',
+      commentId: null,
+      commentUrl: null,
+      createdAt: now,
+      postedAt: null,
+      error: null,
+    };
+    triggers.push(record);
+    freshTask.updatedAt = now;
+    await store.savePrTask(loopId, freshTask);
+    if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
+    return {
+      done: false,
+      idempotencyKey,
+      repoFullName: freshTask.repoFullName,
+      prNumber: freshTask.prNumber,
+    };
+  });
+
+  if (phaseA.done) {
+    return phaseA.result;
+  }
+
+  let postResult = null;
+  let postError = null;
+  try {
+    postResult = await postCommentFn({
+      repoFullName: phaseA.repoFullName,
+      prNumber: phaseA.prNumber,
+      body: buildReviewTriggerBody(phaseA.idempotencyKey),
+    });
+  } catch (err) {
+    postError = String(err?.message ?? err);
+  }
+
+  return withLeaseFn(async () => {
+    const freshTask = (await store.loadPrTask(loopId)) ?? prTask;
+    const triggers = Array.isArray(freshTask.reviewTriggers) ? [...freshTask.reviewTriggers] : [];
+    freshTask.reviewTriggers = triggers;
+    const target = triggers.find((t) => t.idempotencyKey === phaseA.idempotencyKey);
+
+    if (postError == null) {
+      const postedAt = nowFn();
+      if (target) {
+        target.status = 'POSTED';
+        target.commentId = postResult?.commentId ?? postResult?.id ?? null;
+        target.commentUrl = postResult?.commentUrl ?? postResult?.url ?? null;
+        target.postedAt = postedAt;
+      }
+      freshTask.updatedAt = postedAt;
+      await store.savePrTask(loopId, freshTask);
+      if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
       return {
         posted: true,
-        recovered: true,
-        trigger: pending,
+        recovered: false,
+        trigger: target ?? null,
         postedCount: triggers.filter((t) => t.status === 'POSTED').length,
       };
     }
-  }
 
-  const session = parseTrustedBotSession({ comments, trustedBotLogins: prTask.trustedBotLogins });
-  const gate = canTriggerGeminiReview({ prTask, prState, session });
-  if (!gate.allowed) {
-    return { posted: false, reason: gate.reason, postedCount: gate.postedCount };
-  }
-
-  const headSha = String(prTask.boundHeadSha).trim().toLowerCase();
-  const attemptIndex = triggers.filter((t) => t.headSha === headSha).length;
-  const idempotencyKey = `rl-${sha256Hex(`${loopId}:${headSha}:${attemptIndex}`).slice(0, 16)}`;
-  const now = nowFn();
-
-  const record = {
-    idempotencyKey,
-    headSha,
-    status: 'PENDING',
-    commentId: null,
-    commentUrl: null,
-    createdAt: now,
-    postedAt: null,
-    error: null,
-  };
-  triggers.push(record);
-  prTask.updatedAt = now;
-  await store.savePrTask(loopId, prTask);
-
-  try {
-    const res = await postCommentFn({
-      repoFullName: prTask.repoFullName,
-      prNumber: prTask.prNumber,
-      body: buildReviewTriggerBody(idempotencyKey),
-    });
-    record.status = 'POSTED';
-    record.commentId = res?.commentId ?? res?.id ?? null;
-    record.commentUrl = res?.commentUrl ?? res?.url ?? null;
-    record.postedAt = nowFn();
-    prTask.updatedAt = record.postedAt;
-    await store.savePrTask(loopId, prTask);
-    return {
-      posted: true,
-      recovered: false,
-      trigger: record,
-      postedCount: triggers.filter((t) => t.status === 'POSTED').length,
-    };
-  } catch (err) {
-    record.status = 'FAILED';
-    record.error = String(err?.message ?? err);
-    prTask.updatedAt = nowFn();
-    await store.savePrTask(loopId, prTask);
+    if (target) {
+      target.status = 'FAILED';
+      target.error = postError;
+    }
+    freshTask.updatedAt = nowFn();
+    await store.savePrTask(loopId, freshTask);
+    if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
     return {
       posted: false,
       reason: 'POST_FAILED',
-      error: record.error,
-      trigger: record,
+      error: postError,
+      trigger: target ?? null,
       postedCount: triggers.filter((t) => t.status === 'POSTED').length,
     };
-  }
+  });
 }
 
 export function recordPrFixRound({ prTask, boundaryKey = null, introducedNewBlocker = false }) {

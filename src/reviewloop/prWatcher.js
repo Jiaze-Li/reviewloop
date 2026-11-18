@@ -15,8 +15,9 @@ import { executeWake } from './prWakeAdapter.js';
 
 export const DEFAULT_BACKOFF_MS = Object.freeze([15_000, 30_000, 60_000]);
 export const DEFAULT_MAX_WAIT_MS = 30 * 60 * 1000;
+export const DEFAULT_LEASE_RETRY_MS = Object.freeze([100, 150, 200, 250, 300, 350, 400, 500]);
 
-function isPidAlive(pid) {
+export function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -31,75 +32,116 @@ export async function pollPrOnce({
   store,
   fetchPrSnapshotFn = fetchPrSnapshotViaGh,
   wakeFn = executeWake,
+  withLeaseFn = async (fn) => fn(),
   nowFn = () => new Date().toISOString(),
 }) {
-  const loopState = await store.load(loopId);
-  const prTask = await store.loadPrTask(loopId);
+  const initialTarget = await withLeaseFn(async () => {
+    const loopState = await store.load(loopId);
+    const prTask = await store.loadPrTask(loopId);
+    if (!loopState || !prTask) {
+      return { done: true, reason: 'LOOP_OR_PR_TASK_MISSING' };
+    }
+    if (loopState.state !== REVIEW_LOOP_STATES.WAITING_FOR_REVIEW) {
+      return { done: true, status: loopState.state, reason: 'NOT_WAITING' };
+    }
+    return {
+      done: false,
+      repoFullName: prTask.repoFullName,
+      prNumber: prTask.prNumber,
+    };
+  });
 
-  if (!loopState || !prTask) {
-    return { done: true, reason: 'LOOP_OR_PR_TASK_MISSING' };
-  }
-  if (loopState.state !== REVIEW_LOOP_STATES.WAITING_FOR_REVIEW) {
-    return { done: true, status: loopState.state, reason: 'NOT_WAITING' };
+  if (initialTarget.done) {
+    return initialTarget;
   }
 
+  // Network fetch runs outside the lease so concurrent `pr stop` is never blocked
+  // and we re-read state under the lease before committing any transition.
   const snapshot = await fetchPrSnapshotFn({
-    repoFullName: prTask.repoFullName,
-    prNumber: prTask.prNumber,
+    repoFullName: initialTarget.repoFullName,
+    prNumber: initialTarget.prNumber,
   });
 
-  const evaluated = evaluatePrStatus({
-    prState: snapshot.prState,
-    prTask,
-    comments: snapshot.comments,
+  return withLeaseFn(async () => {
+    const freshLoopState = await store.load(loopId);
+    const freshPrTask = await store.loadPrTask(loopId);
+
+    if (!freshLoopState || !freshPrTask) {
+      return { done: true, reason: 'LOOP_OR_PR_TASK_MISSING' };
+    }
+    if (freshLoopState.state !== REVIEW_LOOP_STATES.WAITING_FOR_REVIEW) {
+      return { done: true, status: freshLoopState.state, reason: 'STATE_CHANGED_DURING_POLL' };
+    }
+
+    const evaluated = evaluatePrStatus({
+      prState: snapshot.prState,
+      prTask: freshPrTask,
+      comments: snapshot.comments,
+    });
+
+    const nowIso = nowFn();
+    freshPrTask.latestBotSession = evaluated.session;
+    freshPrTask.watcher = {
+      ...(freshPrTask.watcher ?? {}),
+      lastPollAt: nowIso,
+    };
+    freshPrTask.updatedAt = nowIso;
+
+    if (evaluated.verdict === 'WAITING_FOR_REVIEW') {
+      await store.savePrTask(loopId, freshPrTask);
+      return { done: false, status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, reason: evaluated.reason };
+    }
+
+    const targetState = evaluated.verdict === 'PASS'
+      ? REVIEW_LOOP_STATES.PASS
+      : evaluated.verdict === 'REWORK'
+        ? REVIEW_LOOP_STATES.REWORK
+        : evaluated.verdict === 'STOPPED'
+          ? REVIEW_LOOP_STATES.STOPPED
+          : REVIEW_LOOP_STATES.HUMAN_REQUIRED;
+
+    recordTransition(freshLoopState, REVIEW_LOOP_STATES.REVIEWING, 'prWatcher received bot update');
+    recordTransition(freshLoopState, targetState, evaluated.reason);
+    if (targetState === REVIEW_LOOP_STATES.STOPPED || targetState === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+      freshPrTask.stopReason = evaluated.reason;
+    }
+    freshPrTask.watcher.pid = null;
+    freshPrTask.watcher.stoppedAt = nowIso;
+
+    let wakeResult = null;
+    if (targetState !== REVIEW_LOOP_STATES.STOPPED && typeof wakeFn === 'function') {
+      wakeResult = await wakeFn({ loopId, prTask: freshPrTask });
+      freshPrTask.watcher.wakeStatus = wakeResult.wakeStatus;
+      freshPrTask.watcher.wakeReason = wakeResult.reason ?? null;
+      freshPrTask.watcher.manualResumeCommand = wakeResult.manualResumeCommand ?? `reviewloop pr resume --loop ${loopId}`;
+    }
+
+    await store.save(loopId, freshLoopState);
+    await store.savePrTask(loopId, freshPrTask);
+
+    return {
+      done: true,
+      status: targetState,
+      reason: evaluated.reason,
+      wakeResult,
+    };
   });
+}
 
-  const nowIso = nowFn();
-  prTask.latestBotSession = evaluated.session;
-  prTask.watcher = {
-    ...(prTask.watcher ?? {}),
-    lastPollAt: nowIso,
-  };
-  prTask.updatedAt = nowIso;
-
-  if (evaluated.verdict === 'WAITING_FOR_REVIEW') {
-    await store.savePrTask(loopId, prTask);
-    return { done: false, status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, reason: evaluated.reason };
+async function acquireLeaseWithRetry({
+  runtimeRoot,
+  loopId,
+  reason,
+  retryDelaysMs = DEFAULT_LEASE_RETRY_MS,
+  sleepFn,
+}) {
+  let lease = await acquireLoopFileLease({ runtimeRoot, loopId, reason });
+  for (const delay of retryDelaysMs) {
+    if (lease.ok) return lease;
+    await sleepFn(delay);
+    lease = await acquireLoopFileLease({ runtimeRoot, loopId, reason });
   }
-
-  const targetState = evaluated.verdict === 'PASS'
-    ? REVIEW_LOOP_STATES.PASS
-    : evaluated.verdict === 'REWORK'
-      ? REVIEW_LOOP_STATES.REWORK
-      : evaluated.verdict === 'STOPPED'
-        ? REVIEW_LOOP_STATES.STOPPED
-        : REVIEW_LOOP_STATES.HUMAN_REQUIRED;
-
-  recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'prWatcher received bot update');
-  recordTransition(loopState, targetState, evaluated.reason);
-  if (targetState === REVIEW_LOOP_STATES.STOPPED || targetState === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
-    prTask.stopReason = evaluated.reason;
-  }
-  prTask.watcher.pid = null;
-  prTask.watcher.stoppedAt = nowIso;
-
-  let wakeResult = null;
-  if (targetState !== REVIEW_LOOP_STATES.STOPPED && typeof wakeFn === 'function') {
-    wakeResult = await wakeFn({ loopId, prTask });
-    prTask.watcher.wakeStatus = wakeResult.wakeStatus;
-    prTask.watcher.wakeReason = wakeResult.reason ?? null;
-    prTask.watcher.manualResumeCommand = wakeResult.manualResumeCommand ?? `reviewloop pr resume --loop ${loopId}`;
-  }
-
-  await store.save(loopId, loopState);
-  await store.savePrTask(loopId, prTask);
-
-  return {
-    done: true,
-    status: targetState,
-    reason: evaluated.reason,
-    wakeResult,
-  };
+  return lease;
 }
 
 export async function runPrWatcher({
@@ -108,6 +150,7 @@ export async function runPrWatcher({
   persistence: injectedPersistence = null,
   backoffMs = DEFAULT_BACKOFF_MS,
   maxWaitMs = DEFAULT_MAX_WAIT_MS,
+  leaseRetryDelaysMs = DEFAULT_LEASE_RETRY_MS,
   fetchPrSnapshotFn = fetchPrSnapshotViaGh,
   wakeFn = executeWake,
   sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -116,9 +159,32 @@ export async function runPrWatcher({
 } = {}) {
   const persistence = injectedPersistence ?? new Persistence(runtimeRoot);
   const store = new ReviewLoopStore(persistence);
+  const withLeaseFn = async (fn) => {
+    if (injectedPersistence) return fn();
+    const l = await acquireLeaseWithRetry({
+      runtimeRoot,
+      loopId,
+      reason: 'pr-watcher-step',
+      retryDelaysMs: leaseRetryDelaysMs,
+      sleepFn,
+    });
+    if (!l.ok) throw new Error('LEASE_HELD');
+    try {
+      return await fn();
+    } finally {
+      await l.release();
+    }
+  };
+
   const lease = injectedPersistence
     ? { ok: true, release: async () => {} }
-    : await acquireLoopFileLease({ runtimeRoot, loopId, reason: 'pr-watcher' });
+    : await acquireLeaseWithRetry({
+      runtimeRoot,
+      loopId,
+      reason: 'pr-watcher',
+      retryDelaysMs: leaseRetryDelaysMs,
+      sleepFn,
+    });
 
   if (!lease.ok) {
     return { exited: true, reason: 'LEASE_HELD' };
@@ -145,34 +211,27 @@ export async function runPrWatcher({
   let attempt = 0;
 
   while (true) {
-    const stepLease = injectedPersistence
-      ? { ok: true, release: async () => {} }
-      : await acquireLoopFileLease({ runtimeRoot, loopId, reason: 'pr-watcher-poll' });
     let outcome;
-    if (stepLease.ok) {
-      try {
-        outcome = await pollPrOnce({
-          loopId,
-          store,
-          fetchPrSnapshotFn,
-          wakeFn,
-          nowFn: () => new Date(clock()).toISOString(),
-        });
-      } finally {
-        await stepLease.release();
-      }
-      if (outcome?.done) {
-        return { exited: true, ...outcome };
-      }
+    try {
+      outcome = await pollPrOnce({
+        loopId,
+        store,
+        fetchPrSnapshotFn,
+        wakeFn,
+        withLeaseFn,
+        nowFn: () => new Date(clock()).toISOString(),
+      });
+    } catch (err) {
+      if (String(err?.message) !== 'LEASE_HELD') throw err;
+    }
+    if (outcome?.done) {
+      return { exited: true, ...outcome };
     }
 
     const elapsed = clock() - startedAt;
     if (elapsed >= maxWaitMs) {
-      const endLease = injectedPersistence
-        ? { ok: true, release: async () => {} }
-        : await acquireLoopFileLease({ runtimeRoot, loopId, reason: 'pr-watcher-timeout' });
-      if (endLease.ok) {
-        try {
+      try {
+        await withLeaseFn(async () => {
           const prTask = await store.loadPrTask(loopId);
           if (prTask) {
             prTask.watcher = {
@@ -185,10 +244,8 @@ export async function runPrWatcher({
             };
             await store.savePrTask(loopId, prTask);
           }
-        } finally {
-          await endLease.release();
-        }
-      }
+        });
+      } catch { /* best effort on timeout */ }
       return { exited: true, status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, reason: 'MAX_WAIT_REACHED' };
     }
 

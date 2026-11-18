@@ -206,11 +206,58 @@ test('prCli formats status, builds resume text, stops watcher/loop, and rejects 
     persistence,
     loopId: loopState.loopId,
     reason: 'manual stop',
+    verifyWatcherPidFn: async (pid) => pid === 12345,
     killFn: (pid) => { killedPid = pid; },
   });
   assert.equal(killedPid, 12345);
+  assert.equal(stopped.watcherStopped, 12345);
   assert.equal(stopped.state, 'STOPPED');
   assert.equal((await store.loadPrTask(loopState.loopId)).watcher.pid, null);
+
+  // Unverified/reused PID is NOT killed
+  const setupUnverified = setupPrLoop({ watcher: { pid: 54321 } });
+  await store.save('rl-unverified', { ...setupUnverified.loopState, loopId: 'rl-unverified' });
+  await store.savePrTask('rl-unverified', { ...setupUnverified.prTask, loopId: 'rl-unverified' });
+  let unverifiedKilled = false;
+  const stoppedUnverified = await stopPrTask({
+    persistence,
+    loopId: 'rl-unverified',
+    verifyWatcherPidFn: async () => false,
+    killFn: () => { unverifiedKilled = true; },
+  });
+  assert.equal(unverifiedKilled, false);
+  assert.equal(stoppedUnverified.watcherStopped, null);
+
+  // Concurrent stop during slow fetchPrSnapshotFn is NOT overwritten by pollPrOnce
+  const { pollPrOnce } = await import('../src/reviewloop/prWatcher.js');
+  const pRace = new MemoryPersistence();
+  const sRace = new ReviewLoopStore(pRace);
+  const raceSetup = setupPrLoop({ watcher: { pid: 11111 } });
+  await sRace.save(raceSetup.loopState.loopId, raceSetup.loopState);
+  await sRace.savePrTask(raceSetup.loopState.loopId, raceSetup.prTask);
+
+  const raceOutcome = await pollPrOnce({
+    loopId: raceSetup.loopState.loopId,
+    store: sRace,
+    fetchPrSnapshotFn: async () => {
+      await stopPrTask({
+        persistence: pRace,
+        loopId: raceSetup.loopState.loopId,
+        reason: 'user stopped mid-fetch',
+        verifyWatcherPidFn: async () => false,
+      });
+      return {
+        prState: { state: 'OPEN', headRefOid: HEAD_A },
+        comments: [{
+          id: 'c1',
+          author: { login: 'claude-review-bot[bot]' },
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${HEAD_A}"} -->`,
+        }],
+      };
+    },
+  });
+  assert.equal(raceOutcome.reason, 'STATE_CHANGED_DURING_POLL');
+  assert.equal((await sRace.load(raceSetup.loopState.loopId)).state, 'STOPPED');
 
   // Retired mode=PR rejected
   assert.throws(
