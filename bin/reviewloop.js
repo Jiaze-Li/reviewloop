@@ -19,6 +19,7 @@ import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
+import { acquireLeaseWithRetry } from '../src/reviewloop/prWatcher.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
@@ -292,7 +293,7 @@ async function handlePrCommand(rest) {
   if (sub === 'stop') {
     if (!loopId) throw new Error('usage: reviewloop pr stop --loop <loopId> [--reason "<reason>"]');
     const reason = flagValue(args, '--reason') ?? 'stopped by user';
-    const lease = await acquireLoopFileLease({ runtimeRoot: root, loopId, reason: 'pr-stop' });
+    const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-stop' });
     if (!lease.ok) {
       throw new Error(`cannot stop PR task while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
     }
@@ -309,7 +310,7 @@ async function handlePrCommand(rest) {
     if (!loopId) throw new Error('usage: reviewloop pr push --loop <loopId>');
     const persistence = new Persistence(root);
     const withLeaseFn = async (fn) => {
-      const lease = await acquireLoopFileLease({ runtimeRoot: root, loopId, reason: 'pr-push' });
+      const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-push' });
       if (!lease.ok) throw new Error(`cannot push PR head while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
       try {
         return await fn();
@@ -326,7 +327,7 @@ async function handlePrCommand(rest) {
     if (!loopId) throw new Error('usage: reviewloop pr trigger-review --loop <loopId>');
     const persistence = new Persistence(root);
     const withLeaseFn = async (fn) => {
-      const lease = await acquireLoopFileLease({ runtimeRoot: root, loopId, reason: 'pr-trigger' });
+      const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-trigger' });
       if (!lease.ok) throw new Error(`cannot trigger review while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
       try {
         return await fn();
@@ -350,7 +351,7 @@ async function handlePrCommand(rest) {
     if (!loopId || !agentType) {
       throw new Error('usage: reviewloop pr bind-agent --loop <loopId> --agent <claude|codex|agy> [--session <id>]');
     }
-    const lease = await acquireLoopFileLease({ runtimeRoot: root, loopId, reason: 'pr-bind-agent' });
+    const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-bind-agent' });
     if (!lease.ok) throw new Error(`cannot bind agent while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
     try {
       const res = await bindPrAgent({ persistence: new Persistence(root), loopId, agentType, agentSessionId });

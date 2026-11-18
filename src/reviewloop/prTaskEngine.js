@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DEFAULT_TRUSTED_BOT_LOGINS } from './objective.js';
+import { isTerminal, REVIEW_LOOP_STATES } from './state.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -442,9 +443,20 @@ export async function triggerGeminiReview({
   nowFn = () => new Date().toISOString(),
 }) {
   const phaseA = await withLeaseFn(async () => {
+    const freshLoopState = typeof store.load === 'function' ? await store.load(loopId) : null;
     const freshTask = (await store.loadPrTask(loopId)) ?? prTask;
     const triggers = Array.isArray(freshTask.reviewTriggers) ? [...freshTask.reviewTriggers] : [];
     freshTask.reviewTriggers = triggers;
+    if (freshLoopState && (isTerminal(freshLoopState.state) || freshLoopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED)) {
+      return {
+        done: true,
+        result: {
+          posted: false,
+          reason: `LOOP_${freshLoopState.state}`,
+          postedCount: triggers.filter((t) => t.status === 'POSTED').length,
+        },
+      };
+    }
     const nowIso = nowFn();
     const nowMs = Date.parse(nowIso) || Date.now();
     let expiredAny = false;
@@ -642,81 +654,86 @@ export async function pushPrHead({
   withLeaseFn = async (fn) => fn(),
   nowFn = () => new Date().toISOString(),
 }) {
-  const initialTask = await store.loadPrTask(loopId);
-  if (!initialTask) {
-    throw new Error(`ReviewLoop PR: prTask missing for loopId "${loopId}"`);
-  }
-  if (initialTask.permissions?.push !== true) {
-    throw new Error('ReviewLoop PR: action "push" is not authorized');
-  }
-
-  const oldSha = String(initialTask.boundHeadSha ?? '').trim().toLowerCase();
-  const repoRoot = initialTask.repoRoot;
-  const headBranch = initialTask.headBranch;
-  if (!oldSha || !repoRoot || !headBranch) {
-    throw new Error('ReviewLoop PR: prTask missing boundHeadSha, repoRoot, or headBranch');
-  }
-
-  const preSnapshot = await fetchPrSnapshotFn({
-    repoFullName: initialTask.repoFullName,
-    prNumber: initialTask.prNumber,
-  });
-  const preStatus = String(preSnapshot?.prState?.state ?? '').trim().toUpperCase();
-  if (preStatus !== 'OPEN') {
-    throw new Error(`ReviewLoop PR: cannot push when PR state is ${preStatus || 'UNKNOWN'}`);
-  }
-  if (preSnapshot?.prState?.headRefName && preSnapshot.prState.headRefName !== headBranch) {
-    throw new Error(`ReviewLoop PR: PR head branch mismatch (live=${preSnapshot.prState.headRefName}, expected=${headBranch})`);
-  }
-  const preRemoteSha = String(preSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
-  if (!preRemoteSha || preRemoteSha !== oldSha) {
-    throw new Error(`ReviewLoop PR: HEAD drift detected before push (remote=${preRemoteSha || 'missing'}, bound=${oldSha})`);
-  }
-
-  const { stdout: branchOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' });
-  const currentBranch = String(branchOut ?? '').trim();
-  if (currentBranch !== headBranch) {
-    throw new Error(`ReviewLoop PR: local branch "${currentBranch}" does not match PR headBranch "${headBranch}"`);
-  }
-
-  const { stdout: localHeadOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
-  const localHead = String(localHeadOut ?? '').trim().toLowerCase();
-  if (!localHead || localHead === oldSha) {
-    throw new Error('ReviewLoop PR: local HEAD has no new commit to push');
-  }
-
-  try {
-    await execFn('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', oldSha, localHead], { encoding: 'utf8' });
-  } catch {
-    throw new Error(`ReviewLoop PR: local HEAD (${localHead}) is not a fast-forward descendant of boundHeadSha (${oldSha}); history rewrite/rebase is rejected`);
-  }
-
-  await execFn('git', ['-C', repoRoot, 'push', 'origin', `HEAD:${headBranch}`], { encoding: 'utf8' });
-
-  const postSnapshot = await fetchPrSnapshotFn({
-    repoFullName: initialTask.repoFullName,
-    prNumber: initialTask.prNumber,
-  });
-  const postRemoteSha = String(postSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
-  if (postRemoteSha !== localHead) {
-    throw new Error(`ReviewLoop PR: remote HEAD after push (${postRemoteSha || 'missing'}) does not match pushed commit (${localHead})`);
-  }
-
   return withLeaseFn(async () => {
-    const freshTask = await store.loadPrTask(loopId);
-    if (!freshTask) throw new Error(`ReviewLoop PR: prTask missing for loopId "${loopId}"`);
-    const freshBound = String(freshTask.boundHeadSha ?? '').trim().toLowerCase();
-    if (freshBound !== oldSha) {
-      throw new Error(`ReviewLoop PR: boundHeadSha changed concurrently (${freshBound} !== ${oldSha})`);
+    const freshLoopState = typeof store.load === 'function' ? await store.load(loopId) : null;
+    if (freshLoopState && (isTerminal(freshLoopState.state) || freshLoopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED)) {
+      throw new Error(`ReviewLoop PR: cannot push when loop state is ${freshLoopState.state}`);
     }
+
+    const freshTask = await store.loadPrTask(loopId);
+    if (!freshTask) {
+      throw new Error(`ReviewLoop PR: prTask missing for loopId "${loopId}"`);
+    }
+    if (freshTask.permissions?.push !== true) {
+      throw new Error('ReviewLoop PR: action "push" is not authorized');
+    }
+
+    const oldSha = String(freshTask.boundHeadSha ?? '').trim().toLowerCase();
+    const repoRoot = freshTask.repoRoot;
+    const headBranch = freshTask.headBranch;
+    if (!oldSha || !repoRoot || !headBranch) {
+      throw new Error('ReviewLoop PR: prTask missing boundHeadSha, repoRoot, or headBranch');
+    }
+
+    const preSnapshot = await fetchPrSnapshotFn({
+      repoFullName: freshTask.repoFullName,
+      prNumber: freshTask.prNumber,
+    });
+    const preStatus = String(preSnapshot?.prState?.state ?? '').trim().toUpperCase();
+    if (preStatus !== 'OPEN') {
+      throw new Error(`ReviewLoop PR: cannot push when PR state is ${preStatus || 'UNKNOWN'}`);
+    }
+    if (preSnapshot?.prState?.headRefName && preSnapshot.prState.headRefName !== headBranch) {
+      throw new Error(`ReviewLoop PR: PR head branch mismatch (live=${preSnapshot.prState.headRefName}, expected=${headBranch})`);
+    }
+    const preRemoteSha = String(preSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
+    if (!preRemoteSha || preRemoteSha !== oldSha) {
+      throw new Error(`ReviewLoop PR: HEAD drift detected before push (remote=${preRemoteSha || 'missing'}, bound=${oldSha})`);
+    }
+
+    const { stdout: branchOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' });
+    const currentBranch = String(branchOut ?? '').trim();
+    if (currentBranch !== headBranch) {
+      throw new Error(`ReviewLoop PR: local branch "${currentBranch}" does not match PR headBranch "${headBranch}"`);
+    }
+
+    const { stdout: localHeadOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+    const localHead = String(localHeadOut ?? '').trim().toLowerCase();
+    if (!localHead || localHead === oldSha) {
+      throw new Error('ReviewLoop PR: local HEAD has no new commit to push');
+    }
+
+    try {
+      await execFn('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', oldSha, localHead], { encoding: 'utf8' });
+    } catch {
+      throw new Error(`ReviewLoop PR: local HEAD (${localHead}) is not a fast-forward descendant of boundHeadSha (${oldSha}); history rewrite/rebase is rejected`);
+    }
+
+    await execFn('git', ['-C', repoRoot, 'push', 'origin', `HEAD:${headBranch}`], { encoding: 'utf8' });
+
+    const postSnapshot = await fetchPrSnapshotFn({
+      repoFullName: freshTask.repoFullName,
+      prNumber: freshTask.prNumber,
+    });
+    const postRemoteSha = String(postSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
+    if (postRemoteSha !== localHead) {
+      throw new Error(`ReviewLoop PR: remote HEAD after push (${postRemoteSha || 'missing'}) does not match pushed commit (${localHead})`);
+    }
+
+    const checkTask = await store.loadPrTask(loopId);
+    const checkBound = String(checkTask?.boundHeadSha ?? '').trim().toLowerCase();
+    if (checkBound !== oldSha) {
+      throw new Error(`ReviewLoop PR: boundHeadSha changed concurrently (${checkBound} !== ${oldSha})`);
+    }
+
     const pushedAt = nowFn();
-    freshTask.boundHeadSha = localHead;
-    freshTask.headHistory = [
-      ...(Array.isArray(freshTask.headHistory) ? freshTask.headHistory : []),
+    checkTask.boundHeadSha = localHead;
+    checkTask.headHistory = [
+      ...(Array.isArray(checkTask.headHistory) ? checkTask.headHistory : []),
       { fromSha: oldSha, toSha: localHead, pushedAt, actor: 'worker' },
     ];
-    freshTask.updatedAt = pushedAt;
-    await store.savePrTask(loopId, freshTask);
+    checkTask.updatedAt = pushedAt;
+    await store.savePrTask(loopId, checkTask);
     return {
       pushed: true,
       oldHeadSha: oldSha,

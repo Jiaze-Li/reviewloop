@@ -128,12 +128,12 @@ export async function pollPrOnce({
   });
 }
 
-async function acquireLeaseWithRetry({
+export async function acquireLeaseWithRetry({
   runtimeRoot,
   loopId,
   reason,
   retryDelaysMs = DEFAULT_LEASE_RETRY_MS,
-  sleepFn,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   let lease = await acquireLoopFileLease({ runtimeRoot, loopId, reason });
   for (const delay of retryDelaysMs) {

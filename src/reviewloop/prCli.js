@@ -77,6 +77,12 @@ export async function stopPrTask({
   if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr' || !prTask) {
     throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
   }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot trigger review when loop state is ${loopState.state}`);
+  }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot bind agent when loop state is ${loopState.state}`);
+  }
   const watcherPid = prTask.watcher?.pid ?? null;
   let watcherStopped = null;
   if (Number.isInteger(watcherPid) && watcherPid > 0) {
@@ -114,6 +120,12 @@ export async function bindPrAgent({
   if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr' || !prTask) {
     throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
   }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot trigger review when loop state is ${loopState.state}`);
+  }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot bind agent when loop state is ${loopState.state}`);
+  }
   const normalizedAgent = String(agentType ?? '').trim().toLowerCase();
   if (!['claude', 'codex', 'agy'].includes(normalizedAgent)) {
     throw new Error(`unsupported agentType "${agentType}" (expected claude, codex, or agy)`);
@@ -145,6 +157,9 @@ export async function pushPrHeadCli({
   if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr') {
     throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
   }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot push when loop state is ${loopState.state}`);
+  }
   return pushPrHead({
     loopId,
     store,
@@ -166,6 +181,12 @@ export async function triggerPrReviewCli({
   const prTask = await store.loadPrTask(loopId);
   if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr' || !prTask) {
     throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
+  }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot trigger review when loop state is ${loopState.state}`);
+  }
+  if (isTerminal(loopState.state) || loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+    throw new Error(`cannot bind agent when loop state is ${loopState.state}`);
   }
   const snapshot = await fetchPrSnapshotFn({
     repoFullName: prTask.repoFullName,

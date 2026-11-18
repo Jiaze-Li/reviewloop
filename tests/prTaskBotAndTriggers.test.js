@@ -657,4 +657,81 @@ test('AC-02: pushPrHead advances prTask.boundHeadSha after fast-forward push and
     }),
     /HEAD drift detected before push/,
   );
+
+  // Rejects unauthorized push
+  const unauthTask = makePrTask({ loopId: 'rl-unauth-push', permissions: { push: false } });
+  await store.savePrTask(unauthTask.loopId, unauthTask);
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: unauthTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({ prState: { state: 'OPEN', headRefOid: HEAD_A, headRefName: 'feat/pr-task' }, comments: [] }),
+      execFn: async () => ({ stdout: '' }),
+    }),
+    /action "push" is not authorized/,
+  );
+
+  // Rejects closed PR
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: prTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({ prState: { state: 'CLOSED', headRefOid: HEAD_B, headRefName: 'feat/pr-task' }, comments: [] }),
+      execFn: async () => ({ stdout: '' }),
+    }),
+    /cannot push when PR state is CLOSED/,
+  );
+
+  // Rejects stopped/terminal loop for both pushPrHead and triggerGeminiReview
+  await store.save(prTask.loopId, { loopId: prTask.loopId, state: 'STOPPED' });
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: prTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({ prState: { state: 'OPEN', headRefOid: HEAD_B, headRefName: 'feat/pr-task' }, comments: [] }),
+      execFn: async () => ({ stdout: '' }),
+    }),
+    /cannot push when loop state is STOPPED/,
+  );
+  const stoppedTrigger = await triggerGeminiReview({
+    loopId: prTask.loopId,
+    prTask: await store.loadPrTask(prTask.loopId),
+    prState: { state: 'OPEN', headRefOid: HEAD_B },
+    comments: [],
+    store,
+    postCommentFn: async () => {
+      throw new Error('must not post on stopped loop');
+    },
+  });
+  assert.equal(stoppedTrigger.posted, false);
+  assert.equal(stoppedTrigger.reason, 'LOOP_STOPPED');
+
+  // Concurrent rebind compare-and-swap inside lease
+  const casTask = makePrTask({ loopId: 'rl-cas-push' });
+  await store.savePrTask(casTask.loopId, casTask);
+  let mutatedMidFlight = false;
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: casTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({
+        prState: { state: 'OPEN', headRefOid: mutatedMidFlight ? 'e'.repeat(40) : HEAD_A, headRefName: 'feat/pr-task' },
+        comments: [],
+      }),
+      execFn: async (_cmd, args) => {
+        if (args.includes('--abbrev-ref')) return { stdout: 'feat/pr-task\n' };
+        if (args.includes('HEAD') && args.includes('rev-parse')) return { stdout: `${'e'.repeat(40)}\n` };
+        if (args.includes('--is-ancestor')) return { stdout: '' };
+        if (args.includes('push')) {
+          mutatedMidFlight = true;
+          const concurrent = await store.loadPrTask(casTask.loopId);
+          concurrent.boundHeadSha = 'f'.repeat(40);
+          await store.savePrTask(casTask.loopId, concurrent);
+          return { stdout: '' };
+        }
+        return { stdout: '' };
+      },
+    }),
+    /boundHeadSha changed concurrently/,
+  );
 });
