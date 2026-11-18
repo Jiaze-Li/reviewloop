@@ -48,6 +48,7 @@ export async function pollPrOnce({
       done: false,
       repoFullName: prTask.repoFullName,
       prNumber: prTask.prNumber,
+      boundHeadSha: String(prTask.boundHeadSha ?? '').trim().toLowerCase(),
     };
   });
 
@@ -72,6 +73,14 @@ export async function pollPrOnce({
     if (freshLoopState.state !== REVIEW_LOOP_STATES.WAITING_FOR_REVIEW) {
       return { done: true, status: freshLoopState.state, reason: 'STATE_CHANGED_DURING_POLL' };
     }
+    const freshBoundHeadSha = String(freshPrTask.boundHeadSha ?? '').trim().toLowerCase();
+    if (freshBoundHeadSha !== initialTarget.boundHeadSha) {
+      return {
+        done: false,
+        status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW,
+        reason: 'BOUND_HEAD_CHANGED_DURING_POLL',
+      };
+    }
 
     const evaluated = evaluatePrStatus({
       prState: snapshot.prState,
@@ -84,6 +93,9 @@ export async function pollPrOnce({
     freshPrTask.watcher = {
       ...(freshPrTask.watcher ?? {}),
       lastPollAt: nowIso,
+      consecutiveErrors: 0,
+      lastError: null,
+      lastErrorAt: null,
     };
     freshPrTask.updatedAt = nowIso;
 
@@ -128,12 +140,12 @@ export async function pollPrOnce({
   });
 }
 
-async function acquireLeaseWithRetry({
+export async function acquireLeaseWithRetry({
   runtimeRoot,
   loopId,
   reason,
   retryDelaysMs = DEFAULT_LEASE_RETRY_MS,
-  sleepFn,
+  sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }) {
   let lease = await acquireLoopFileLease({ runtimeRoot, loopId, reason });
   for (const delay of retryDelaysMs) {
@@ -222,7 +234,22 @@ export async function runPrWatcher({
         nowFn: () => new Date(clock()).toISOString(),
       });
     } catch (err) {
-      if (String(err?.message) !== 'LEASE_HELD') throw err;
+      if (String(err?.message) !== 'LEASE_HELD') {
+        try {
+          await withLeaseFn(async () => {
+            const prTask = await store.loadPrTask(loopId);
+            if (prTask) {
+              prTask.watcher = {
+                ...(prTask.watcher ?? {}),
+                consecutiveErrors: (prTask.watcher?.consecutiveErrors ?? 0) + 1,
+                lastError: String(err?.message ?? err),
+                lastErrorAt: new Date(clock()).toISOString(),
+              };
+              await store.savePrTask(loopId, prTask);
+            }
+          });
+        } catch { /* best effort error recording */ }
+      }
     }
     if (outcome?.done) {
       return { exited: true, ...outcome };

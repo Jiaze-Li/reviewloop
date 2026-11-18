@@ -117,6 +117,8 @@ export function createReviewLoopMcpServer({
           originContractText: z.string().nullable().optional(),
           originDesignSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).nullable().optional(),
           trustedBotLogins: z.array(z.string().min(1)).min(1).optional(),
+          agentType: z.enum(['claude', 'codex', 'agy']).optional(),
+          agentSessionId: z.string().min(1).optional(),
           permissions: z.object({
             edit: z.boolean().optional(),
             commit: z.boolean().optional(),

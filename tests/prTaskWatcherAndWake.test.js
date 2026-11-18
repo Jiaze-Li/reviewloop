@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildWakePlan, executeWake } from '../src/reviewloop/prWakeAdapter.js';
 import { runPrWatcher, DEFAULT_BACKOFF_MS } from '../src/reviewloop/prWatcher.js';
-import { formatPrStatusEntry, buildPrResumeText, stopPrTask } from '../src/reviewloop/prCli.js';
+import { formatPrStatusEntry, buildPrResumeText, stopPrTask, bindPrAgent, triggerPrReviewCli } from '../src/reviewloop/prCli.js';
 import { createReviewObjective, TASK_TYPES } from '../src/reviewloop/objective.js';
 import { initialLoopState, initialPrTaskState, ReviewLoopStore, REVIEW_LOOP_STATES } from '../src/reviewloop/state.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
@@ -259,9 +259,134 @@ test('prCli formats status, builds resume text, stops watcher/loop, and rejects 
   assert.equal(raceOutcome.reason, 'STATE_CHANGED_DURING_POLL');
   assert.equal((await sRace.load(raceSetup.loopState.loopId)).state, 'STOPPED');
 
+  // Concurrent boundHeadSha advance during slow fetchPrSnapshotFn does NOT trigger spurious HEAD_DRIFT
+  const pPushRace = new MemoryPersistence();
+  const sPushRace = new ReviewLoopStore(pPushRace);
+  const pushRaceSetup = setupPrLoop({ watcher: { pid: 22222 } });
+  await sPushRace.save(pushRaceSetup.loopState.loopId, pushRaceSetup.loopState);
+  await sPushRace.savePrTask(pushRaceSetup.loopState.loopId, pushRaceSetup.prTask);
+  const pushRaceOutcome = await pollPrOnce({
+    loopId: pushRaceSetup.loopState.loopId,
+    store: sPushRace,
+    fetchPrSnapshotFn: async () => {
+      const updated = await sPushRace.loadPrTask(pushRaceSetup.loopState.loopId);
+      updated.boundHeadSha = 'b'.repeat(40);
+      await sPushRace.savePrTask(pushRaceSetup.loopState.loopId, updated);
+      return {
+        prState: { state: 'OPEN', headRefOid: HEAD_A },
+        comments: [],
+      };
+    },
+  });
+  assert.equal(pushRaceOutcome.done, false);
+  assert.equal(pushRaceOutcome.reason, 'BOUND_HEAD_CHANGED_DURING_POLL');
+  assert.equal((await sPushRace.load(pushRaceSetup.loopState.loopId)).state, 'WAITING_FOR_REVIEW');
+
   // Retired mode=PR rejected
   assert.throws(
     () => buildPrResumeText({ loopState: { loopId: 'old', objective: { mode: 'PR' } }, prTask }),
     /retired mode="PR"/,
   );
+});
+
+test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error backoff', async () => {
+  const persistence = new MemoryPersistence();
+  const store = new ReviewLoopStore(persistence);
+  const { loopState, prTask } = setupPrLoop();
+  await store.save(loopState.loopId, loopState);
+  await store.savePrTask(loopState.loopId, prTask);
+
+  const bound = await bindPrAgent({
+    persistence,
+    loopId: loopState.loopId,
+    agentType: 'claude',
+    agentSessionId: 'sess-bound-1',
+  });
+  assert.equal(bound.agentType, 'claude');
+  assert.equal(bound.agentSessionId, 'sess-bound-1');
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.agentSessionId, 'sess-bound-1');
+
+  await assert.rejects(
+    () => bindPrAgent({ persistence, loopId: loopState.loopId, agentType: 'unknown' }),
+    /unsupported agentType/,
+  );
+
+  const trigRes = await triggerPrReviewCli({
+    persistence,
+    loopId: loopState.loopId,
+    fetchPrSnapshotFn: async () => ({
+      prState: { state: 'OPEN', headRefOid: HEAD_A },
+      comments: [],
+    }),
+    postCommentFn: async () => ({ commentId: 'c-trig-1', commentUrl: 'https://github.com/x/y/pull/51#issuecomment-1' }),
+  });
+  assert.equal(trigRes.posted, true);
+  assert.equal(trigRes.postedCount, 1);
+
+  // Watcher survives transient network error, increments consecutiveErrors, and resets it on recovery
+  let calls = 0;
+  let observedConsecutiveErrorsDuringOutage = 0;
+  let now = 0;
+  const watchRes = await runPrWatcher({
+    loopId: loopState.loopId,
+    persistence,
+    backoffMs: [100],
+    maxWaitMs: 5000,
+    fetchPrSnapshotFn: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('gh network timeout');
+      observedConsecutiveErrorsDuringOutage = (await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors;
+      return {
+        prState: { state: 'OPEN', headRefOid: HEAD_A },
+        comments: [{
+          id: 'c-ready',
+          author: { login: 'jiaze-claude-review-bot[bot]' },
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${HEAD_A}","auditCompleted":true} -->`,
+        }],
+      };
+    },
+    wakeFn: async () => ({ woken: false, wakeStatus: 'MANUAL_REQUIRED', reason: 'DONE' }),
+    sleepFn: async (ms) => { now += ms; },
+    clock: () => now,
+    pid: 77777,
+  });
+  assert.equal(watchRes.status, 'PASS');
+  assert.equal(calls, 2);
+  assert.equal(observedConsecutiveErrorsDuringOutage, 1);
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors, 0);
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.lastError, null);
+
+  // stopPrTask remains idempotent on already-STOPPED / HUMAN_REQUIRED / PASS loops,
+  // while bindPrAgent and triggerPrReviewCli reject with their own operation errors.
+  const humanSetup = setupPrLoop({ state: REVIEW_LOOP_STATES.HUMAN_REQUIRED, watcher: { pid: 65432 } });
+  await store.save('rl-human-stop', { ...humanSetup.loopState, loopId: 'rl-human-stop' });
+  await store.savePrTask('rl-human-stop', { ...humanSetup.prTask, loopId: 'rl-human-stop' });
+  let killedHumanPid = null;
+  const stoppedHuman = await stopPrTask({
+    persistence,
+    loopId: 'rl-human-stop',
+    verifyWatcherPidFn: async (pid) => pid === 65432,
+    killFn: (pid) => { killedHumanPid = pid; },
+  });
+  assert.equal(killedHumanPid, 65432);
+  assert.equal(stoppedHuman.state, 'HUMAN_REQUIRED');
+  assert.equal((await store.loadPrTask('rl-human-stop')).watcher.pid, null);
+  await assert.rejects(
+    () => bindPrAgent({ persistence, loopId: 'rl-human-stop', agentType: 'claude', agentSessionId: 's1' }),
+    /cannot bind agent when loop state is HUMAN_REQUIRED/,
+  );
+  await assert.rejects(
+    () => triggerPrReviewCli({ persistence, loopId: 'rl-human-stop' }),
+    /cannot trigger review when loop state is HUMAN_REQUIRED/,
+  );
+
+  const stoppedSetup = setupPrLoop({ state: REVIEW_LOOP_STATES.STOPPED, watcher: { pid: 65433 } });
+  await store.save('rl-already-stopped', { ...stoppedSetup.loopState, loopId: 'rl-already-stopped' });
+  await store.savePrTask('rl-already-stopped', { ...stoppedSetup.prTask, loopId: 'rl-already-stopped' });
+  const stoppedAgain = await stopPrTask({
+    persistence,
+    loopId: 'rl-already-stopped',
+    verifyWatcherPidFn: async () => false,
+  });
+  assert.equal(stoppedAgain.state, 'STOPPED');
 });

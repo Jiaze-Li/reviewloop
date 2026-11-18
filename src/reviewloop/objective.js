@@ -143,7 +143,10 @@ export function normalizePhasePlan(phases = []) {
   return normalized;
 }
 
-export const DEFAULT_TRUSTED_BOT_LOGINS = Object.freeze(['claude-review-bot[bot]']);
+export const DEFAULT_TRUSTED_BOT_LOGINS = Object.freeze([
+  'jiaze-claude-review-bot[bot]',
+  'claude-review-bot[bot]',
+]);
 
 export function normalizePrContext(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -171,6 +174,12 @@ export function normalizePrContext(raw) {
   if (originDesignSha256 && !/^[0-9a-f]{64}$/.test(originDesignSha256)) {
     throw new Error('createReviewObjective: prContext.originDesignSha256 must be 64 hexadecimal characters');
   }
+  const agentType = raw.agentType == null
+    ? null
+    : String(raw.agentType).trim().toLowerCase() || null;
+  const agentSessionId = raw.agentSessionId == null
+    ? null
+    : String(raw.agentSessionId).trim() || null;
   return {
     repoFullName: reqStr('repoFullName'),
     repoRoot: reqStr('repoRoot'),
@@ -183,6 +192,8 @@ export function normalizePrContext(raw) {
     originContractText: raw.originContractText == null ? null : String(raw.originContractText),
     originDesignSha256,
     trustedBotLogins,
+    ...(agentType ? { agentType } : {}),
+    ...(agentSessionId ? { agentSessionId } : {}),
     permissions: {
       edit: perms.edit === true,
       commit: perms.commit === true,

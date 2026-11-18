@@ -43,7 +43,7 @@ test('createReviewObjective supports taskType=pr, freezes prContext into fingerp
   assert.equal(resolveReviewMode(obj), REVIEW_WORKFLOWS.PR);
   assert.equal(obj.prContext.prNumber, 51);
   assert.equal(obj.prContext.originPolicySha, 'unknown');
-  assert.deepEqual(obj.prContext.trustedBotLogins, ['claude-review-bot[bot]']);
+  assert.deepEqual(obj.prContext.trustedBotLogins, ['jiaze-claude-review-bot[bot]', 'claude-review-bot[bot]']);
   assert.deepEqual(obj.prContext.permissions, {
     edit: false,
     commit: false,
@@ -164,13 +164,19 @@ test('MCP reviewloop_begin accepts taskType=pr with prContext and validates outp
         goal: 'Fix PR #51',
         cwd: '/repo',
         taskType: 'pr',
-        prContext: BASE_PR_CONTEXT,
+        prContext: {
+          ...BASE_PR_CONTEXT,
+          agentType: 'claude',
+          agentSessionId: 'sess-real-123',
+        },
       },
     });
     assert.equal(res.isError ?? false, false);
     assert.equal(res.structuredContent.taskType, 'pr');
     assert.equal(res.structuredContent.mode, 'LOCAL');
     assert.equal(res.structuredContent.prContext.prNumber, 51);
+    assert.equal(res.structuredContent.prContext.agentType, 'claude');
+    assert.equal(res.structuredContent.prContext.agentSessionId, 'sess-real-123');
     assert.match(res.structuredContent.statusLine, /^\[ReviewLoop \| pr \| 启动\] loopId=/);
 
     // Retired top-level prNumber still errors
