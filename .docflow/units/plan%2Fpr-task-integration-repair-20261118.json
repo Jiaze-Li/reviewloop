@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:50:01.623Z",
+  "updatedAt": "2026-11-18T05:50:38.542Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -19,7 +19,14 @@
         "message": "docs(plan): repair PR Task production integration gaps"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 53,
+      "state": "open",
+      "title": "docs(plan): close PR Task integration and E2E gaps from #51",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/53",
+      "merged": false,
+      "updatedAt": "2026-11-18T05:50:28Z"
+    },
     "completed": null,
     "outcome": null
   }
