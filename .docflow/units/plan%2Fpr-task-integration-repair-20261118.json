@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T07:07:47.688Z",
+  "updatedAt": "2026-11-18T07:14:41.393Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/pr-task-integration-repair-20261118",
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
-    "current": "fix(pr-task): reset watcher consecutiveErrors after a successful poll",
+    "current": "fix(pr-task): treat stale REWORK bot sessions as waiting for review",
     "next": "等待 PR 53 机器人复审 P3 修复并确认是否开始真实测试 PR 闭环验收",
     "history": [
       {
@@ -30,6 +30,10 @@
       {
         "at": "2026-11-18T15:07:20+08:00",
         "text": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag"
+      },
+      {
+        "at": "2026-11-18T15:14:29+08:00",
+        "text": "fix(pr-task): reset watcher consecutiveErrors after a successful poll"
       }
     ],
     "commits": [
@@ -68,6 +72,12 @@
         "branch": "plan/pr-task-integration-repair-20261118",
         "timestamp": "2026-11-18T15:07:20+08:00",
         "message": "fix(pr-task): reset watcher consecutiveErrors after a successful poll"
+      },
+      {
+        "sha": "dd17a6b6ecdaf6e146eb8da15b5896e6713557fc",
+        "branch": "plan/pr-task-integration-repair-20261118",
+        "timestamp": "2026-11-18T15:14:29+08:00",
+        "message": "fix(pr-task): treat stale REWORK bot sessions as waiting for review"
       }
     ],
     "pr": {
