@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T06:13:24.850Z",
+  "updatedAt": "2026-11-18T06:56:40.742Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/pr-task-integration-repair-20261118",
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
-    "current": "fix(pr-task): keep stopPrTask idempotent and clean up duplicate guard blocks",
+    "current": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag",
     "next": "等待 PR 53 机器人复审 F005 修复并确认测试 PR 授权",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-18T14:13:08+08:00",
         "text": "fix(pr-task): hold lease during push, gate terminal loops, and retry CLI leases"
+      },
+      {
+        "at": "2026-11-18T14:56:29+08:00",
+        "text": "fix(pr-task): keep stopPrTask idempotent and clean up duplicate guard blocks"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/pr-task-integration-repair-20261118",
         "timestamp": "2026-11-18T14:13:08+08:00",
         "message": "fix(pr-task): keep stopPrTask idempotent and clean up duplicate guard blocks"
+      },
+      {
+        "sha": "a2173ddb730afc4331006adcc0ede7375d8f3412",
+        "branch": "plan/pr-task-integration-repair-20261118",
+        "timestamp": "2026-11-18T14:56:29+08:00",
+        "message": "fix(pr-task): guard watcher poll against concurrent push and tolerate post-push lag"
       }
     ],
     "pr": {
