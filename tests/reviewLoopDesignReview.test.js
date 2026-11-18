@@ -391,9 +391,9 @@ function routingCtl({ cwd, routedRoles }) {
     callAgy: async (opts) => {
       const prompt = String(opts?.prompt ?? opts?.message ?? '');
       let text = '{"findings":[]}';
-      if (prompt.includes('Return JSON only: {"requestedFiles"')) text = '{"requestedFiles":[]}';
-      else if (prompt.includes('Return JSON only: {"proposals"')) text = JSON.stringify(PROPOSALS);
-      else if (prompt.includes('Return JSON only: {"comparison"')) text = JSON.stringify(ALIGNED);
+      if (prompt.includes('Field: requestedFiles')) text = '{"requestedFiles":[]}';
+      else if (prompt.includes('Fields: proposals')) text = JSON.stringify(PROPOSALS);
+      else if (prompt.includes('Rules: comparison.verdict')) text = JSON.stringify(ALIGNED);
       return { model: opts?.model ?? 'm', exitCode: 0, text, usage: { input_tokens: 20, output_tokens: 5 } };
     },
   });

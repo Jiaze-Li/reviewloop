@@ -118,7 +118,8 @@ export function buildFileRequestPrompt({ plan, context, workerSummary }) {
     contextBlock(context),
     exchangeBlock(workerSummary),
     `You may request up to ${DESIGN_LIMITS.maxRequestedFiles} files from the list above (a file larger than ${DESIGN_LIMITS.maxFileBytes} bytes is unavailable, not truncated; unavailable requests are reported back) so your proposals are grounded in real code.`,
-    'Return JSON only: {"requestedFiles":["repo/relative/path"]}. Use an empty array if you need nothing more.',
+    'Return ONE JSON object and nothing else (no prose, no code fence). Field: requestedFiles = array of repo-relative path strings taken from the list above (empty array if you need nothing more).',
+    'Example: {"requestedFiles":["src/index.js","docs/ARCHITECTURE.md"]}',
   ].filter(Boolean).join('\n');
 }
 
@@ -130,7 +131,8 @@ export function buildProposalPrompt({ plan, context, files, rejected, workerSumm
     ...files.map((f) => `FILE ${f.path}:\n${f.text}`),
     rejected.length ? `UNAVAILABLE REQUESTS: ${JSON.stringify(rejected)}` : '',
     exchangeBlock(workerSummary),
-    `Return JSON only: {"proposals":[{"title":"","summary":"","tradeoffs":""}],"confidenceNote":""} with 1 to ${DESIGN_LIMITS.maxProposals} proposals, simplest reuse-first approach first, each with its cost (tradeoffs).`,
+    `Return ONE JSON object and nothing else (no prose, no code fence). Fields: proposals = array of 1 to ${DESIGN_LIMITS.maxProposals} objects, simplest reuse-first approach first; each object needs non-empty string fields title, summary and tradeoffs (its cost); confidenceNote = string (may be empty).`,
+    'Example: {"proposals":[{"title":"Reuse the existing queue","summary":"Add a retry step to the current upload queue.","tradeoffs":"Less flexible, but no new components."}],"confidenceNote":"Based on the files listed above."}',
   ].filter(Boolean).join('\n');
 }
 
@@ -148,7 +150,8 @@ export function buildAdjudicationPrompt({
     'Column 2 — blockingFindings (severity P1/P2 with title, detail, rule): violates the Plan or a non-goal; omits an acceptance criterion; internally inconsistent or contradicts stated repository facts; missing "Options" or "Assumptions" section; a mechanism relying on an unstated premise; over-engineering where a simpler listed route satisfies the Plan. Speculative concerns are nonBlockingFindings.',
     'If following the Plan itself looks wrong, do NOT block: put it in comparison.planConcern for the user.',
     'designPassComment: only when verdict is ALIGNED or MINOR_DIFF and blockingFindings is empty — a short, plain-language, formatted note for the user: what will be built, the Assumptions to confirm, the comparison conclusion, and planConcern if any. No file paths or jargon. Otherwise null.',
-    'Return JSON only: {"comparison":{"verdict":"","reason":"","workerSummary":"","planConcern":null},"blockingFindings":[{"severity":"P1|P2","title":"","detail":"","rule":""}],"nonBlockingFindings":[{"title":"","detail":""}],"humanQuestions":[],"designPassComment":null}',
+    'Return ONE JSON object and nothing else (no prose, no code fence). Rules: comparison.verdict is exactly one of ALIGNED, MINOR_DIFF, MAJOR_DIFF, NEEDS_HUMAN; comparison.reason and comparison.workerSummary are non-empty strings; comparison.planConcern is a string or null; blockingFindings is an array (may be empty) whose items have severity exactly "P1" or "P2" (a P3 or speculative item goes to nonBlockingFindings instead), a non-empty title, and string detail and rule; nonBlockingFindings is an array of {title, detail}; humanQuestions is an array of strings and MUST be non-empty when verdict is NEEDS_HUMAN; designPassComment is a string or null.',
+    'Example: {"comparison":{"verdict":"MINOR_DIFF","reason":"Both reuse the existing queue; only naming differs.","workerSummary":"Adds a retry step to the current queue.","planConcern":null},"blockingFindings":[{"severity":"P2","title":"Missing Assumptions section","detail":"The design never lists its premises.","rule":"Assumptions section required"}],"nonBlockingFindings":[{"title":"Vague wording","detail":"Section 3 could be shorter."}],"humanQuestions":[],"designPassComment":null}',
   ].filter(Boolean).join('\n');
 }
 
@@ -243,6 +246,24 @@ export function decideDesignTransition({ adjudication, exchangeCount }) {
   return { kind: 'PASS' };
 }
 
+// ------------------------------------------------------------------ retry
+
+const EXCERPT_CHARS = 300;
+function rawExcerpt(value) {
+  let raw = value && typeof value === 'object' ? (value.raw ?? (value.malformed ? undefined : value)) : value;
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw !== 'string') { try { raw = JSON.stringify(raw); } catch { raw = String(raw); } }
+  const t = raw.replace(/\s+/g, ' ').trim();
+  return t.length > EXCERPT_CHARS ? `${t.slice(0, EXCERPT_CHARS)}…` : t;
+}
+
+export function describeMalformed(label, validated, rawValue) {
+  const ex = rawExcerpt(rawValue);
+  return `${label} unusable (${validated.reason})${ex ? `; model output began: ${ex}` : ''}`;
+}
+
+export const retryNote = (reason) => `\nYOUR PREVIOUS REPLY WAS REJECTED: ${reason}. Reply again with ONE corrected JSON object only, following the field rules and example above exactly.`;
+
 // ------------------------------------------------------------------ runner
 
 export function createDesignTwoStageRunner({
@@ -293,49 +314,65 @@ export function createDesignTwoStageRunner({
     const workerSummary = designState.exchangeCount > 0 ? designState.workerSummary : null;
 
     await beat('reviewer_proposing');
-    const askFiles = await metered({
-      spend, loopState, role: 'reviewer', routeFn: routeReviewerFn, defaultFamily: 'agy:opus',
-      op: `design-files:${stage}`, stageEvidence: `${designTarget.sha256}:${stage}:files`,
-      fn: designReviewerFn,
-      args: { stage: 'files', prompt: buildFileRequestPrompt({ plan, context, workerSummary }), objective },
-      signal, physicalCalls,
-    });
-    loopState.reviewerCalls += 1;
-    const fileReq = validateFileRequest(askFiles);
-    if (fileReq.malformed) return { kind: 'FAILED', reason: `Reviewer file request unusable (${fileReq.reason})`, physicalCalls };
+    // One stage = one paid call, plus exactly one corrective retry when the
+    // output is unusable. The retry goes through the same metered/failover path.
+    const runStage = async ({ op, stageName, role, routeFn, defaultFamily, fn, prompt, validate, label, counter }) => {
+      const call = (p, suffix) => metered({
+        spend, loopState, role, routeFn, defaultFamily,
+        op: `${op}${suffix}`, stageEvidence: `${designTarget.sha256}:${stage}:${stageName}${suffix}`,
+        fn, args: { stage: stageName, prompt: p, objective }, signal, physicalCalls,
+      });
+      const first = await call(prompt, '');
+      loopState[counter] += 1;
+      const v1 = validate(first);
+      if (!v1.malformed) return { value: v1 };
+      const second = await call(`${prompt}${retryNote(v1.reason)}`, ':retry');
+      loopState[counter] += 1;
+      const v2 = validate(second);
+      if (!v2.malformed) return { value: v2 };
+      return { failed: describeMalformed(label, v2, second) };
+    };
+
+    let fileReq;
+    {
+      const r = await runStage({
+        op: `design-files:${stage}`, stageName: 'files', role: 'reviewer', routeFn: routeReviewerFn, defaultFamily: 'agy:opus',
+        fn: designReviewerFn, prompt: buildFileRequestPrompt({ plan, context, workerSummary }),
+        validate: validateFileRequest, label: 'Reviewer file request', counter: 'reviewerCalls',
+      });
+      if (r.failed) return { kind: 'FAILED', reason: r.failed, physicalCalls };
+      fileReq = r.value;
+    }
 
     const { files, rejected } = fileReq.requestedFiles.length
       ? await readRequestedFiles({ cwd, requested: fileReq.requestedFiles, context })
       : { files: [], rejected: [] };
-    const rawProposals = await metered({
-      spend, loopState, role: 'reviewer', routeFn: routeReviewerFn, defaultFamily: 'agy:opus',
-      op: `design-proposal:${stage}`, stageEvidence: `${designTarget.sha256}:${stage}:proposal`,
-      fn: designReviewerFn,
-      args: { stage: 'proposal', prompt: buildProposalPrompt({ plan, context, files, rejected, workerSummary }), objective },
-      signal, physicalCalls,
-    });
-    loopState.reviewerCalls += 1;
-    const proposed = validateProposals(rawProposals);
-    if (proposed.malformed) return { kind: 'FAILED', reason: `Reviewer proposals unusable (${proposed.reason})`, physicalCalls };
+    let proposed;
+    {
+      const r = await runStage({
+        op: `design-proposal:${stage}`, stageName: 'proposal', role: 'reviewer', routeFn: routeReviewerFn, defaultFamily: 'agy:opus',
+        fn: designReviewerFn, prompt: buildProposalPrompt({ plan, context, files, rejected, workerSummary }),
+        validate: validateProposals, label: 'Reviewer proposals', counter: 'reviewerCalls',
+      });
+      if (r.failed) return { kind: 'FAILED', reason: r.failed, physicalCalls };
+      proposed = r.value;
+    }
 
     await beat('supervisor_adjudicating');
-    const rawAdj = await metered({
-      spend, loopState, role: 'supervisor', routeFn: routeSupervisorFn, defaultFamily: 'agy:gemini-supervisor',
-      op: `design-adjudicate:${stage}`, stageEvidence: `${designTarget.sha256}:${stage}:adjudicate`,
-      fn: designSupervisorFn,
-      args: {
-        stage: 'adjudicate',
+    let adjudication;
+    {
+      const r = await runStage({
+        op: `design-adjudicate:${stage}`, stageName: 'adjudicate', role: 'supervisor', routeFn: routeSupervisorFn, defaultFamily: 'agy:gemini-supervisor',
+        fn: designSupervisorFn,
         prompt: buildAdjudicationPrompt({
           plan, proposals: proposed.proposals, designText: designTarget.text, history: designState.history, exchangeCount: designState.exchangeCount,
         }),
-        objective,
-      },
-      signal, physicalCalls,
-    });
-    loopState.supervisorCalls += 1;
-    loopState.supervisorInvoked = true;
-    const adjudication = validateAdjudication(rawAdj);
-    if (adjudication.malformed) return { kind: 'FAILED', reason: `Supervisor adjudication unusable (${adjudication.reason})`, physicalCalls };
+        validate: validateAdjudication, label: 'Supervisor adjudication', counter: 'supervisorCalls',
+      });
+      loopState.supervisorInvoked = true;
+      if (r.failed) return { kind: 'FAILED', reason: r.failed, physicalCalls };
+      adjudication = r.value;
+    }
     await saveLoop(loopState);
     return { kind: 'DECIDED', adjudication, proposals: proposed.proposals, physicalCalls };
   }
