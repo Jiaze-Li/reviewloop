@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T05:33:14.151Z",
+  "updatedAt": "2026-11-18T05:33:20.416Z",
   "task": {
     "id": "fix/design-reviewer-json-robustness",
     "branch": "fix/design-reviewer-json-robustness",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:33:02+08:00",
     "status": "In progress",
     "current": "Retry design review once when the reviewer's reply is unusable and show why it failed",
-    "next": "",
+    "next": "等评审机器人审完这个草稿 PR，通过后合并；合并后观察设计评审是否还会因格式问题中断",
     "history": [],
     "commits": [
       {
