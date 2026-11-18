@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T07:07:38.035Z",
+  "updatedAt": "2026-11-18T07:07:47.688Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
     "current": "fix(pr-task): reset watcher consecutiveErrors after a successful poll",
-    "next": "确认 PR 53 的人工复审或手动触发复检，并授权测试 PR 运行真实闭环验收",
+    "next": "等待 PR 53 机器人复审 P3 修复并确认是否开始真实测试 PR 闭环验收",
     "history": [
       {
         "at": "2026-11-18T14:03:40+08:00",
