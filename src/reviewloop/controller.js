@@ -4,6 +4,11 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createBeginTask } from './taskBegin.js';
+import {
+  evaluatePrStatus,
+  fetchPrSnapshotViaGh,
+  postPrCommentViaGh,
+} from './prTaskEngine.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
 import { buildReviewRecord } from './reviewRecord.js';
@@ -136,6 +141,9 @@ export function createReviewLoopController({
   runGateFn = runGate,
   discoverVerificationCommandsFn = discoverVerificationCommands,
   gateRunner = null,
+  fetchPrSnapshotFn = fetchPrSnapshotViaGh,
+  postPrCommentFn = postPrCommentViaGh,
+  spawnPrWatcherFn = null,
   clock = () => Date.now(),
 } = {}) {
   const persistence = injectedPersistence ?? new Persistence(runtimeRoot);
@@ -534,7 +542,147 @@ export function createReviewLoopController({
     // completed phase, objective or task-wide spend counter.
     loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
 
+    if (resolveReviewMode(objective) === REVIEW_WORKFLOWS.PR) {
+      return reviewPrTask({ loopState });
+    }
+
     return reviewLocal({ loopState, evidence, signal, onHeartbeat });
+  }
+
+  async function reviewPrTask({ loopState }) {
+    const objective = loopState.objective;
+    const prTask = await store.loadPrTask(loopState.loopId);
+    if (!prTask) {
+      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'prTask missing');
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, 'prTask state missing');
+      await saveLoop(loopState);
+      return humanRequiredResult(loopState, null, await durableTelemetry(loopState.loopId));
+    }
+
+    recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'evaluating PR bot session');
+    let snapshot;
+    try {
+      snapshot = await fetchPrSnapshotFn({
+        repoFullName: prTask.repoFullName,
+        prNumber: prTask.prNumber,
+      });
+    } catch (err) {
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `GitHub PR read failed: ${err?.message ?? err}`);
+      await saveLoop(loopState);
+      return humanRequiredResult(loopState, null, await durableTelemetry(loopState.loopId));
+    }
+
+    const evaluated = evaluatePrStatus({
+      prState: snapshot.prState,
+      prTask,
+      comments: snapshot.comments,
+    });
+    const nowIso = new Date(clock()).toISOString();
+    prTask.latestBotSession = evaluated.session;
+    prTask.updatedAt = nowIso;
+
+    const postedTriggers = (prTask.reviewTriggers ?? []).filter((t) => t.status === 'POSTED').length;
+    const prTaskSummary = {
+      prNumber: prTask.prNumber,
+      repoFullName: prTask.repoFullName,
+      boundHeadSha: prTask.boundHeadSha,
+      liveHeadSha: evaluated.liveHeadSha,
+      postedReviewTriggers: postedTriggers,
+      maxReviewTriggers: 3,
+      sessionStatus: evaluated.session.sessionStatus,
+      lastReviewedHead: evaluated.session.lastReviewedHead,
+      permissions: prTask.permissions,
+      watcher: prTask.watcher ?? null,
+    };
+
+    if (evaluated.verdict === 'PASS') {
+      recordTransition(loopState, REVIEW_LOOP_STATES.PASS, evaluated.reason);
+      await saveLoop(loopState);
+      await store.savePrTask(loopState.loopId, prTask);
+      return {
+        status: REVIEW_LOOP_STATES.PASS,
+        loopId: loopState.loopId,
+        round: loopState.round,
+        terminal: true,
+        head: evaluated.liveHeadSha,
+        reason: evaluated.reason,
+        prTask: prTaskSummary,
+        nextAction: 'PR review is READY on live HEAD (note: CI checks and merge authorization remain separate).',
+      };
+    }
+
+    if (evaluated.verdict === 'REWORK') {
+      recordTransition(loopState, REVIEW_LOOP_STATES.REWORK, evaluated.reason);
+      await saveLoop(loopState);
+      await store.savePrTask(loopState.loopId, prTask);
+      return {
+        status: REVIEW_LOOP_STATES.REWORK,
+        loopId: loopState.loopId,
+        round: loopState.round,
+        terminal: false,
+        head: evaluated.liveHeadSha,
+        reason: evaluated.reason,
+        blockingFindings: evaluated.session.openFindings,
+        prTask: prTaskSummary,
+        nextAction: 'Fix open findings or submit @gemini dismiss <ID> with Reason and Evidence, then push/trigger review within authorized permissions.',
+      };
+    }
+
+    if (evaluated.verdict === 'WAITING_FOR_REVIEW') {
+      recordTransition(loopState, REVIEW_LOOP_STATES.WAITING_FOR_REVIEW, evaluated.reason);
+      if (typeof spawnPrWatcherFn === 'function' && !prTask.watcher?.pid) {
+        const spawned = spawnPrWatcherFn({ loopId: loopState.loopId, runtimeRoot, env });
+        prTask.watcher = {
+          ...(prTask.watcher ?? {}),
+          pid: spawned?.pid ?? null,
+          startedAt: nowIso,
+          stoppedAt: null,
+        };
+      }
+      await saveLoop(loopState);
+      await store.savePrTask(loopState.loopId, prTask);
+      return {
+        status: REVIEW_LOOP_STATES.WAITING_FOR_REVIEW,
+        loopId: loopState.loopId,
+        round: loopState.round,
+        terminal: false,
+        head: evaluated.liveHeadSha,
+        reason: evaluated.reason,
+        prTask: { ...prTaskSummary, watcher: prTask.watcher ?? null },
+        nextAction: 'Waiting for trusted claude-review-bot result with 0 LLM tokens.',
+      };
+    }
+
+    if (evaluated.verdict === 'STOPPED') {
+      prTask.stopReason = evaluated.reason;
+      recordTransition(loopState, REVIEW_LOOP_STATES.STOPPED, evaluated.reason);
+      await saveLoop(loopState);
+      await store.savePrTask(loopState.loopId, prTask);
+      return {
+        status: REVIEW_LOOP_STATES.STOPPED,
+        loopId: loopState.loopId,
+        round: loopState.round,
+        terminal: true,
+        head: evaluated.liveHeadSha,
+        reason: evaluated.reason,
+        prTask: prTaskSummary,
+      };
+    }
+
+    prTask.stopReason = evaluated.reason;
+    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, evaluated.reason);
+    await saveLoop(loopState);
+    await store.savePrTask(loopState.loopId, prTask);
+    return {
+      status: REVIEW_LOOP_STATES.HUMAN_REQUIRED,
+      loopId: loopState.loopId,
+      round: loopState.round,
+      terminal: true,
+      head: evaluated.liveHeadSha,
+      reason: evaluated.reason,
+      prTask: prTaskSummary,
+      nextAction: 'Stop and surface the blocker to the user; do not bypass HUMAN_REQUIRED.',
+    };
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
