@@ -55,6 +55,43 @@ export function buildDismissComment({ findingId, reason, evidence }) {
   return `@gemini dismiss ${id}\nReason: ${r}\nEvidence: ${ev}`;
 }
 
+const CLOSED_FINDING_STATUSES = new Set([
+  'FIXED',
+  'DISMISSED',
+  'WAIVED',
+  'DEFERRED',
+  'RESOLVED',
+  'DOWNGRADED_NON_BLOCKING',
+]);
+const BLOCKING_SEVERITIES = new Set(['P0', 'P1', 'P2']);
+
+export function isBlockingPrFinding(finding) {
+  const status = String(finding?.status ?? 'OPEN').trim().toUpperCase();
+  if (CLOSED_FINDING_STATUSES.has(status)) return false;
+  const severity = String(finding?.severity ?? 'P2').trim().toUpperCase();
+  if (BLOCKING_SEVERITIES.has(severity)) return true;
+  if (severity === 'P3') return !finding?.downgradedFrom;
+  return true;
+}
+
+function parseBase64StatePayload(body) {
+  const match = body.match(/<!--\s*jiaze-review-state:([A-Za-z0-9_-]+)\s*-->/);
+  if (!match) return { present: false, valid: false, payload: null };
+  try {
+    const json = Buffer.from(match[1], 'base64url').toString('utf8');
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { present: true, valid: false, payload: null };
+    }
+    if (parsed.version != null && parsed.version !== 1) {
+      return { present: true, valid: false, payload: null };
+    }
+    return { present: true, valid: true, payload: parsed };
+  } catch {
+    return { present: true, valid: false, payload: null };
+  }
+}
+
 function parseJsonSessionPayload(body) {
   const match = body.match(/<!--\s*jiaze-review-session:v1\s*(\{[\s\S]*?\})\s*-->/);
   if (!match) return null;
@@ -114,10 +151,13 @@ export function parseTrustedBotSession({
     return {
       found: false,
       parseable: false,
+      hasAuthoritativeState: false,
       commentId: null,
       authorLogin: null,
       sessionStatus: BOT_SESSION_STATUSES.MISSING,
       lastReviewedHead: null,
+      auditCompleted: null,
+      staleFor: null,
       findings: [],
       openFindings: [],
       updatedAt: null,
@@ -125,9 +165,54 @@ export function parseTrustedBotSession({
   }
 
   const latest = trusted[trusted.length - 1];
+  const latestTs = Date.parse(latest?.updatedAt ?? latest?.createdAt ?? 0) || 0;
+  const sameTsComments = trusted.filter((c) => (Date.parse(c?.updatedAt ?? c?.createdAt ?? 0) || 0) === latestTs);
+  if (sameTsComments.length > 1) {
+    const distinctIds = new Set(sameTsComments.map((c) => {
+      const b = String(c?.body ?? '');
+      const st = parseBase64StatePayload(b);
+      return `${st.payload?.sessionId ?? ''}:${st.payload?.status ?? ''}:${st.payload?.lastReviewedHead ?? ''}`;
+    }));
+    if (distinctIds.size > 1) {
+      return {
+        found: true,
+        parseable: false,
+        hasAuthoritativeState: false,
+        conflictDetected: true,
+        commentId: latest.id ?? null,
+        authorLogin: latest.author?.login ?? latest.authorLogin ?? null,
+        sessionStatus: BOT_SESSION_STATUSES.UNKNOWN,
+        lastReviewedHead: null,
+        auditCompleted: null,
+        staleFor: null,
+        findings: [],
+        openFindings: [],
+        updatedAt: latest.updatedAt ?? latest.createdAt ?? null,
+      };
+    }
+  }
+
   const body = String(latest.body ?? '');
-  const jsonPayload = parseJsonSessionPayload(body);
-  const mdPayload = parseMarkdownSessionFields(body);
+  const statePayload = parseBase64StatePayload(body);
+  if (statePayload.present && !statePayload.valid) {
+    return {
+      found: true,
+      parseable: false,
+      hasAuthoritativeState: true,
+      commentId: latest.id ?? null,
+      authorLogin: latest.author?.login ?? latest.authorLogin ?? null,
+      sessionStatus: BOT_SESSION_STATUSES.UNKNOWN,
+      lastReviewedHead: null,
+      auditCompleted: null,
+      staleFor: null,
+      findings: [],
+      openFindings: [],
+      updatedAt: latest.updatedAt ?? latest.createdAt ?? null,
+    };
+  }
+
+  const jsonPayload = statePayload.valid ? statePayload.payload : parseJsonSessionPayload(body);
+  const mdPayload = statePayload.valid ? { sessionStatus: null, lastReviewedHead: null, findings: [] } : parseMarkdownSessionFields(body);
 
   const rawStatus = String(jsonPayload?.status ?? jsonPayload?.sessionStatus ?? mdPayload.sessionStatus ?? '')
     .trim()
@@ -138,6 +223,8 @@ export function parseTrustedBotSession({
 
   const rawHead = jsonPayload?.lastReviewedHead ?? jsonPayload?.head ?? mdPayload.lastReviewedHead ?? null;
   const lastReviewedHead = rawHead ? String(rawHead).trim().toLowerCase() : null;
+  const auditCompleted = typeof jsonPayload?.auditCompleted === 'boolean' ? jsonPayload.auditCompleted : null;
+  const staleFor = jsonPayload?.staleFor ? String(jsonPayload.staleFor).trim().toLowerCase() : null;
 
   const rawFindings = Array.isArray(jsonPayload?.findings) ? jsonPayload.findings : mdPayload.findings;
   const findings = rawFindings.map((f) => ({
@@ -145,19 +232,23 @@ export function parseTrustedBotSession({
     severity: String(f.severity ?? 'P2').trim().toUpperCase(),
     status: String(f.status ?? 'OPEN').trim().toUpperCase(),
     title: String(f.title ?? '').trim(),
+    ...(f.downgradedFrom ? { downgradedFrom: String(f.downgradedFrom).trim() } : {}),
     ...(f.sharedBoundaryKey ? { sharedBoundaryKey: String(f.sharedBoundaryKey).trim() } : {}),
   })).filter((f) => f.id);
 
-  const openFindings = findings.filter((f) => f.status !== 'DISMISSED' && f.status !== 'RESOLVED' && f.status !== 'DOWNGRADED_NON_BLOCKING');
+  const openFindings = findings.filter(isBlockingPrFinding);
   const parseable = sessionStatus !== BOT_SESSION_STATUSES.UNKNOWN;
 
   return {
     found: true,
     parseable,
+    hasAuthoritativeState: statePayload.valid,
     commentId: latest.id ?? null,
     authorLogin: latest.author?.login ?? latest.authorLogin ?? null,
     sessionStatus,
     lastReviewedHead,
+    auditCompleted,
+    staleFor,
     findings,
     openFindings,
     updatedAt: latest.updatedAt ?? latest.createdAt ?? null,
@@ -221,10 +312,30 @@ export function evaluatePrStatus({ prState, prTask, comments = [] }) {
   }
 
   if (session.sessionStatus === BOT_SESSION_STATUSES.READY) {
-    if (session.lastReviewedHead === liveHeadSha) {
+    if (session.lastReviewedHead !== liveHeadSha || session.staleFor === liveHeadSha) {
       return {
-        verdict: 'PASS',
-        reason: 'BOT_READY_ON_LIVE_HEAD',
+        verdict: 'WAITING_FOR_REVIEW',
+        reason: 'STALE_BOT_READY',
+        prStatus: 'OPEN',
+        liveHeadSha,
+        boundHeadSha,
+        session,
+      };
+    }
+    if ((session.openFindings?.length ?? 0) > 0) {
+      return {
+        verdict: 'HUMAN_REQUIRED',
+        reason: 'INCONSISTENT_BOT_READY',
+        prStatus: 'OPEN',
+        liveHeadSha,
+        boundHeadSha,
+        session,
+      };
+    }
+    if (session.hasAuthoritativeState && session.auditCompleted !== true) {
+      return {
+        verdict: 'HUMAN_REQUIRED',
+        reason: 'INCOMPLETE_BOT_AUDIT',
         prStatus: 'OPEN',
         liveHeadSha,
         boundHeadSha,
@@ -232,8 +343,8 @@ export function evaluatePrStatus({ prState, prTask, comments = [] }) {
       };
     }
     return {
-      verdict: 'WAITING_FOR_REVIEW',
-      reason: 'STALE_BOT_READY',
+      verdict: 'PASS',
+      reason: 'BOT_READY_ON_LIVE_HEAD',
       prStatus: 'OPEN',
       liveHeadSha,
       boundHeadSha,
@@ -325,6 +436,7 @@ export async function triggerGeminiReview({
   comments = [],
   store,
   postCommentFn,
+  fetchPrSnapshotFn = null,
   withLeaseFn = async (fn) => fn(),
   pendingTtlMs = PENDING_TRIGGER_TTL_MS,
   nowFn = () => new Date().toISOString(),
@@ -415,6 +527,7 @@ export async function triggerGeminiReview({
 
   let postResult = null;
   let postError = null;
+  let postDefinitelyNotSent = false;
   try {
     postResult = await postCommentFn({
       repoFullName: phaseA.repoFullName,
@@ -423,6 +536,23 @@ export async function triggerGeminiReview({
     });
   } catch (err) {
     postError = String(err?.message ?? err);
+    postDefinitelyNotSent = err?.definitelyNotSent === true;
+  }
+
+  let reconciledComment = null;
+  let reconcileConfirmedMissing = false;
+  if (postError != null && typeof fetchPrSnapshotFn === 'function') {
+    try {
+      const freshSnapshot = await fetchPrSnapshotFn({
+        repoFullName: phaseA.repoFullName,
+        prNumber: phaseA.prNumber,
+      });
+      const marker = triggerMarker(phaseA.idempotencyKey);
+      reconciledComment = (freshSnapshot?.comments ?? []).find((c) => String(c?.body ?? '').includes(marker)) ?? null;
+      if (!reconciledComment) reconcileConfirmedMissing = true;
+    } catch {
+      // Reconcile snapshot failed; keep PENDING to avoid duplicate comment.
+    }
   }
 
   return withLeaseFn(async () => {
@@ -450,19 +580,148 @@ export async function triggerGeminiReview({
       };
     }
 
+    if (reconciledComment) {
+      const postedAt = reconciledComment.createdAt ?? nowFn();
+      if (target) {
+        target.status = 'POSTED';
+        target.commentId = reconciledComment.id ?? target.commentId ?? null;
+        target.commentUrl = reconciledComment.url ?? target.commentUrl ?? null;
+        target.postedAt = postedAt;
+        target.error = null;
+      }
+      freshTask.updatedAt = postedAt;
+      await store.savePrTask(loopId, freshTask);
+      if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
+      return {
+        posted: true,
+        recovered: true,
+        trigger: target ?? null,
+        postedCount: triggers.filter((t) => t.status === 'POSTED').length,
+      };
+    }
+
+    if (reconcileConfirmedMissing || postDefinitelyNotSent) {
+      if (target) {
+        target.status = 'FAILED';
+        target.error = postError;
+      }
+      freshTask.updatedAt = nowFn();
+      await store.savePrTask(loopId, freshTask);
+      if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
+      return {
+        posted: false,
+        reason: 'POST_FAILED',
+        error: postError,
+        trigger: target ?? null,
+        postedCount: triggers.filter((t) => t.status === 'POSTED').length,
+      };
+    }
+
     if (target) {
-      target.status = 'FAILED';
       target.error = postError;
+      target.postUncertain = true;
     }
     freshTask.updatedAt = nowFn();
     await store.savePrTask(loopId, freshTask);
     if (prTask && prTask !== freshTask) prTask.reviewTriggers = freshTask.reviewTriggers;
     return {
       posted: false,
-      reason: 'POST_FAILED',
+      reason: 'POST_UNCERTAIN',
       error: postError,
       trigger: target ?? null,
       postedCount: triggers.filter((t) => t.status === 'POSTED').length,
+    };
+  });
+}
+
+export async function pushPrHead({
+  loopId,
+  store,
+  execFn = execFileAsync,
+  fetchPrSnapshotFn = fetchPrSnapshotViaGh,
+  withLeaseFn = async (fn) => fn(),
+  nowFn = () => new Date().toISOString(),
+}) {
+  const initialTask = await store.loadPrTask(loopId);
+  if (!initialTask) {
+    throw new Error(`ReviewLoop PR: prTask missing for loopId "${loopId}"`);
+  }
+  if (initialTask.permissions?.push !== true) {
+    throw new Error('ReviewLoop PR: action "push" is not authorized');
+  }
+
+  const oldSha = String(initialTask.boundHeadSha ?? '').trim().toLowerCase();
+  const repoRoot = initialTask.repoRoot;
+  const headBranch = initialTask.headBranch;
+  if (!oldSha || !repoRoot || !headBranch) {
+    throw new Error('ReviewLoop PR: prTask missing boundHeadSha, repoRoot, or headBranch');
+  }
+
+  const preSnapshot = await fetchPrSnapshotFn({
+    repoFullName: initialTask.repoFullName,
+    prNumber: initialTask.prNumber,
+  });
+  const preStatus = String(preSnapshot?.prState?.state ?? '').trim().toUpperCase();
+  if (preStatus !== 'OPEN') {
+    throw new Error(`ReviewLoop PR: cannot push when PR state is ${preStatus || 'UNKNOWN'}`);
+  }
+  if (preSnapshot?.prState?.headRefName && preSnapshot.prState.headRefName !== headBranch) {
+    throw new Error(`ReviewLoop PR: PR head branch mismatch (live=${preSnapshot.prState.headRefName}, expected=${headBranch})`);
+  }
+  const preRemoteSha = String(preSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
+  if (!preRemoteSha || preRemoteSha !== oldSha) {
+    throw new Error(`ReviewLoop PR: HEAD drift detected before push (remote=${preRemoteSha || 'missing'}, bound=${oldSha})`);
+  }
+
+  const { stdout: branchOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' });
+  const currentBranch = String(branchOut ?? '').trim();
+  if (currentBranch !== headBranch) {
+    throw new Error(`ReviewLoop PR: local branch "${currentBranch}" does not match PR headBranch "${headBranch}"`);
+  }
+
+  const { stdout: localHeadOut } = await execFn('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const localHead = String(localHeadOut ?? '').trim().toLowerCase();
+  if (!localHead || localHead === oldSha) {
+    throw new Error('ReviewLoop PR: local HEAD has no new commit to push');
+  }
+
+  try {
+    await execFn('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', oldSha, localHead], { encoding: 'utf8' });
+  } catch {
+    throw new Error(`ReviewLoop PR: local HEAD (${localHead}) is not a fast-forward descendant of boundHeadSha (${oldSha}); history rewrite/rebase is rejected`);
+  }
+
+  await execFn('git', ['-C', repoRoot, 'push', 'origin', `HEAD:${headBranch}`], { encoding: 'utf8' });
+
+  const postSnapshot = await fetchPrSnapshotFn({
+    repoFullName: initialTask.repoFullName,
+    prNumber: initialTask.prNumber,
+  });
+  const postRemoteSha = String(postSnapshot?.prState?.headRefOid ?? '').trim().toLowerCase();
+  if (postRemoteSha !== localHead) {
+    throw new Error(`ReviewLoop PR: remote HEAD after push (${postRemoteSha || 'missing'}) does not match pushed commit (${localHead})`);
+  }
+
+  return withLeaseFn(async () => {
+    const freshTask = await store.loadPrTask(loopId);
+    if (!freshTask) throw new Error(`ReviewLoop PR: prTask missing for loopId "${loopId}"`);
+    const freshBound = String(freshTask.boundHeadSha ?? '').trim().toLowerCase();
+    if (freshBound !== oldSha) {
+      throw new Error(`ReviewLoop PR: boundHeadSha changed concurrently (${freshBound} !== ${oldSha})`);
+    }
+    const pushedAt = nowFn();
+    freshTask.boundHeadSha = localHead;
+    freshTask.headHistory = [
+      ...(Array.isArray(freshTask.headHistory) ? freshTask.headHistory : []),
+      { fromSha: oldSha, toSha: localHead, pushedAt, actor: 'worker' },
+    ];
+    freshTask.updatedAt = pushedAt;
+    await store.savePrTask(loopId, freshTask);
+    return {
+      pushed: true,
+      oldHeadSha: oldSha,
+      newHeadSha: localHead,
+      headBranch,
     };
   });
 }

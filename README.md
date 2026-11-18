@@ -239,6 +239,21 @@ reviewloop inspect-spend --loop <loopId> --operation <operationId> --json
 reviewloop inspect-spend --loop <loopId> --reservation <reservationId> --json
 ```
 
+### PR Task (`taskType: "pr"`) CLI
+
+For PR-fix orchestration against `jiaze-claude-review-bot[bot]`, start with `reviewloop_begin({ taskType: "pr", prContext })` and use:
+
+```sh
+reviewloop pr status [--loop <loopId>] [--json]
+reviewloop pr push --loop <loopId>                 # requires permissions.push; verifies branch/ancestor/remote before updating boundHeadSha
+reviewloop pr trigger-review --loop <loopId>       # requires permissions.comment; enforces <= 3 @gemini review triggers
+reviewloop pr bind-agent --loop <loopId> --agent <claude|codex|agy> [--session <id>]
+reviewloop pr resume --loop <loopId>
+reviewloop pr stop --loop <loopId> [--reason "<reason>"]
+```
+
+> **Note:** Local `npm test` / `npm run doctor` verify local behavior only. Real-PR Fix/Dismiss E2E and auto-wake require explicit user authorization on the target PR and valid local `gh` / CLI credentials.
+
 See [RL-P0-01: settlement safety and operator runbook](docs/RL-P0-01-SETTLEMENT.md).
 This inspector does not reconcile billing or authorize another call.
 

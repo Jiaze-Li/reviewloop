@@ -4,6 +4,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildPrWakeContextPrompt } from './prWakeAdapter.js';
+import {
+  fetchPrSnapshotViaGh,
+  postPrCommentViaGh,
+  pushPrHead,
+  triggerGeminiReview,
+} from './prTaskEngine.js';
 import { REVIEW_LOOP_STATES, ReviewLoopStore, recordTransition, isTerminal } from './state.js';
 
 const execFileAsync = promisify(execFile);
@@ -94,4 +100,85 @@ export async function stopPrTask({
   await store.save(loopId, loopState);
   await store.savePrTask(loopId, prTask);
   return { loopId, state: loopState.state, watcherStopped, reason };
+}
+
+export async function bindPrAgent({
+  persistence,
+  loopId,
+  agentType,
+  agentSessionId = null,
+}) {
+  const store = new ReviewLoopStore(persistence);
+  const loopState = await store.load(loopId);
+  const prTask = await store.loadPrTask(loopId);
+  if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr' || !prTask) {
+    throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
+  }
+  const normalizedAgent = String(agentType ?? '').trim().toLowerCase();
+  if (!['claude', 'codex', 'agy'].includes(normalizedAgent)) {
+    throw new Error(`unsupported agentType "${agentType}" (expected claude, codex, or agy)`);
+  }
+  const sessionId = agentSessionId == null ? null : (String(agentSessionId).trim() || null);
+  prTask.watcher = {
+    ...(prTask.watcher ?? {}),
+    agentType: normalizedAgent,
+    agentSessionId: sessionId,
+  };
+  prTask.updatedAt = new Date().toISOString();
+  await store.savePrTask(loopId, prTask);
+  return {
+    loopId,
+    agentType: normalizedAgent,
+    agentSessionId: sessionId,
+  };
+}
+
+export async function pushPrHeadCli({
+  persistence,
+  loopId,
+  execFn,
+  fetchPrSnapshotFn = fetchPrSnapshotViaGh,
+  withLeaseFn = async (fn) => fn(),
+}) {
+  const store = new ReviewLoopStore(persistence);
+  const loopState = await store.load(loopId);
+  if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr') {
+    throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
+  }
+  return pushPrHead({
+    loopId,
+    store,
+    ...(execFn ? { execFn } : {}),
+    fetchPrSnapshotFn,
+    withLeaseFn,
+  });
+}
+
+export async function triggerPrReviewCli({
+  persistence,
+  loopId,
+  fetchPrSnapshotFn = fetchPrSnapshotViaGh,
+  postCommentFn = postPrCommentViaGh,
+  withLeaseFn = async (fn) => fn(),
+}) {
+  const store = new ReviewLoopStore(persistence);
+  const loopState = await store.load(loopId);
+  const prTask = await store.loadPrTask(loopId);
+  if (!loopState || loopState.objective?.mode === 'PR' || loopState.objective?.taskType !== 'pr' || !prTask) {
+    throw new Error(`unknown or non-PR-task loopId: ${loopId}`);
+  }
+  const snapshot = await fetchPrSnapshotFn({
+    repoFullName: prTask.repoFullName,
+    prNumber: prTask.prNumber,
+  });
+  return triggerGeminiReview({
+    loopId,
+    prTask,
+    prState: snapshot.prState,
+    comments: snapshot.comments,
+    store,
+    postCommentFn,
+    fetchPrSnapshotFn,
+    withLeaseFn,
+  });
 }

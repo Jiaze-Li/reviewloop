@@ -4,6 +4,7 @@ import {
   parseTrustedBotSession,
   evaluatePrStatus,
   triggerGeminiReview,
+  pushPrHead,
   buildDismissComment,
   assertPrActionAuthorized,
   recordPrFixRound,
@@ -151,21 +152,62 @@ test('triggerGeminiReview enforces max 3 posted triggers, ignores failed/dismiss
   await store.savePrTask(prTask.loopId, prTask);
 
   let postCalls = 0;
-  // 1. Failed post does NOT consume the 3-comment limit
+  // 1. Confirmed failed post (via fetchPrSnapshotFn) does NOT consume the 3-comment limit
   const failRes = await triggerGeminiReview({
     loopId: prTask.loopId,
     prTask,
     prState: { state: 'OPEN', headRefOid: HEAD_A },
     comments: [],
     store,
+    fetchPrSnapshotFn: async () => ({ prState: { state: 'OPEN', headRefOid: HEAD_A }, comments: [] }),
     postCommentFn: async () => {
       postCalls += 1;
       throw new Error('network error');
     },
   });
   assert.equal(failRes.posted, false);
+  assert.equal(failRes.reason, 'POST_FAILED');
   assert.equal(failRes.postedCount, 0);
   assert.equal(prTask.reviewTriggers[0].status, 'FAILED');
+
+  // 1b. Unknown POST error (no reconcile snapshot) stays PENDING/POST_UNCERTAIN and reconciles to POSTED without double posting
+  const pUncertain = new MemoryPersistence();
+  const sUncertain = new ReviewLoopStore(pUncertain);
+  const tUncertain = makePrTask({ loopId: 'rl-uncertain' });
+  await sUncertain.savePrTask(tUncertain.loopId, tUncertain);
+  let uncertainPostCalls = 0;
+  const uncRes = await triggerGeminiReview({
+    loopId: tUncertain.loopId,
+    prTask: tUncertain,
+    prState: { state: 'OPEN', headRefOid: HEAD_A },
+    comments: [],
+    store: sUncertain,
+    postCommentFn: async () => {
+      uncertainPostCalls += 1;
+      throw new Error('socket hang up');
+    },
+  });
+  assert.equal(uncRes.posted, false);
+  assert.equal(uncRes.reason, 'POST_UNCERTAIN');
+  assert.equal(tUncertain.reviewTriggers[0].status, 'PENDING');
+  const recoveredUnc = await triggerGeminiReview({
+    loopId: tUncertain.loopId,
+    prTask: tUncertain,
+    prState: { state: 'OPEN', headRefOid: HEAD_A },
+    comments: [{
+      id: 'gh-unc-1',
+      url: 'https://github.com/x/y/pull/51#issuecomment-999',
+      body: `@gemini review\n${triggerMarker(tUncertain.reviewTriggers[0].idempotencyKey)}`,
+    }],
+    store: sUncertain,
+    postCommentFn: async () => {
+      uncertainPostCalls += 1;
+      return { commentId: 'should-not-post' };
+    },
+  });
+  assert.equal(recoveredUnc.posted, true);
+  assert.equal(recoveredUnc.recovered, true);
+  assert.equal(uncertainPostCalls, 1);
 
   // 2. Three successful posts on 3 distinct HEADs
   for (let i = 1; i <= MAX_REVIEW_TRIGGERS; i += 1) {
@@ -435,4 +477,184 @@ test('controller.review dispatches taskType=pr without calling LLM Reviewer or S
   assert.equal(passed.status, 'PASS');
   assert.equal(passed.terminal, true);
   assert.equal(reviewerCalls, 0);
+});
+
+function encodeReviewStateComment(stateObj, visibleStatus = 'READY') {
+  const b64 = Buffer.from(JSON.stringify(stateObj), 'utf8').toString('base64url');
+  return [
+    '<!-- jiaze-review-session:v1 -->',
+    `Status: **${visibleStatus}**`,
+    `<!-- jiaze-review-state:${b64} -->`,
+  ].join('\n');
+}
+
+test('AC-01: parses real jiaze-claude-review-bot[bot] jiaze-review-state base64url and fails closed on invalid/incomplete READY', () => {
+  const realReadyState = {
+    version: 1,
+    sessionId: 'claude-d33d63ef1f29',
+    lastReviewedHead: HEAD_A,
+    status: 'READY',
+    auditCompleted: true,
+    findings: [
+      { id: 'F001', severity: 'P1', status: 'FIXED', title: 'Fixed P1' },
+      { id: 'F002', severity: 'P3', status: 'OPEN', downgradedFrom: 'P2', title: 'Downgraded non-blocking P3' },
+    ],
+  };
+  const prTask = makePrTask({ trustedBotLogins: undefined });
+  const prState = { state: 'OPEN', headRefOid: HEAD_A };
+
+  const okReady = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: '6969829315',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment(realReadyState, 'READY'),
+      updatedAt: '2026-11-18T05:17:37.343Z',
+    }],
+  });
+  assert.equal(okReady.verdict, 'PASS');
+  assert.equal(okReady.session.openFindings.length, 0);
+
+  // Blocking P3 (without downgradedFrom) keeps REWORK blocking
+  const reworkWithP3 = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: '6969829316',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({
+        ...realReadyState,
+        status: 'REWORK',
+        findings: [{ id: 'F003', severity: 'P3', status: 'OPEN', title: 'Blocking P3' }],
+      }, 'REWORK'),
+    }],
+  });
+  assert.equal(reworkWithP3.verdict, 'REWORK');
+  assert.equal(reworkWithP3.session.openFindings.length, 1);
+
+  // Malformed jiaze-review-state MUST fail closed even if visible markdown says READY
+  const malformed = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-bad',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: '<!-- jiaze-review-session:v1 -->\nStatus: **READY**\n<!-- jiaze-review-state:not_valid_base64_json -->',
+    }],
+  });
+  assert.equal(malformed.verdict, 'WAITING_FOR_REVIEW');
+  assert.equal(malformed.reason, 'SESSION_UNPARSEABLE');
+
+  // READY with auditCompleted=false fails closed as HUMAN_REQUIRED
+  const incompleteAudit = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-incomp',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({ ...realReadyState, auditCompleted: false }, 'READY'),
+    }],
+  });
+  assert.equal(incompleteAudit.verdict, 'HUMAN_REQUIRED');
+  assert.equal(incompleteAudit.reason, 'INCOMPLETE_BOT_AUDIT');
+
+  // READY with open blocking finding fails closed as HUMAN_REQUIRED
+  const inconsistentReady = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-incon',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({
+        ...realReadyState,
+        findings: [{ id: 'F004', severity: 'P1', status: 'OPEN', title: 'Still open' }],
+      }, 'READY'),
+    }],
+  });
+  assert.equal(inconsistentReady.verdict, 'HUMAN_REQUIRED');
+  assert.equal(inconsistentReady.reason, 'INCONSISTENT_BOT_READY');
+
+  // staleFor === liveHeadSha -> STALE_BOT_READY
+  const staleMarked = evaluatePrStatus({
+    prState,
+    prTask,
+    comments: [{
+      id: 'c-stale',
+      author: { login: 'jiaze-claude-review-bot[bot]' },
+      body: encodeReviewStateComment({ ...realReadyState, staleFor: HEAD_A }, 'READY'),
+    }],
+  });
+  assert.equal(staleMarked.verdict, 'WAITING_FOR_REVIEW');
+  assert.equal(staleMarked.reason, 'STALE_BOT_READY');
+});
+
+test('AC-02: pushPrHead advances prTask.boundHeadSha after fast-forward push and rejects drift/rebase/unauthorized', async () => {
+  const persistence = new MemoryPersistence();
+  const store = new ReviewLoopStore(persistence);
+  const prTask = makePrTask();
+  await store.savePrTask(prTask.loopId, prTask);
+
+  let remoteSha = HEAD_A;
+  const pushed = await pushPrHead({
+    loopId: prTask.loopId,
+    store,
+    fetchPrSnapshotFn: async () => ({
+      prState: { state: 'OPEN', headRefOid: remoteSha, headRefName: 'feat/pr-task' },
+      comments: [],
+    }),
+    execFn: async (cmd, args) => {
+      assert.equal(cmd, 'git');
+      if (args.includes('--abbrev-ref')) return { stdout: 'feat/pr-task\n' };
+      if (args.includes('HEAD') && args.includes('rev-parse')) return { stdout: `${HEAD_B}\n` };
+      if (args.includes('--is-ancestor')) return { stdout: '' };
+      if (args.includes('push')) {
+        assert.equal(args.includes('--force'), false);
+        remoteSha = HEAD_B;
+        return { stdout: '' };
+      }
+      throw new Error(`unexpected git args: ${args.join(' ')}`);
+    },
+  });
+  assert.equal(pushed.pushed, true);
+  assert.equal(pushed.oldHeadSha, HEAD_A);
+  assert.equal(pushed.newHeadSha, HEAD_B);
+
+  const reloaded = await store.loadPrTask(prTask.loopId);
+  assert.equal(reloaded.boundHeadSha, HEAD_B);
+  assert.equal(reloaded.headHistory.length, 1);
+  assert.equal(reloaded.headHistory[0].toSha, HEAD_B);
+
+  // Rejects non-ancestor rebase/history rewrite
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: prTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({
+        prState: { state: 'OPEN', headRefOid: HEAD_B, headRefName: 'feat/pr-task' },
+        comments: [],
+      }),
+      execFn: async (_cmd, args) => {
+        if (args.includes('--abbrev-ref')) return { stdout: 'feat/pr-task\n' };
+        if (args.includes('HEAD') && args.includes('rev-parse')) return { stdout: `${'c'.repeat(40)}\n` };
+        if (args.includes('--is-ancestor')) throw new Error('not ancestor');
+        return { stdout: '' };
+      },
+    }),
+    /history rewrite\/rebase is rejected/,
+  );
+
+  // Rejects external remote drift
+  await assert.rejects(
+    () => pushPrHead({
+      loopId: prTask.loopId,
+      store,
+      fetchPrSnapshotFn: async () => ({
+        prState: { state: 'OPEN', headRefOid: 'd'.repeat(40), headRefName: 'feat/pr-task' },
+        comments: [],
+      }),
+      execFn: async () => ({ stdout: '' }),
+    }),
+    /HEAD drift detected before push/,
+  );
 });

@@ -75,11 +75,14 @@ export function initialPrTaskState(objective) {
     originContractText: ctx.originContractText ?? null,
     originDesignSha256: ctx.originDesignSha256 ?? null,
     permissions: { ...(ctx.permissions ?? {}) },
-    trustedBotLogins: [...(ctx.trustedBotLogins ?? ['claude-review-bot[bot]'])],
+    trustedBotLogins: [...(ctx.trustedBotLogins ?? ['jiaze-claude-review-bot[bot]', 'claude-review-bot[bot]'])],
     reviewTriggers: [],
+    headHistory: [],
     latestBotSession: null,
     sharedBoundaryStreak: { count: 0, boundaryKey: null, roundHistory: [] },
-    watcher: null,
+    watcher: (ctx.agentType || ctx.agentSessionId)
+      ? { agentType: ctx.agentType ?? null, agentSessionId: ctx.agentSessionId ?? null }
+      : null,
     stopReason: null,
     createdAt: objective.createdAt,
     updatedAt: objective.createdAt,

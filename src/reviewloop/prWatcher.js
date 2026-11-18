@@ -222,7 +222,22 @@ export async function runPrWatcher({
         nowFn: () => new Date(clock()).toISOString(),
       });
     } catch (err) {
-      if (String(err?.message) !== 'LEASE_HELD') throw err;
+      if (String(err?.message) !== 'LEASE_HELD') {
+        try {
+          await withLeaseFn(async () => {
+            const prTask = await store.loadPrTask(loopId);
+            if (prTask) {
+              prTask.watcher = {
+                ...(prTask.watcher ?? {}),
+                consecutiveErrors: (prTask.watcher?.consecutiveErrors ?? 0) + 1,
+                lastError: String(err?.message ?? err),
+                lastErrorAt: new Date(clock()).toISOString(),
+              };
+              await store.savePrTask(loopId, prTask);
+            }
+          });
+        } catch { /* best effort error recording */ }
+      }
     }
     if (outcome?.done) {
       return { exited: true, ...outcome };

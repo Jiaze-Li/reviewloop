@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildWakePlan, executeWake } from '../src/reviewloop/prWakeAdapter.js';
 import { runPrWatcher, DEFAULT_BACKOFF_MS } from '../src/reviewloop/prWatcher.js';
-import { formatPrStatusEntry, buildPrResumeText, stopPrTask } from '../src/reviewloop/prCli.js';
+import { formatPrStatusEntry, buildPrResumeText, stopPrTask, bindPrAgent, triggerPrReviewCli } from '../src/reviewloop/prCli.js';
 import { createReviewObjective, TASK_TYPES } from '../src/reviewloop/objective.js';
 import { initialLoopState, initialPrTaskState, ReviewLoopStore, REVIEW_LOOP_STATES } from '../src/reviewloop/state.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
@@ -264,4 +264,68 @@ test('prCli formats status, builds resume text, stops watcher/loop, and rejects 
     () => buildPrResumeText({ loopState: { loopId: 'old', objective: { mode: 'PR' } }, prTask }),
     /retired mode="PR"/,
   );
+});
+
+test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error backoff', async () => {
+  const persistence = new MemoryPersistence();
+  const store = new ReviewLoopStore(persistence);
+  const { loopState, prTask } = setupPrLoop();
+  await store.save(loopState.loopId, loopState);
+  await store.savePrTask(loopState.loopId, prTask);
+
+  const bound = await bindPrAgent({
+    persistence,
+    loopId: loopState.loopId,
+    agentType: 'claude',
+    agentSessionId: 'sess-bound-1',
+  });
+  assert.equal(bound.agentType, 'claude');
+  assert.equal(bound.agentSessionId, 'sess-bound-1');
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.agentSessionId, 'sess-bound-1');
+
+  await assert.rejects(
+    () => bindPrAgent({ persistence, loopId: loopState.loopId, agentType: 'unknown' }),
+    /unsupported agentType/,
+  );
+
+  const trigRes = await triggerPrReviewCli({
+    persistence,
+    loopId: loopState.loopId,
+    fetchPrSnapshotFn: async () => ({
+      prState: { state: 'OPEN', headRefOid: HEAD_A },
+      comments: [],
+    }),
+    postCommentFn: async () => ({ commentId: 'c-trig-1', commentUrl: 'https://github.com/x/y/pull/51#issuecomment-1' }),
+  });
+  assert.equal(trigRes.posted, true);
+  assert.equal(trigRes.postedCount, 1);
+
+  // Watcher survives transient network error and recovers on next poll
+  let calls = 0;
+  let now = 0;
+  const watchRes = await runPrWatcher({
+    loopId: loopState.loopId,
+    persistence,
+    backoffMs: [100],
+    maxWaitMs: 5000,
+    fetchPrSnapshotFn: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('gh network timeout');
+      return {
+        prState: { state: 'OPEN', headRefOid: HEAD_A },
+        comments: [{
+          id: 'c-ready',
+          author: { login: 'jiaze-claude-review-bot[bot]' },
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${HEAD_A}","auditCompleted":true} -->`,
+        }],
+      };
+    },
+    wakeFn: async () => ({ woken: false, wakeStatus: 'MANUAL_REQUIRED', reason: 'DONE' }),
+    sleepFn: async (ms) => { now += ms; },
+    clock: () => now,
+    pid: 77777,
+  });
+  assert.equal(watchRes.status, 'PASS');
+  assert.equal(calls, 2);
+  assert.equal((await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors, 1);
 });
