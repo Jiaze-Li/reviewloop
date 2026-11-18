@@ -328,4 +328,38 @@ test('AC-04/AC-05: bindPrAgent, triggerPrReviewCli, and watcher transient error 
   assert.equal(watchRes.status, 'PASS');
   assert.equal(calls, 2);
   assert.equal((await store.loadPrTask(loopState.loopId)).watcher.consecutiveErrors, 1);
+
+  // stopPrTask remains idempotent on already-STOPPED / HUMAN_REQUIRED / PASS loops,
+  // while bindPrAgent and triggerPrReviewCli reject with their own operation errors.
+  const humanSetup = setupPrLoop({ state: REVIEW_LOOP_STATES.HUMAN_REQUIRED, watcher: { pid: 65432 } });
+  await store.save('rl-human-stop', { ...humanSetup.loopState, loopId: 'rl-human-stop' });
+  await store.savePrTask('rl-human-stop', { ...humanSetup.prTask, loopId: 'rl-human-stop' });
+  let killedHumanPid = null;
+  const stoppedHuman = await stopPrTask({
+    persistence,
+    loopId: 'rl-human-stop',
+    verifyWatcherPidFn: async (pid) => pid === 65432,
+    killFn: (pid) => { killedHumanPid = pid; },
+  });
+  assert.equal(killedHumanPid, 65432);
+  assert.equal(stoppedHuman.state, 'HUMAN_REQUIRED');
+  assert.equal((await store.loadPrTask('rl-human-stop')).watcher.pid, null);
+  await assert.rejects(
+    () => bindPrAgent({ persistence, loopId: 'rl-human-stop', agentType: 'claude', agentSessionId: 's1' }),
+    /cannot bind agent when loop state is HUMAN_REQUIRED/,
+  );
+  await assert.rejects(
+    () => triggerPrReviewCli({ persistence, loopId: 'rl-human-stop' }),
+    /cannot trigger review when loop state is HUMAN_REQUIRED/,
+  );
+
+  const stoppedSetup = setupPrLoop({ state: REVIEW_LOOP_STATES.STOPPED, watcher: { pid: 65433 } });
+  await store.save('rl-already-stopped', { ...stoppedSetup.loopState, loopId: 'rl-already-stopped' });
+  await store.savePrTask('rl-already-stopped', { ...stoppedSetup.prTask, loopId: 'rl-already-stopped' });
+  const stoppedAgain = await stopPrTask({
+    persistence,
+    loopId: 'rl-already-stopped',
+    verifyWatcherPidFn: async () => false,
+  });
+  assert.equal(stoppedAgain.state, 'STOPPED');
 });
