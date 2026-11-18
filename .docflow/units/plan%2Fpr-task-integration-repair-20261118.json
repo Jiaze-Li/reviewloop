@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T06:03:57.878Z",
+  "updatedAt": "2026-11-18T06:03:59.775Z",
   "task": {
     "id": "plan/pr-task-integration-repair-20261118",
     "branch": "plan/pr-task-integration-repair-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T13:49:49+08:00",
     "status": "In progress",
     "current": "fix(pr-task): align pr-bot state, guarded push, triggers, and watcher",
-    "next": "",
+    "next": "等待 PR 53 的 CI 和机器人审查结果，并确认测试 PR 授权以运行真实闭环验收",
     "history": [
       {
         "at": "2026-11-18T14:03:40+08:00",
