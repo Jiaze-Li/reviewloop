@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T03:41:31.770Z",
+  "updatedAt": "2026-11-18T03:41:58.077Z",
   "task": {
     "id": "plan/pr-task-20261118",
     "branch": "plan/pr-task-20261118",
@@ -19,7 +19,14 @@
         "message": "docs(plan): define bounded event-driven PR repair task"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 51,
+      "state": "open",
+      "title": "docs(plan): event-driven PR repair task with bounded review triggers",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/51",
+      "merged": false,
+      "updatedAt": "2026-11-18T03:41:48Z"
+    },
     "completed": null,
     "outcome": null
   }
