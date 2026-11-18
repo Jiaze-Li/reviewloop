@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-18T03:56:02.360Z",
+  "updatedAt": "2026-11-18T04:48:36.264Z",
   "task": {
     "id": "plan/pr-task-20261118",
     "branch": "plan/pr-task-20261118",
@@ -9,7 +9,7 @@
     "started": "2026-11-18T11:41:22+08:00",
     "status": "In progress",
     "current": "docs(design): add approved design for event-driven PR repair task",
-    "next": "",
+    "next": "确认 Code 阶段授权后开始实现 PR 问题修复编排与零空转唤醒",
     "history": [
       {
         "at": "2026-11-18T11:55:51+08:00",
