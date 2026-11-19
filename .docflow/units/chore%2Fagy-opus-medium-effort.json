@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T12:02:51.408Z",
+  "updatedAt": "2026-11-19T12:05:04.666Z",
   "task": {
     "id": "chore/agy-opus-medium-effort",
     "branch": "chore/agy-opus-medium-effort",
@@ -8,15 +8,26 @@
     "task": "Development branch: chore/agy-opus-medium-effort",
     "started": "2026-11-19T20:01:21+08:00",
     "status": "In progress",
-    "current": "Prefer medium reasoning effort for AGY Claude Opus reviewer",
+    "current": "Update model family resolver test to expect medium effort for AGY Opus",
     "next": "等待 PR 检查与审查完成后合并进主分支，并重启评审服务",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-19T20:04:54+08:00",
+        "text": "Prefer medium reasoning effort for AGY Claude Opus reviewer"
+      }
+    ],
     "commits": [
       {
         "sha": "610133d75657e267fe129122432e9bf215a6d27c",
         "branch": "chore/agy-opus-medium-effort",
         "timestamp": "2026-11-19T20:01:21+08:00",
         "message": "Prefer medium reasoning effort for AGY Claude Opus reviewer"
+      },
+      {
+        "sha": "0be1a2b00bd8569e651824277968a1f9cda09e1d",
+        "branch": "chore/agy-opus-medium-effort",
+        "timestamp": "2026-11-19T20:04:54+08:00",
+        "message": "Update model family resolver test to expect medium effort for AGY Opus"
       }
     ],
     "pr": {
