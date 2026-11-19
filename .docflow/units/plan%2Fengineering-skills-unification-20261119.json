@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T10:40:42.740Z",
+  "updatedAt": "2026-11-19T10:40:55.904Z",
   "task": {
     "id": "plan/engineering-skills-unification-20261119",
     "branch": "plan/engineering-skills-unification-20261119",
@@ -36,7 +36,7 @@
       "title": "plan: unify Engineering Skills with ReviewLoop workflow",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/57",
       "merged": false,
-      "updatedAt": "2026-11-19T08:07:03Z"
+      "updatedAt": "2026-11-19T10:40:34Z"
     },
     "completed": null,
     "outcome": null
