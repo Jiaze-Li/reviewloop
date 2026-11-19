@@ -71,6 +71,8 @@ test('resolveAgyOpus* resolves AGY Claude Opus dynamically from the catalog, nev
   assert.equal(resolveAgyOpusFamily({}).provider, 'agy-claude-gpt');
   const cat = ['claude-opus-4-6', 'claude-opus-5-0', 'claude-sonnet-4-6'];
   assert.equal(resolveAgyOpusModel({}, { agyCatalog: cat }), 'claude-opus-5-0');
+  const effortCat = ['claude-opus-5-5-low', 'claude-opus-5-5-medium', 'claude-opus-5-5-high'];
+  assert.equal(resolveAgyOpusModel({}, { agyCatalog: effortCat }), 'claude-opus-5-5-medium');
   assert.equal(resolveAgyOpusFamily({}, { agyCatalog: cat }).resolvedFrom, 'runtime_catalog');
   assert.equal(resolveAgyOpusModel({ REVIEWLOOP_AGY_OPUS_MODEL: 'claude-opus-4-6' }, { agyCatalog: cat }), 'claude-opus-4-6');
 });
