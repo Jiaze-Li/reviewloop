@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T05:56:25.723Z",
+  "updatedAt": "2026-11-19T05:58:47.024Z",
   "task": {
     "id": "fix/unify-quota-lock",
     "branch": "fix/unify-quota-lock",
     "title": "fix/unify-quota-lock",
     "task": "Development branch: fix/unify-quota-lock",
     "started": "2026-11-19T13:47:21+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Prevent stale /usage snapshots from clearing newer cooldowns",
     "next": "等待自动评审机器人复核第55号拉取请求并合并",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 55,
-      "state": "open",
+      "state": "closed",
       "title": "fix(agy): unify quota pool lock and use 1h preflight refresh during cooldown",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/55",
-      "merged": false,
-      "updatedAt": "2026-11-19T05:56:12Z"
+      "merged": true,
+      "mergedAt": "2026-11-19T05:58:37Z",
+      "closedAt": "2026-11-19T05:58:38Z",
+      "updatedAt": "2026-11-19T05:58:38Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-19T05:58:37Z",
+    "outcome": "Merged"
   }
 }
