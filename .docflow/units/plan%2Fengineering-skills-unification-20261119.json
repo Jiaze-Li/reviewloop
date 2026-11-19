@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T08:07:14.424Z",
+  "updatedAt": "2026-11-19T10:40:36.327Z",
   "task": {
     "id": "plan/engineering-skills-unification-20261119",
     "branch": "plan/engineering-skills-unification-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T16:06:34+08:00",
     "status": "In progress",
     "current": "chore(plan): initialize engineering skills unification draft PR",
-    "next": "",
+    "next": "工程统一 Code 的最终整体审查因预算用尽暂停，等产品负责人决定是否再提预算",
     "history": [],
     "commits": [
       {
