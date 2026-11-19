@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T06:52:57.131Z",
+  "updatedAt": "2026-11-19T06:53:50.283Z",
   "task": {
     "id": "workflow/pr-comment-only-contracts-20261119",
     "branch": "workflow/pr-comment-only-contracts-20261119",
@@ -19,7 +19,14 @@
         "message": "chore: open contract-storage workflow planning PR (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 56,
+      "state": "open",
+      "title": "plan: 统一 Plan/Design 合同只存 PR 评论，不再随 PR 进入 main",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/56",
+      "merged": false,
+      "updatedAt": "2026-11-19T06:53:31Z"
+    },
     "completed": null,
     "outcome": null
   }
