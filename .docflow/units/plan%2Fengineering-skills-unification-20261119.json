@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T12:30:13.567Z",
+  "updatedAt": "2026-11-19T12:30:19.503Z",
   "task": {
     "id": "plan/engineering-skills-unification-20261119",
     "branch": "plan/engineering-skills-unification-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T16:06:34+08:00",
     "status": "In progress",
     "current": "Remove duplicate heading in ChatGPT starter prompt guide",
-    "next": "工程统一的代码已推送到 PR，等 PR 机器人审查；整体本地审查未完成，由你决定是否合并",
+    "next": "等待 PR 57 机器人复核通过后确认合并",
     "history": [
       {
         "at": "2026-11-19T18:40:31+08:00",
