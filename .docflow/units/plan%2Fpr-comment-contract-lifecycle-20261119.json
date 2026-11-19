@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T03:53:04.689Z",
+  "updatedAt": "2026-11-19T03:53:09.676Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -19,7 +19,14 @@
         "message": "chore: initialize PR for contract lifecycle plan [empty]"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 54,
+      "state": "open",
+      "title": "docs(plan): PR-only task contracts and verified lifecycle",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/54",
+      "merged": false,
+      "updatedAt": "2026-11-19T03:52:59Z"
+    },
     "completed": null,
     "outcome": null
   }
