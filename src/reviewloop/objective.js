@@ -9,8 +9,9 @@
 import { createHash } from 'node:crypto';
 import { normalizeContractText, normalizeEvidenceRequirements } from './contractEvidence.js';
 
+export const PR_TASK_REMOVED_MESSAGE = 'PR task type removed; handle PR fixes per engineering/README.md PR stage';
 export const REVIEW_MODES = Object.freeze({ LOCAL: 'LOCAL' });
-export const TASK_TYPES = Object.freeze({ CODE: 'code', DESIGN: 'design', PR: 'pr' });
+export const TASK_TYPES = Object.freeze({ CODE: 'code', DESIGN: 'design' });
 
 // Code tasks block on every concrete defect, P3 included, matching
 // claude-review-bot (a P3 left open there blocks READY). Design tasks keep
@@ -148,62 +149,6 @@ export const DEFAULT_TRUSTED_BOT_LOGINS = Object.freeze([
   'claude-review-bot[bot]',
 ]);
 
-export function normalizePrContext(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('createReviewObjective: prContext must be an object for taskType "pr"');
-  }
-  const reqStr = (field) => {
-    const val = String(raw[field] ?? '').trim();
-    if (!val) throw new Error(`createReviewObjective: prContext.${field} is required`);
-    return val;
-  };
-  const prNumber = Number(raw.prNumber);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    throw new Error('createReviewObjective: prContext.prNumber must be a positive integer');
-  }
-  const trustedBotLogins = Array.isArray(raw.trustedBotLogins) && raw.trustedBotLogins.length
-    ? [...new Set(raw.trustedBotLogins.map((v) => String(v ?? '').trim()).filter(Boolean))]
-    : [...DEFAULT_TRUSTED_BOT_LOGINS];
-  if (!trustedBotLogins.length) {
-    throw new Error('createReviewObjective: prContext.trustedBotLogins must not be empty');
-  }
-  const perms = raw.permissions && typeof raw.permissions === 'object' ? raw.permissions : {};
-  const originDesignSha256 = raw.originDesignSha256 == null
-    ? null
-    : String(raw.originDesignSha256).trim().toLowerCase() || null;
-  if (originDesignSha256 && !/^[0-9a-f]{64}$/.test(originDesignSha256)) {
-    throw new Error('createReviewObjective: prContext.originDesignSha256 must be 64 hexadecimal characters');
-  }
-  const agentType = raw.agentType == null
-    ? null
-    : String(raw.agentType).trim().toLowerCase() || null;
-  const agentSessionId = raw.agentSessionId == null
-    ? null
-    : String(raw.agentSessionId).trim() || null;
-  return {
-    repoFullName: reqStr('repoFullName'),
-    repoRoot: reqStr('repoRoot'),
-    prNumber,
-    baseBranch: reqStr('baseBranch'),
-    headBranch: reqStr('headBranch'),
-    boundHeadSha: reqStr('boundHeadSha'),
-    originLoopId: raw.originLoopId == null ? null : (String(raw.originLoopId).trim() || null),
-    originPolicySha: String(raw.originPolicySha ?? '').trim() || 'unknown',
-    originContractText: raw.originContractText == null ? null : String(raw.originContractText),
-    originDesignSha256,
-    trustedBotLogins,
-    ...(agentType ? { agentType } : {}),
-    ...(agentSessionId ? { agentSessionId } : {}),
-    permissions: {
-      edit: perms.edit === true,
-      commit: perms.commit === true,
-      push: perms.push === true,
-      comment: perms.comment === true,
-      autoWake: perms.autoWake === true,
-    },
-  };
-}
-
 // Build the immutable objective record. `mode` is LOCAL unless a PR number is
 // supplied. Every mode uses the internal Reviewer pool.
 export function createReviewObjective({
@@ -213,7 +158,7 @@ export function createReviewObjective({
   mode,
   taskType = TASK_TYPES.CODE,
   prNumber = null,
-  prContext = null,
+  prContext = null, // RETIRED: only to produce a clear error
   reviewer = null,
   baseline = null,
   constraints = [],
@@ -321,10 +266,8 @@ export function createReviewObjective({
     }
     objective.reviewTarget = String(reviewTarget);
   }
-  if (resolvedTaskType === TASK_TYPES.PR) {
-    objective.prContext = normalizePrContext(prContext);
-  } else if (prContext != null) {
-    throw new Error('createReviewObjective: prContext is only valid for taskType "pr"');
+  if (prContext != null) {
+    throw new Error(PR_TASK_REMOVED_MESSAGE);
   }
   // Explicit workflow mode (display/dispatch). NOT folded into the fingerprint:
   // it is derived from fingerprinted fields, and resolveReviewMode() always
@@ -379,7 +322,6 @@ function fingerprintFields(o) {
   // full-file check). Folded in only when present, so every pre-existing
   // objective keeps its original hash.
   if (o.reviewTarget) base.reviewTarget = o.reviewTarget;
-  if (o.prContext && typeof o.prContext === 'object') base.prContext = o.prContext;
   // Baseline Gate evidence identity — load-bearing for FAIL->WARN suppression.
   // Only folded in when present, so a pre-baselineGate objective keeps its hash.
   if (o.baselineGateEvidence && typeof o.baselineGateEvidence === 'object') {
@@ -463,9 +405,6 @@ export function assertObjectiveNotWeakened(original, candidate) {
   if ((candidate.reviewTarget ?? null) !== (original.reviewTarget ?? null)) {
     problems.push('design reviewTarget changed');
   }
-  if (JSON.stringify(candidate.prContext ?? null) !== JSON.stringify(original.prContext ?? null)) {
-    problems.push('prContext changed');
-  }
   if ((candidate.contractText ?? null) !== (original.contractText ?? null)) {
     problems.push('frozen contract text changed');
   }
@@ -502,13 +441,17 @@ export const REVIEW_WORKFLOWS = Object.freeze({
   CODE: 'code',
   DESIGN_LEGACY: 'design-legacy',
   DESIGN_TWO_STAGE: 'design-two-stage',
-  PR: 'pr',
 });
 
 export function resolveReviewMode(objective) {
-  if (objective?.taskType === TASK_TYPES.PR) return REVIEW_WORKFLOWS.PR;
   if (objective?.taskType === TASK_TYPES.DESIGN) {
     return objective.reviewTarget ? REVIEW_WORKFLOWS.DESIGN_TWO_STAGE : REVIEW_WORKFLOWS.DESIGN_LEGACY;
   }
   return REVIEW_WORKFLOWS.CODE;
+}
+
+// A loop stored by the removed PR task type. ReviewLoop never rehydrates,
+// rewrites or deletes such a record; callers only report it as retired.
+export function isRetiredPrLoop(raw) {
+  return raw?.objective?.mode === 'PR' || raw?.objective?.taskType === 'pr';
 }

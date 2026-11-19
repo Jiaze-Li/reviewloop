@@ -20,7 +20,7 @@ import {
   normalizeReviewTargetPath,
 } from './designTarget.js';
 import { DEFAULT_TRUSTED_BOT_LOGINS } from './objective.js';
-import { parseTrustedBotSession } from './prTaskEngine.js';
+import { parseTrustedBotSession } from './botSession.js';
 import { resolveReviewLoopRuntimeRoot } from './runtimeDir.js';
 
 const execFileAsync = promisify(execFile);

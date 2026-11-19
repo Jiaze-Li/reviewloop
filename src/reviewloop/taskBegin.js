@@ -1,15 +1,14 @@
 // Frozen task initialization. Dependencies are injected from the controller boundary.
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   createReviewObjective,
   normalizePhasePlan,
-  normalizePrContext,
   assertResumeTaskDefinitionBound,
   REVIEW_MODES,
   TASK_TYPES,
+  PR_TASK_REMOVED_MESSAGE,
 } from './objective.js';
-import { initialLoopState, initialPrTaskState } from './state.js';
+import { initialLoopState } from './state.js';
 import { assertContractHandoff, normalizeEvidenceRequirements } from './contractEvidence.js';
 import { sha256Hex, phasesOf, currentReviewScope } from './phaseState.js';
 import { assertReviewTargetAbsent, designContentSha256 } from './designTarget.js';
@@ -32,30 +31,14 @@ export function createBeginTask({
     constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
     reviewTarget = null, designSha256 = null,
   } = {}) {
-    if (prNumber != null) throw new Error('reviewloop_begin: PR mode has been retired; use claude-review-bot for GitHub PR review.');
+    if (prNumber != null) throw new Error(`reviewloop_begin: PR mode has been retired; ${PR_TASK_REMOVED_MESSAGE}`);
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
     if (!cwd) throw new Error('reviewloop_begin: cwd is required');
     const resolvedTaskType = String(taskType ?? TASK_TYPES.CODE).trim().toLowerCase();
     if (!Object.values(TASK_TYPES).includes(resolvedTaskType)) {
       throw new Error(`reviewloop_begin: unknown taskType "${taskType}"`);
     }
-    let normalizedPrContext = null;
-    if (resolvedTaskType === TASK_TYPES.PR) {
-      if (!prContext || typeof prContext !== 'object' || Array.isArray(prContext)) {
-        throw new Error('reviewloop_begin: prContext is required for taskType "pr"');
-      }
-      normalizedPrContext = normalizePrContext({
-        ...prContext,
-        repoRoot: prContext.repoRoot ?? cwd,
-      });
-      if (path.resolve(normalizedPrContext.repoRoot) !== path.resolve(cwd)) {
-        throw new Error(
-          `reviewloop_begin: prContext.repoRoot (${normalizedPrContext.repoRoot}) does not match cwd (${cwd})`,
-        );
-      }
-    } else if (prContext != null) {
-      throw new Error('reviewloop_begin: prContext is only valid with taskType "pr"');
-    }
+    if (prContext != null) throw new Error(`reviewloop_begin: ${PR_TASK_REMOVED_MESSAGE}`);
     const effectiveVerificationCommands = verificationCommands
       ?? (resolvedTaskType === TASK_TYPES.DESIGN ? ['git diff --check'] : null);
     const frozenContractText = assertContractHandoff({
@@ -220,7 +203,7 @@ export function createBeginTask({
       : (Number.isInteger(envMaxRounds) && envMaxRounds > 0 ? envMaxRounds : undefined);
 
     const objective = createReviewObjective({
-      loopId, goal, repository, mode, taskType: resolvedTaskType, prContext: normalizedPrContext, reviewer, baseline,
+      loopId, goal, repository, mode, taskType: resolvedTaskType, reviewer, baseline,
       constraints, phases, contractText: frozenContractText, evidenceRequirements,
       blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       reviewTarget: frozenReviewTarget,
@@ -291,9 +274,6 @@ export function createBeginTask({
     loopState.verificationCommands = effectiveVerificationCommands ?? null;
     loopState.baselineGateEvidence = baselineGate;
     await store.save(loopId, loopState);
-    if (resolvedTaskType === TASK_TYPES.PR && typeof store.savePrTask === 'function') {
-      await store.savePrTask(loopId, initialPrTaskState(objective));
-    }
     onEvent?.({ type: 'REVIEWLOOP_BEGIN', loopId, mode, taskType: objective.taskType });
 
     return {
@@ -309,7 +289,6 @@ export function createBeginTask({
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
       ...(objective.reviewTarget ? { reviewTarget: objective.reviewTarget } : {}),
-      ...(objective.prContext ? { prContext: objective.prContext } : {}),
       ...(planWarnings.length ? { planWarnings } : {}),
     };
   }

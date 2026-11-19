@@ -7,6 +7,7 @@
 // diagnostic warning only — a stale or absent global install never fails
 // doctor, and doctor never mutates the real environment or makes a model call.
 
+import { checkEngineeringConsistency } from './check-engineering-consistency.js';
 import path from 'node:path';
 import os from 'node:os';
 import { execSync as nodeExecSync } from 'node:child_process';
@@ -96,6 +97,11 @@ export function checkMcpServerBinding({
 
 function probe(execSync, command) {
   return String(execSync(command, { stdio: ['ignore', 'pipe', 'ignore'] })).trim();
+}
+
+export function checkEngineering(check = checkEngineeringConsistency) {
+  const res = check();
+  return { name: 'engineering_consistency', ok: res.ok, issues: res.issues };
 }
 
 export function checkGit({ execSync } = {}) {
@@ -253,7 +259,7 @@ export function checkLegacyManagedEnv(env = process.env) {
   };
 }
 
-export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv } = {}) {
+export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv, engineeringCheck } = {}) {
   const exec = execSync || nodeExecSync;
   const write = log || console.log;
   const environment = env || process.env;
@@ -264,10 +270,17 @@ export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv }
     checkGit({ execSync: exec }),
     checkRuntimeDir(),
     checkRepoInvariants(),
+    // engineering/ docs vs COMMON vs code: a drift fails doctor (core), like repo_invariants
+    checkEngineering(engineeringCheck ?? checkEngineeringConsistency),
   ];
   const ok = core.every((r) => r.ok);
 
   for (const r of core) {
+    if (r.name === 'engineering_consistency') {
+      if (r.ok) write('  ok    engineering_consistency (engineering/ docs match COMMON and code)');
+      else for (const i of r.issues) write(`  FAIL  engineering_consistency: ${i}`);
+      continue;
+    }
     if (r.name === 'repo_invariants') {
       if (r.ok) write(`  ok    repo_invariants (reviewer+supervisor only, no planner/executor, COMMON ${r.commonBytes}B)`);
       else for (const i of r.issues) write(`  FAIL  repo_invariants: ${i}`);

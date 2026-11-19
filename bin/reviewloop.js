@@ -19,7 +19,6 @@ import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
-import { acquireLeaseWithRetry } from '../src/reviewloop/prWatcher.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
@@ -27,15 +26,9 @@ import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenPr
 import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInspect.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
+import { isRetiredPrLoop } from '../src/reviewloop/objective.js';
+import { readSpec, formatSpec, SpecError } from '../src/reviewloop/engineeringSpec.js';
 import { applySettingsFile } from '../src/reviewloop/settingsFile.js';
-import {
-  formatPrStatusEntry,
-  buildPrResumeText,
-  stopPrTask,
-  bindPrAgent,
-  pushPrHeadCli,
-  triggerPrReviewCli,
-} from '../src/reviewloop/prCli.js';
 import {
   checkFinalPrDiff,
   formatContractComments,
@@ -60,7 +53,7 @@ async function listSessions() {
       const loop = state.reviewLoop;
       if (!loop) continue;
       found += 1;
-      console.log(`  ${loop.loopId}  ${loop.state}  round=${loop.round ?? 0}  reviewer=${loop.reviewerCalls ?? 0} supervisor=${loop.supervisorCalls ?? 0}${loop.objective?.mode === 'PR' ? '  [RETIRED_PR]' : ''}`);
+      console.log(`  ${loop.loopId}  ${loop.state}  round=${loop.round ?? 0}  reviewer=${loop.reviewerCalls ?? 0} supervisor=${loop.supervisorCalls ?? 0}${isRetiredPrLoop(loop) || state.prTask ? '  [RETIRED_PR]' : ''}`);
     } catch { /* skip */ }
   }
   if (!found) console.log('No ReviewLoop sessions found.');
@@ -235,7 +228,7 @@ async function resume(rest) {
       console.error(`${candidates.length} unfinished loops here; showing the newest. Others: ${candidates.slice(1).map((l) => l.loopId).join(', ')}`);
     }
   }
-  if (loop.objective?.mode === 'PR') {
+  if (isRetiredPrLoop(loop)) {
     console.log(`Loop ${loop.loopId} is a retired PR review. Start a new review via claude-review-bot; the saved record remains unchanged.`);
     return;
   }
@@ -401,121 +394,22 @@ async function handleContractCommand(rest) {
   throw new Error('usage: reviewloop contract <format|recover|verify-archive|diff-check|gate-report> ...');
 }
 
-async function handlePrCommand(rest) {
-  const [sub, ...args] = rest;
-  const loopId = flagValue(args, '--loop');
-  const root = REVIEWLOOP_RUNTIME_ROOT;
-
-  if (sub === 'status') {
-    const entries = [];
-    if (existsSync(root)) {
-      for (const d of await readdir(root).catch(() => [])) {
-        if (loopId && d !== loopId) continue;
-        try {
-          const state = JSON.parse(await readFile(path.join(root, d, 'workflow.json'), 'utf8'));
-          if (state.reviewLoop?.objective?.mode === 'PR') continue;
-          if (state.reviewLoop?.objective?.taskType === 'pr' && state.prTask) {
-            entries.push(formatPrStatusEntry({ loopState: state.reviewLoop, prTask: state.prTask }));
-          }
-        } catch { /* skip */ }
-      }
-    }
-    if (args.includes('--json')) {
-      console.log(JSON.stringify(entries, null, 2));
-      return;
-    }
-    if (!entries.length) {
-      console.log('No PR Task sessions found.');
-      return;
-    }
-    for (const e of entries) {
-      console.log(
-        `  ${e.loopId}  PR #${e.prNumber} (${e.repoFullName})  state=${e.state}  bot=${e.botStatus}  findings=${e.openFindingsCount}  triggers=${e.postedReviewTriggers}/3  head=${String(e.boundHeadSha).slice(0, 8)}${e.watcherPid ? `  watcherPid=${e.watcherPid}` : ''}${e.wakeStatus ? `  wake=${e.wakeStatus}` : ''}`,
-      );
-    }
-    return;
+function handleSpecCommand(args) {
+  const stage = args.find((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--at');
+  const atIdx = args.indexOf('--at');
+  const at = atIdx >= 0 ? args[atIdx + 1] : null;
+  if (!stage || (atIdx >= 0 && !at)) {
+    console.error('usage: reviewloop spec <plan|design|code|review|pr> [--at <40-char sha>] [--allow-dirty]');
+    process.exit(2);
   }
-
-  if (sub === 'resume') {
-    if (!loopId) throw new Error('usage: reviewloop pr resume --loop <loopId>');
-    const state = await new Persistence(root).readWorkflowState(loopId);
-    console.log(buildPrResumeText({ loopState: state?.reviewLoop, prTask: state?.prTask }));
-    return;
+  try {
+    const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    console.log(formatSpec(readSpec({ repoRoot, stage, at, allowDirty: args.includes('--allow-dirty') })));
+  } catch (err) {
+    if (!(err instanceof SpecError)) throw err;
+    console.error(`reviewloop spec: ${err.message}`);
+    process.exit(1);
   }
-
-  if (sub === 'stop') {
-    if (!loopId) throw new Error('usage: reviewloop pr stop --loop <loopId> [--reason "<reason>"]');
-    const reason = flagValue(args, '--reason') ?? 'stopped by user';
-    const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-stop' });
-    if (!lease.ok) {
-      throw new Error(`cannot stop PR task while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
-    }
-    try {
-      const res = await stopPrTask({ persistence: new Persistence(root), loopId, reason });
-      console.log(`Stopped PR Task ${res.loopId} (state=${res.state}, reason=${res.reason}).`);
-    } finally {
-      await lease.release();
-    }
-    return;
-  }
-
-  if (sub === 'push') {
-    if (!loopId) throw new Error('usage: reviewloop pr push --loop <loopId>');
-    const persistence = new Persistence(root);
-    const withLeaseFn = async (fn) => {
-      const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-push' });
-      if (!lease.ok) throw new Error(`cannot push PR head while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
-      try {
-        return await fn();
-      } finally {
-        await lease.release();
-      }
-    };
-    const res = await pushPrHeadCli({ persistence, loopId, withLeaseFn });
-    console.log(`Pushed ${res.headBranch} and bound PR Task ${loopId} to ${res.newHeadSha} (from ${res.oldHeadSha}).`);
-    return;
-  }
-
-  if (sub === 'trigger-review') {
-    if (!loopId) throw new Error('usage: reviewloop pr trigger-review --loop <loopId>');
-    const persistence = new Persistence(root);
-    const withLeaseFn = async (fn) => {
-      const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-trigger' });
-      if (!lease.ok) throw new Error(`cannot trigger review while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
-      try {
-        return await fn();
-      } finally {
-        await lease.release();
-      }
-    };
-    const res = await triggerPrReviewCli({ persistence, loopId, withLeaseFn });
-    if (res.posted) {
-      console.log(`Triggered @gemini review for ${loopId} (${res.postedCount}/3, commentId=${res.trigger?.commentId ?? 'unknown'}).`);
-    } else {
-      console.error(`Did not trigger @gemini review for ${loopId}: ${res.reason} (${res.postedCount}/3).`);
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  if (sub === 'bind-agent') {
-    const agentType = flagValue(args, '--agent');
-    const agentSessionId = flagValue(args, '--session');
-    if (!loopId || !agentType) {
-      throw new Error('usage: reviewloop pr bind-agent --loop <loopId> --agent <claude|codex|agy> [--session <id>]');
-    }
-    const lease = await acquireLeaseWithRetry({ runtimeRoot: root, loopId, reason: 'pr-bind-agent' });
-    if (!lease.ok) throw new Error(`cannot bind agent while lease is held: ${lease.heldBy?.reason ?? 'active'}`);
-    try {
-      const res = await bindPrAgent({ persistence: new Persistence(root), loopId, agentType, agentSessionId });
-      console.log(`Bound agent=${res.agentType}${res.agentSessionId ? ` session=${res.agentSessionId}` : ''} to PR Task ${res.loopId}.`);
-    } finally {
-      await lease.release();
-    }
-    return;
-  }
-
-  throw new Error('usage: reviewloop pr <status|resume|stop|push|trigger-review|bind-agent> [--loop <loopId>]');
 }
 
 async function main() {
@@ -549,11 +443,11 @@ async function main() {
     case 'resume':
       await resume(rest);
       break;
-    case 'pr':
-      await handlePrCommand(rest);
-      break;
     case 'contract':
       await handleContractCommand(rest);
+      break;
+    case 'spec':
+      handleSpecCommand(rest);
       break;
     case 'install': {
       const res = await installGlobal();
@@ -568,7 +462,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|pr|contract|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|contract|spec|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);
