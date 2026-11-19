@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T05:23:35.764Z",
+  "updatedAt": "2026-11-19T06:18:18.586Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
     "current": "fix(pr-contract): select highest-ID trusted bot session comment for F001",
-    "next": "等待 PR 54 审查机器人验证 F001 最终修复",
+    "next": "等待 PR 54 审查机器人验证 F004 与 F005 修复后给出 READY",
     "history": [
       {
         "at": "2026-11-19T12:31:48+08:00",
