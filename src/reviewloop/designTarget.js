@@ -60,7 +60,7 @@ export function normalizeReviewTargetPath(value) {
 // Walk every path component with lstat. A symlink anywhere on the way is
 // refused (never followed). Returns { stat } of the final component or
 // { missing: true } when the final component does not exist.
-async function lstatNoSymlinks(root, rel) {
+export async function lstatNoSymlinks(root, rel) {
   const segments = rel.split('/');
   let current = root;
   for (let i = 0; i < segments.length; i += 1) {

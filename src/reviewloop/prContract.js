@@ -16,8 +16,10 @@ import { promisify } from 'node:util';
 import {
   DESIGN_TARGET_MAX_BYTES,
   designContentSha256,
+  lstatNoSymlinks,
   normalizeReviewTargetPath,
 } from './designTarget.js';
+import { parseTrustedBotSession } from './prTaskEngine.js';
 import { resolveReviewLoopRuntimeRoot } from './runtimeDir.js';
 
 const execFileAsync = promisify(execFile);
@@ -726,18 +728,9 @@ export async function verifyDesignArchiveAndCleanupReady({
   runGh = defaultRunGh,
   runGit = defaultRunGit,
 }) {
-  // 1. Independent local Design PASS anchor
-  const anchor = await findLocalDesignPassAnchor({ loopId, runtimeDir });
-  if (!anchor) {
-    fail(
-      'PR_CONTRACT_NO_DESIGN_PASS',
-      loopId
-        ? `no Design PASS record found in ReviewLoop store for loopId=${loopId}`
-        : 'no Design PASS record found in local ReviewLoop store',
-    );
-  }
-
-  // 2 & 3. Recover Design from PR comment + index and match anchor SHA-256
+  // 1 & 2. Recover Design from PR comment + index first so the local anchor
+  // lookup is bound to this task's exact recovered Design SHA-256 (even when
+  // `--loop` is omitted).
   const recovered = await recoverPrContract({
     repo,
     prNumber,
@@ -745,11 +738,26 @@ export async function verifyDesignArchiveAndCleanupReady({
     type: 'design',
     version,
     allowedAuthors,
-    expectedDesignSha256: anchor.designSha256,
     runGh,
   });
 
-  // 4. Verify local untracked working file exists, is not tracked, and matches SHA-256
+  // 3. Independent local Design PASS anchor matching recovered.sha256
+  const anchor = await findLocalDesignPassAnchor({
+    loopId,
+    designSha256: recovered.sha256,
+    runtimeDir,
+  });
+  if (!anchor) {
+    fail(
+      'PR_CONTRACT_NO_DESIGN_PASS',
+      loopId
+        ? `no Design PASS record found in ReviewLoop store for loopId=${loopId} matching sha256=${recovered.sha256}`
+        : `no Design PASS record found in local ReviewLoop store matching sha256=${recovered.sha256}`,
+    );
+  }
+
+  // 4. Verify local untracked working file exists (walking every path component
+  // to refuse symlinks), is not tracked in Git, and matches SHA-256.
   const relPath = normalizeReviewTargetPath(reviewTarget ?? anchor.reviewTarget);
   if (anchor.reviewTarget && relPath !== normalizeReviewTargetPath(anchor.reviewTarget)) {
     fail(
@@ -759,13 +767,16 @@ export async function verifyDesignArchiveAndCleanupReady({
   }
   const absPath = path.join(cwd, relPath);
 
-  let st;
+  let found;
   try {
-    st = await fsp.lstat(absPath);
+    found = await lstatNoSymlinks(cwd, relPath);
   } catch (err) {
-    fail('PR_CONTRACT_LOCAL_FILE_MISSING', `local design file ${relPath} does not exist: ${err?.message ?? err}`);
+    fail('PR_CONTRACT_LOCAL_FILE_INVALID', `local design file ${relPath} failed symlink/stat check: ${err?.message ?? err}`);
   }
-  if (st.isSymbolicLink() || !st.isFile()) {
+  if (found.missing) {
+    fail('PR_CONTRACT_LOCAL_FILE_MISSING', `local design file ${relPath} does not exist`);
+  }
+  if (!found.stat.isFile()) {
     fail('PR_CONTRACT_LOCAL_FILE_INVALID', `local design file ${relPath} must be a regular non-symlink file`);
   }
 
@@ -908,38 +919,62 @@ export async function inspectRemoteProtection({ repo, baseRef, runGh = defaultRu
   }
 }
 
-export async function inspectPrBotStatus({ repo, prNumber, headRefOid, runGh = defaultRunGh }) {
+export async function inspectPrBotStatus({
+  repo,
+  prNumber,
+  headRefOid,
+  trustedBotLogins,
+  runGh = defaultRunGh,
+}) {
   const { owner, name } = splitRepoSlug(repo);
   try {
     const raw = await runGh([
       'api',
+      '--paginate',
+      '--slurp',
       `repos/${owner}/${name}/issues/${prNumber}/comments?per_page=100`,
     ]);
-    const comments = JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // `--paginate --slurp` returns an array of pages (or a single array in unit stubs).
+    const comments = Array.isArray(parsed) && Array.isArray(parsed[0]) ? parsed.flat() : parsed;
     if (!Array.isArray(comments)) {
       return { status: 'UNKNOWN', detail: 'PR 评论列表格式异常' };
     }
-    let latest = null;
-    for (const c of comments) {
-      if (typeof c?.body === 'string' && c.body.includes('<!-- jiaze-review-session:v1 -->')) {
-        latest = c;
+    const normalized = comments
+      .map((c) => ({
+        id: Number(c?.id ?? 0),
+        authorLogin: c?.user?.login ?? c?.author?.login ?? c?.authorLogin ?? '',
+        createdAt: c?.created_at ?? c?.createdAt ?? null,
+        updatedAt: c?.updated_at ?? c?.updatedAt ?? null,
+        body: typeof c?.body === 'string' ? c.body : '',
+      }))
+      .sort((a, b) => a.id - b.id);
+
+    const session = parseTrustedBotSession({
+      comments: normalized,
+      ...(trustedBotLogins ? { trustedBotLogins } : {}),
+    });
+    if (!session.found) {
+      return { status: 'MISSING', detail: '未找到受信任的 claude-review-bot 审查会话评论' };
+    }
+    if (!session.parseable) {
+      return { status: 'UNKNOWN', detail: 'PR bot 审查会话格式无法解析' };
+    }
+
+    const headLower = headRefOid ? String(headRefOid).trim().toLowerCase() : null;
+    if (headLower) {
+      if (!session.lastReviewedHead || !headLower.startsWith(session.lastReviewedHead) || session.staleFor === headLower) {
+        return {
+          status: 'PENDING',
+          detail: session.lastReviewedHead
+            ? `PR bot 最近审查基线 (${session.lastReviewedHead.slice(0, 7)}) 落后于当前 HEAD (${headLower.slice(0, 7)})`
+            : `PR bot 尚未记录当前 HEAD (${headLower.slice(0, 7)}) 的审查基线`,
+        };
       }
     }
-    if (!latest) {
-      return { status: 'MISSING', detail: '未找到 claude-review-bot 审查会话评论' };
-    }
-    const headMatch = /lastReviewedHead[:=]\s*`?([0-9a-fA-F]{7,40})`?/i.exec(latest.body);
-    const statusMatch = /\b(READY|REWORK|AUDIT_PENDING|PARTIAL|HUMAN_REQUIRED)\b/.exec(latest.body);
-    const reviewedHead = headMatch ? headMatch[1].toLowerCase() : null;
-    const rawStatus = statusMatch ? statusMatch[1] : 'UNKNOWN';
 
-    if (headRefOid && reviewedHead && !headRefOid.toLowerCase().startsWith(reviewedHead)) {
-      return {
-        status: 'PENDING',
-        detail: `PR bot 最近审查基线 (${reviewedHead.slice(0, 7)}) 落后于当前 HEAD (${headRefOid.slice(0, 7)})`,
-      };
-    }
-    if (rawStatus === 'AUDIT_PENDING' || rawStatus === 'PARTIAL') {
+    const rawStatus = session.sessionStatus;
+    if (rawStatus === 'AUDIT_PENDING' || rawStatus === 'PARTIAL' || rawStatus === 'REVIEW_IN_PROGRESS') {
       return { status: 'PENDING', detail: `PR bot 状态为 ${rawStatus}` };
     }
     return { status: rawStatus, detail: `PR bot 状态为 ${rawStatus}` };

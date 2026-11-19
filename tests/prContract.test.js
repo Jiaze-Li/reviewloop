@@ -416,6 +416,79 @@ test('verifyDesignArchiveAndCleanupReady enforces 4 preconditions and protects c
   assert.equal(dryRun.cleaned, false);
   assert.ok(fs.existsSync(path.join(repoDir, designFile)));
 
+  // Also verify F002: when --loop is omitted and a newer unrelated Design PASS exists,
+  // verifyDesignArchiveAndCleanupReady still binds to the recovered Design's sha256.
+  const newerOtherLoop = 'rl-20261119999999-other';
+  fs.mkdirSync(path.join(runtimeDir, newerOtherLoop), { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDir, newerOtherLoop, 'workflow.json'),
+    JSON.stringify({
+      reviewLoop: {
+        state: 'PASS',
+        designReview: { reviewTarget: 'Design-other.md', designSha256: 'e'.repeat(64), round: 1 },
+      },
+    }),
+    'utf8',
+  );
+  const dryRunNoLoop = await verifyDesignArchiveAndCleanupReady({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 54,
+    taskId: 'T-CLEAN',
+    runtimeDir,
+    clean: false,
+    runGh,
+  });
+  assert.equal(dryRunNoLoop.loopId, loopId);
+  assert.equal(dryRunNoLoop.readyToClean, true);
+
+  // Also verify F003: symlink parent directory is refused by lstatNoSymlinks
+  const realSub = path.join(repoDir, 'real-sub');
+  const linkSub = path.join(repoDir, 'link-sub');
+  fs.mkdirSync(realSub, { recursive: true });
+  fs.writeFileSync(path.join(realSub, 'Design-sym.md'), designText, 'utf8');
+  fs.symlinkSync(realSub, linkSub);
+  fs.writeFileSync(
+    path.join(runtimeDir, loopId, 'workflow.json'),
+    JSON.stringify({
+      reviewLoop: {
+        state: 'PASS',
+        designReview: { reviewTarget: 'link-sub/Design-sym.md', designSha256: designSha, round: 1 },
+      },
+    }),
+    'utf8',
+  );
+  await assert.rejects(
+    () => verifyDesignArchiveAndCleanupReady({
+      cwd: repoDir,
+      repo: 'Jiaze-Li/reviewloop',
+      prNumber: 54,
+      taskId: 'T-CLEAN',
+      loopId,
+      runtimeDir,
+      clean: true,
+      runGh,
+    }),
+    (err) => err.code === 'PR_CONTRACT_LOCAL_FILE_INVALID',
+  );
+  assert.ok(fs.existsSync(path.join(realSub, 'Design-sym.md')));
+
+  // Clean up F003 symlink fixtures before checking clean captureBaseline
+  fs.unlinkSync(linkSub);
+  fs.rmSync(realSub, { recursive: true, force: true });
+
+  // Restore workflow.json for the clean: true check below
+  fs.writeFileSync(
+    path.join(runtimeDir, loopId, 'workflow.json'),
+    JSON.stringify({
+      reviewLoop: {
+        state: 'PASS',
+        designReview: { reviewTarget: designFile, designSha256: designSha, round: 1 },
+      },
+    }),
+    'utf8',
+  );
+
   // Explicit clean: true removes ONLY Design-test.md (leaves historical Plan.md untouched)
   const cleaned = await verifyDesignArchiveAndCleanupReady({
     cwd: repoDir,
@@ -507,12 +580,23 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
     if (args[0] === 'pr') {
       return JSON.stringify({ body: prBody, headRefOid: headOid, baseRefName: 'main' });
     }
-    if (args[1].endsWith('/branches/main/protection')) {
+    if (args.some((a) => String(a).endsWith('/branches/main/protection'))) {
       throw new PrContractError('PR_CONTRACT_NOT_FOUND', 'HTTP 404 Branch not protected');
     }
-    if (args[1].includes('/issues/54/comments')) {
+    if (args.some((a) => String(a).includes('/issues/54/comments'))) {
       return JSON.stringify([
-        { body: `<!-- jiaze-review-session:v1 -->\nlastReviewedHead: \`${headOid}\`\nStatus: READY` },
+        {
+          id: 1,
+          user: { login: 'spoof-user' },
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${headOid}"} -->`,
+        },
+        {
+          id: 2,
+          user: { login: 'claude-review-bot[bot]' },
+          created_at: '2026-11-19T00:00:00Z',
+          updated_at: '2026-11-19T00:00:00Z',
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${headOid}"} -->\nlastReviewedHead: \`${headOid}\`\nStatus: READY`,
+        },
       ]);
     }
     throw new Error(`unexpected ${args.join(' ')}`);
@@ -528,4 +612,35 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
   assert.equal(report.localCheck.status, 'FAIL');
   assert.equal(report.remoteProtection.status, 'NOT_ENFORCED');
   assert.equal(report.prBotStatus.status, 'READY');
+
+  // F001 regression: spoofed comment alone is MISSING; stale head from trusted bot is PENDING
+  const staleGh = async (args) => {
+    if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: headOid, baseRefName: 'main' });
+    if (args.some((a) => String(a).endsWith('/branches/main/protection'))) throw new PrContractError('PR_CONTRACT_NOT_FOUND', '404');
+    if (args.some((a) => String(a).includes('/issues/54/comments'))) {
+      return JSON.stringify([
+        {
+          id: 10,
+          user: { login: 'spoof-user' },
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${headOid}"} -->`,
+        },
+        {
+          id: 11,
+          user: { login: 'claude-review-bot[bot]' },
+          created_at: '2026-11-19T00:00:00Z',
+          updated_at: '2026-11-19T00:00:00Z',
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${'0'.repeat(40)}"} -->`,
+        },
+      ]);
+    }
+    throw new Error(`unexpected ${args.join(' ')}`);
+  };
+  const staleReport = await runFinalPrGateReport({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 54,
+    approvedAssets: ['docs/Architecture-Design.md'],
+    runGh: staleGh,
+  });
+  assert.equal(staleReport.prBotStatus.status, 'PENDING');
 });
