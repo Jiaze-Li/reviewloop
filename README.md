@@ -252,6 +252,16 @@ reviewloop pr resume --loop <loopId>
 reviewloop pr stop --loop <loopId> [--reason "<reason>"]
 ```
 
+For opt-in `contract_storage: pr-comment` tasks (`personal-skills @305d9c0`), read-only contract recovery, Design cleanup verification, and final PR diff checks are available via `reviewloop contract` and `scripts/check-pr-handoff.js --check-contract --check-diff`:
+
+```sh
+reviewloop contract format --task-id <id> --type <plan|design> --version <ver> --file <path> [--json]
+reviewloop contract recover --repo <owner/name> --pr <num> --task-id <id> --type <plan|design> [--json]
+reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--clean] [--json]
+reviewloop contract diff-check [--cwd <dir>] [--base <ref>] [--approved-asset <path>] [--json]
+reviewloop contract gate-report --repo <owner/name> --pr <num> [--base <ref>] [--json]
+```
+
 > **Note:** Local `npm test` / `npm run doctor` verify local behavior only. Real-PR Fix/Dismiss E2E and auto-wake require explicit user authorization on the target PR and valid local `gh` / CLI credentials.
 
 See [RL-P0-01: settlement safety and operator runbook](docs/RL-P0-01-SETTLEMENT.md).
