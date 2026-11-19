@@ -239,18 +239,15 @@ reviewloop inspect-spend --loop <loopId> --operation <operationId> --json
 reviewloop inspect-spend --loop <loopId> --reservation <reservationId> --json
 ```
 
-### PR Task (`taskType: "pr"`) CLI
+### Engineering method entry
 
-For PR-fix orchestration against `jiaze-claude-review-bot[bot]`, start with `reviewloop_begin({ taskType: "pr", prContext })` and use:
+The engineering method (Plan → Design → Code, roles, handoff, contract archive) lives in [`engineering/`](engineering/README.md); the ownership split with PR bot is in [`docs/BOUNDARY.md`](docs/BOUNDARY.md). Workers read it by stage, pinned to a commit:
 
 ```sh
-reviewloop pr status [--loop <loopId>] [--json]
-reviewloop pr push --loop <loopId>                 # requires permissions.push; verifies branch/ancestor/remote before updating boundHeadSha
-reviewloop pr trigger-review --loop <loopId>       # requires permissions.comment; enforces <= 3 @gemini review triggers
-reviewloop pr bind-agent --loop <loopId> --agent <claude|codex|agy> [--session <id>]
-reviewloop pr resume --loop <loopId>
-reviewloop pr stop --loop <loopId> [--reason "<reason>"]
+reviewloop spec <plan|design|code|review|pr> [--at <40-char sha>]   # prints policy_ref=reviewloop@<sha> + the stage's files
 ```
+
+The PR task type (`taskType: "pr"`, the PR watcher and `reviewloop pr ...`) was removed (D46): PR fixes follow the PR stage in `engineering/README.md`.
 
 For new tasks, PR-comment contract storage is the default (legacy file-based `Plan.md`/`Design.md` contracts with older `policy_sha` remain supported as-is). Read-only contract recovery, 5-step Design archive/cleanup verification, and final PR diff + 3-state gate visibility (`localCheck` / `remoteProtection` / `prBotStatus`) are available via `reviewloop contract` and `scripts/check-pr-handoff.js --check-contract --check-diff`:
 
@@ -262,7 +259,7 @@ reviewloop contract diff-check [--cwd <dir>] [--base <ref>] [--approved-asset <p
 reviewloop contract gate-report --repo <owner/name> --pr <num> [--base <ref>] [--json]
 ```
 
-> **Note:** Local `npm test` / `npm run doctor` verify local behavior only. Real-PR Fix/Dismiss E2E and auto-wake require explicit user authorization on the target PR and valid local `gh` / CLI credentials.
+> **Note:** Local `npm test` / `npm run doctor` verify local behavior only. Real-PR checks require explicit user authorization on the target PR and valid local `gh` credentials.
 
 See [RL-P0-01: settlement safety and operator runbook](docs/RL-P0-01-SETTLEMENT.md).
 This inspector does not reconcile billing or authorize another call.

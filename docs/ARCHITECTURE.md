@@ -1,6 +1,6 @@
 # ReviewLoop architecture
 
-LOCAL-only architecture as of 2026-10-11. [review-bot](https://github.com/Jiaze-Li/review-bot)
+LOCAL-only architecture as of 2026-10-11 (PR task type removed and engineering method merged in, 2026-11-19; see `docs/BOUNDARY.md`). [review-bot](https://github.com/Jiaze-Li/review-bot)
 owns PR code review, while GitHub CI owns post-push tests.
 
 The Worker owns code changes, commits and PR creation. ReviewLoop owns local
@@ -19,6 +19,8 @@ verification and bounded repair control.
 | Supervisor exception guidance | ReviewLoop |
 | durable loop state / resume | ReviewLoop |
 | ReviewLoop's own token safety (Reviewer + Supervisor spend) | ReviewLoop |
+| engineering method (`engineering/`), read by stage via `reviewloop spec`; Worker rules (`agent-policy/COMMON.md`) | ReviewLoop (D46) |
+| PR review state, threads, `@gemini review` handling | PR bot; Worker fixes and comments once (no ReviewLoop PR task type, D46) |
 
 ReviewLoop cannot autonomously: rewrite files, execute repair code, commit,
 push, force-push, merge, weaken the objective, or spend models without fresh
