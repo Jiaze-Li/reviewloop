@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T06:18:28.720Z",
+  "updatedAt": "2026-11-19T06:20:07.587Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
     "title": "plan/pr-comment-contract-lifecycle-20261119",
     "task": "Development branch: plan/pr-comment-contract-lifecycle-20261119",
     "started": "2026-11-19T11:52:54+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "fix(pr-contract): fix F004 NUL-delimited git diff and F005 PR comment binding",
     "next": "等待 PR 54 审查机器人验证 F004 与 F005 修复后给出 READY",
     "history": [
@@ -62,13 +62,15 @@
     ],
     "pr": {
       "number": 54,
-      "state": "open",
+      "state": "closed",
       "title": "docs(plan): PR-only task contracts and verified lifecycle",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/54",
-      "merged": false,
-      "updatedAt": "2026-11-19T06:18:17Z"
+      "merged": true,
+      "mergedAt": "2026-11-19T06:19:58Z",
+      "closedAt": "2026-11-19T06:19:58Z",
+      "updatedAt": "2026-11-19T06:19:58Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-19T06:19:58Z",
+    "outcome": "Merged"
   }
 }
