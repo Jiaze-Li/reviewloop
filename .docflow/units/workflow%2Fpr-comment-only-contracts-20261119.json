@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T07:20:06.480Z",
+  "updatedAt": "2026-11-19T07:20:10.269Z",
   "task": {
     "id": "workflow/pr-comment-only-contracts-20261119",
     "branch": "workflow/pr-comment-only-contracts-20261119",
@@ -36,7 +36,7 @@
       "title": "plan: 统一 Plan/Design 合同只存 PR 评论，不再随 PR 进入 main",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/56",
       "merged": false,
-      "updatedAt": "2026-11-19T06:53:31Z"
+      "updatedAt": "2026-11-19T07:19:58Z"
     },
     "completed": null,
     "outcome": null
