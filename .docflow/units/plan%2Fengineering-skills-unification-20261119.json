@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-19T08:06:45.121Z",
+  "task": {
+    "id": "plan/engineering-skills-unification-20261119",
+    "branch": "plan/engineering-skills-unification-20261119",
+    "title": "plan/engineering-skills-unification-20261119",
+    "task": "Development branch: plan/engineering-skills-unification-20261119",
+    "started": "2026-11-19T16:06:34+08:00",
+    "status": "In progress",
+    "current": "chore(plan): initialize engineering skills unification draft PR",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "7c809f307f3218dcd47ceb77790e9aeea80c7782",
+        "branch": "plan/engineering-skills-unification-20261119",
+        "timestamp": "2026-11-19T16:06:34+08:00",
+        "message": "chore(plan): initialize engineering skills unification draft PR"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
