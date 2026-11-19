@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T03:53:09.676Z",
+  "updatedAt": "2026-11-19T04:32:01.688Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
     "current": "chore: initialize PR for contract lifecycle plan [empty]",
-    "next": "",
+    "next": "等待 PR 54 的自动测试和审查机器人完成检查后决定是否合并",
     "history": [],
     "commits": [
       {
