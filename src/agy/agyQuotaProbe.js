@@ -130,14 +130,13 @@ export function createAgyQuotaPreflight({
       const snapshot = parseAgyQuotaSnapshot(output, t);
       if (!snapshot) return { checked: false, reason: 'unknown_response' };
       const exhausted = snapshot.exhausted;
-      // If a promotional quota reset occurred early, release ONLY a cooldown
-      // previously established by /usage itself. A provider's model-specific
-      // quota rejection remains authoritative and must not be cleared here.
+      // Both /usage preflight and provider quota rejections share one quota-availability
+      // lock per pool: when a complete /usage snapshot confirms a pool has available
+      // quota, clear any active COOLDOWN or UNKNOWN state regardless of source.
       for (const poolId of snapshot.availablePools) {
         const current = quotaRegistry.get(poolId);
-        if (current.source === 'agy_usage_preflight'
-          && (current.status === 'COOLDOWN' || current.status === 'UNKNOWN')) {
-          quotaRegistry.recordReady(poolId, { source: 'agy_usage_preflight', onlyIfSource: 'agy_usage_preflight' });
+        if (current.status === 'COOLDOWN' || current.status === 'UNKNOWN') {
+          quotaRegistry.recordReady(poolId, { source: 'agy_usage_preflight' });
         }
       }
       for (const { poolId, resetAt } of exhausted) {
