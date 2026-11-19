@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T07:21:45.994Z",
+  "updatedAt": "2026-11-19T07:44:53.391Z",
   "task": {
     "id": "workflow/pr-comment-only-contracts-20261119",
     "branch": "workflow/pr-comment-only-contracts-20261119",
     "title": "workflow/pr-comment-only-contracts-20261119",
     "task": "Development branch: workflow/pr-comment-only-contracts-20261119",
     "started": "2026-11-19T14:52:38+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Switch PR-comment contract storage to default for new tasks",
     "next": "分别确认 ReviewLoop PR #56 与个人规范库 PR #10 的审查和验收结果，再决定合并",
     "history": [
@@ -32,13 +32,15 @@
     ],
     "pr": {
       "number": 56,
-      "state": "open",
+      "state": "closed",
       "title": "plan: 统一 Plan/Design 合同只存 PR 评论，不再随 PR 进入 main",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/56",
-      "merged": false,
-      "updatedAt": "2026-11-19T07:19:58Z"
+      "merged": true,
+      "mergedAt": "2026-11-19T07:44:43Z",
+      "closedAt": "2026-11-19T07:44:43Z",
+      "updatedAt": "2026-11-19T07:44:43Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-19T07:44:43Z",
+    "outcome": "Merged"
   }
 }
