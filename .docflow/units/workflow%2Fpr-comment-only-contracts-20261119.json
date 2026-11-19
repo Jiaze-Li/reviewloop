@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T07:44:53.391Z",
+  "updatedAt": "2026-11-19T07:45:19.578Z",
   "task": {
     "id": "workflow/pr-comment-only-contracts-20261119",
     "branch": "workflow/pr-comment-only-contracts-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T14:52:38+08:00",
     "status": "Completed",
     "current": "Switch PR-comment contract storage to default for new tasks",
-    "next": "分别确认 ReviewLoop PR #56 与个人规范库 PR #10 的审查和验收结果，再决定合并",
+    "next": "",
     "history": [
       {
         "at": "2026-11-19T15:19:55+08:00",
