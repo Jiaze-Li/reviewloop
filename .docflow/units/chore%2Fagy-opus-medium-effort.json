@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-19T12:01:43.528Z",
+  "task": {
+    "id": "chore/agy-opus-medium-effort",
+    "branch": "chore/agy-opus-medium-effort",
+    "title": "chore/agy-opus-medium-effort",
+    "task": "Development branch: chore/agy-opus-medium-effort",
+    "started": "2026-11-19T20:01:21+08:00",
+    "status": "In progress",
+    "current": "Prefer medium reasoning effort for AGY Claude Opus reviewer",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "610133d75657e267fe129122432e9bf215a6d27c",
+        "branch": "chore/agy-opus-medium-effort",
+        "timestamp": "2026-11-19T20:01:21+08:00",
+        "message": "Prefer medium reasoning effort for AGY Claude Opus reviewer"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
