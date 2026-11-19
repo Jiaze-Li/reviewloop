@@ -93,3 +93,20 @@ test('AC-01: parses the real base64url jiaze-review-state and fails closed on in
   assert.equal(untrusted.found, false);
   assert.equal(untrusted.sessionStatus, 'MISSING');
 });
+
+test('parseTrustedBotSession ignores null and non-object entries in findings array', () => {
+  const payload = {
+    version: 1,
+    sessionId: 'claude-null-guard',
+    lastReviewedHead: HEAD_A,
+    status: 'REWORK',
+    auditCompleted: true,
+    findings: [null, 'bad-string', 42, ['nested'], { id: 'F010', severity: 'P2', status: 'OPEN', title: 'Valid finding' }],
+  };
+  const parsed = parse({ id: 'null-guard', body: encodeReviewStateComment(payload, 'REWORK') });
+  assert.equal(parsed.parseable, true);
+  assert.equal(parsed.sessionStatus, 'REWORK');
+  assert.equal(parsed.findings.length, 1);
+  assert.equal(parsed.findings[0].id, 'F010');
+  assert.equal(parsed.openFindings.length, 1);
+});

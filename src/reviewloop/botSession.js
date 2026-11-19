@@ -190,14 +190,17 @@ export function parseTrustedBotSession({
   const staleFor = jsonPayload?.staleFor ? String(jsonPayload.staleFor).trim().toLowerCase() : null;
 
   const rawFindings = Array.isArray(jsonPayload?.findings) ? jsonPayload.findings : mdPayload.findings;
-  const findings = rawFindings.map((f) => ({
-    id: String(f.id ?? '').trim(),
-    severity: String(f.severity ?? 'P2').trim().toUpperCase(),
-    status: String(f.status ?? 'OPEN').trim().toUpperCase(),
-    title: String(f.title ?? '').trim(),
-    ...(f.downgradedFrom ? { downgradedFrom: String(f.downgradedFrom).trim() } : {}),
-    ...(f.sharedBoundaryKey ? { sharedBoundaryKey: String(f.sharedBoundaryKey).trim() } : {}),
-  })).filter((f) => f.id);
+  const findings = rawFindings
+    .filter((f) => f && typeof f === 'object' && !Array.isArray(f))
+    .map((f) => ({
+      id: String(f.id ?? '').trim(),
+      severity: String(f.severity ?? 'P2').trim().toUpperCase(),
+      status: String(f.status ?? 'OPEN').trim().toUpperCase(),
+      title: String(f.title ?? '').trim(),
+      ...(f.downgradedFrom ? { downgradedFrom: String(f.downgradedFrom).trim() } : {}),
+      ...(f.sharedBoundaryKey ? { sharedBoundaryKey: String(f.sharedBoundaryKey).trim() } : {}),
+    }))
+    .filter((f) => f.id);
 
   const openFindings = findings.filter(isBlockingPrFinding);
   const parseable = sessionStatus !== BOT_SESSION_STATUSES.UNKNOWN;
