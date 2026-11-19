@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T10:40:36.327Z",
+  "updatedAt": "2026-11-19T10:40:42.740Z",
   "task": {
     "id": "plan/engineering-skills-unification-20261119",
     "branch": "plan/engineering-skills-unification-20261119",
@@ -8,15 +8,26 @@
     "task": "Development branch: plan/engineering-skills-unification-20261119",
     "started": "2026-11-19T16:06:34+08:00",
     "status": "In progress",
-    "current": "chore(plan): initialize engineering skills unification draft PR",
+    "current": "Unify engineering method into ReviewLoop and remove the PR task type",
     "next": "工程统一 Code 的最终整体审查因预算用尽暂停，等产品负责人决定是否再提预算",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-19T18:40:31+08:00",
+        "text": "chore(plan): initialize engineering skills unification draft PR"
+      }
+    ],
     "commits": [
       {
         "sha": "7c809f307f3218dcd47ceb77790e9aeea80c7782",
         "branch": "plan/engineering-skills-unification-20261119",
         "timestamp": "2026-11-19T16:06:34+08:00",
         "message": "chore(plan): initialize engineering skills unification draft PR"
+      },
+      {
+        "sha": "c1902f5554f2fe7b24e0c90e03b3f9ddd627744a",
+        "branch": "plan/engineering-skills-unification-20261119",
+        "timestamp": "2026-11-19T18:40:31+08:00",
+        "message": "Unify engineering method into ReviewLoop and remove the PR task type"
       }
     ],
     "pr": {
