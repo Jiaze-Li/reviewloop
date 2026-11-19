@@ -19,6 +19,7 @@ import {
   lstatNoSymlinks,
   normalizeReviewTargetPath,
 } from './designTarget.js';
+import { DEFAULT_TRUSTED_BOT_LOGINS } from './objective.js';
 import { parseTrustedBotSession } from './prTaskEngine.js';
 import { resolveReviewLoopRuntimeRoot } from './runtimeDir.js';
 
@@ -940,18 +941,30 @@ export async function inspectPrBotStatus({
     if (!Array.isArray(comments)) {
       return { status: 'UNKNOWN', detail: 'PR 评论列表格式异常' };
     }
-    const normalized = comments
+    const allowed = new Set(
+      (trustedBotLogins?.length ? trustedBotLogins : DEFAULT_TRUSTED_BOT_LOGINS)
+        .map((l) => String(l ?? '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+    const trusted = comments
       .map((c) => ({
         id: Number(c?.id ?? 0),
-        authorLogin: c?.user?.login ?? c?.author?.login ?? c?.authorLogin ?? '',
+        authorLogin: String(c?.user?.login ?? c?.author?.login ?? c?.authorLogin ?? '').trim(),
         createdAt: c?.created_at ?? c?.createdAt ?? null,
         updatedAt: c?.updated_at ?? c?.updatedAt ?? null,
         body: typeof c?.body === 'string' ? c.body : '',
       }))
+      .filter((c) => allowed.has(c.authorLogin.toLowerCase()) && c.body.includes('jiaze-review-session:v1'))
       .sort((a, b) => a.id - b.id);
 
+    if (!trusted.length) {
+      return { status: 'MISSING', detail: '未找到受信任的 claude-review-bot 审查会话评论' };
+    }
+    // Select the configured review App's session comment with the highest ID
+    // (README spec), rather than sorting by updatedAt.
+    const latestById = trusted[trusted.length - 1];
     const session = parseTrustedBotSession({
-      comments: normalized,
+      comments: [latestById],
       ...(trustedBotLogins ? { trustedBotLogins } : {}),
     });
     if (!session.found) {
@@ -963,7 +976,11 @@ export async function inspectPrBotStatus({
 
     const headLower = headRefOid ? String(headRefOid).trim().toLowerCase() : null;
     if (headLower) {
-      if (!session.lastReviewedHead || !headLower.startsWith(session.lastReviewedHead) || session.staleFor === headLower) {
+      const headMatches = session.lastReviewedHead
+        && (session.lastReviewedHead.length === 40
+          ? headLower === session.lastReviewedHead
+          : headLower.startsWith(session.lastReviewedHead));
+      if (!headMatches || session.staleFor === headLower) {
         return {
           status: 'PENDING',
           detail: session.lastReviewedHead

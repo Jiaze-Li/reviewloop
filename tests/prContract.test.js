@@ -643,4 +643,38 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
     runGh: staleGh,
   });
   assert.equal(staleReport.prBotStatus.status, 'PENDING');
+
+  // F001 highest-ID regression: even if an older comment ID has a newer updated_at,
+  // inspectPrBotStatus must select the trusted bot's comment with the highest ID.
+  const highestIdGh = async (args) => {
+    if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: headOid, baseRefName: 'main' });
+    if (args.some((a) => String(a).endsWith('/branches/main/protection'))) throw new PrContractError('PR_CONTRACT_NOT_FOUND', '404');
+    if (args.some((a) => String(a).includes('/issues/54/comments'))) {
+      return JSON.stringify([
+        {
+          id: 50,
+          user: { login: 'claude-review-bot[bot]' },
+          created_at: '2026-11-19T00:00:00Z',
+          updated_at: '2026-11-19T05:00:00Z', // newer updated_at on older ID
+          body: `<!-- jiaze-review-session:v1 {"status":"READY","lastReviewedHead":"${headOid}"} -->`,
+        },
+        {
+          id: 99,
+          user: { login: 'claude-review-bot[bot]' },
+          created_at: '2026-11-19T01:00:00Z',
+          updated_at: '2026-11-19T01:00:00Z', // highest ID
+          body: `<!-- jiaze-review-session:v1 {"status":"REWORK","lastReviewedHead":"${headOid}"} -->`,
+        },
+      ]);
+    }
+    throw new Error(`unexpected ${args.join(' ')}`);
+  };
+  const highestIdReport = await runFinalPrGateReport({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 54,
+    approvedAssets: ['docs/Architecture-Design.md'],
+    runGh: highestIdGh,
+  });
+  assert.equal(highestIdReport.prBotStatus.status, 'REWORK');
 });
