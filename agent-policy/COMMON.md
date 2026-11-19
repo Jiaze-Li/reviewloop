@@ -1,5 +1,5 @@
 # ReviewLoop Worker Contract
-Contract version: 15
+Contract version: 16
 You are Worker: design/implement/test/debug. ReviewLoop verifies.
 
 ## Start (`taskType`: `"code"` | `"design"`)
@@ -11,9 +11,9 @@ Pass complete contract verbatim as `contractText` (never Brief/chat ref).
   carry `reviewerProposals`: revise/justify. `PASS` returns `designPassComment`:
   post to PR VERBATIM, relay it + `planConcern`. Then STOP.
 - `"code"`: from Design `PASS`, pass verbatim `contractText` + `designSha256`.
-Opt-in `contract_storage: pr-comment` (`personal-skills @305d9c0`): recover via
-`reviewloop contract recover`; after Design `PASS` archive/verify first, then
-clean untracked `reviewTarget` (`verify-archive --clean`) before Code `begin`.
+New tasks store Plan/Design in PR comments (legacy file contracts keep old
+paths): recover via `reviewloop contract recover`; after Design `PASS` archive/
+verify first, then `verify-archive --clean` untracked target before Code `begin`.
 Phased: pass ordered `phases` (objective, exit criteria, carry-forward invariants,
 verification); never omit/merge/reorder/empty.
 Proof: `begin` `evidenceRequirements:[{id,description}]`; `review`
@@ -41,8 +41,8 @@ Write each `statusLine` verbatim in reply; on terminal result also write
 After push, PR description opens with: built; acceptance checklist; verified;
 risks/deviations. Brief = link only. Never claim unrun checks. Marker
 `<!-- reviewloop-handoff head=<HEAD> stage=<stage> loop=<id> -->`; run
-`node scripts/check-pr-handoff.js <PR> --stage <s>` (add `--check-diff` for
-`pr-comment`): non-zero = not done; fix, rerun. Pass != review PASS/READY.
+`node scripts/check-pr-handoff.js <PR> --stage <s> --check-diff` (omit
+`--check-diff` for legacy only): non-zero = not done; fix, rerun. Pass != review PASS/READY.
 
 ## Safety
 Gate FAIL (0 tokens) = repair cycle, not Reviewer round. Spend, Sentinel, ledgers,

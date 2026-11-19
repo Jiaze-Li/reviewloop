@@ -695,3 +695,169 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
   });
   assert.equal(highestIdReport.prBotStatus.status, 'REWORK');
 });
+
+test('AC08 simulated end-to-end lifecycle: empty-tree Plan -> Design PASS & clean -> Code recovery -> final diff guard', async () => {
+  const repoDir = initTempRepo();
+  const runtimeDir = makeTempDir('rl-e2e-');
+
+  // 1. Plan: branch off main, empty-tree bootstrap commit + PR comment archive + index
+  git(repoDir, ['checkout', '-b', 'feat/e2e-task']);
+  git(repoDir, ['commit', '--allow-empty', '-m', 'chore: bootstrap plan PR']);
+  const planText = '# Plan — E2E\n\n## Goal\nDeliver feature X cleanly.\n';
+  const planFmt = formatContractComments({ taskId: 'T-E2E', type: 'plan', version: 'v1.0', content: planText });
+  let prBody = upsertContractIndex('## Brief\nSummary\n', {
+    taskId: 'T-E2E',
+    type: 'plan',
+    version: 'v1.0',
+    commentIds: ['1001'],
+    sha256: planFmt.sha256,
+    totalParts: 1,
+  });
+
+  const comments = {
+    1001: {
+      id: 1001,
+      node_id: 'N1001',
+      issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/99',
+      user: { login: 'Jiaze-Li' },
+      body: planFmt.comments[0].body,
+    },
+  };
+  const runGh = async (args) => {
+    if (args[0] === 'pr') {
+      const headRefOid = git(repoDir, ['rev-parse', 'HEAD']).trim();
+      return JSON.stringify({ body: prBody, headRefOid, baseRefName: 'main' });
+    }
+    if (args[1]?.includes('/issues/comments/')) {
+      const id = Number(args[1].split('/').pop());
+      return JSON.stringify(comments[id]);
+    }
+    if (args[0] === 'api' && args[1] === 'graphql') {
+      return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
+    }
+    if (args.some((a) => String(a).endsWith('/branches/main/protection'))) {
+      throw new PrContractError('PR_CONTRACT_NOT_FOUND', 'HTTP 404');
+    }
+    if (args.some((a) => String(a).includes('/issues/99/comments'))) {
+      return JSON.stringify([]);
+    }
+    throw new Error(`unexpected gh ${args.join(' ')}`);
+  };
+
+  // Recover Plan in a fresh session
+  const recoveredPlan = await recoverPrContract({
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 99,
+    taskId: 'T-E2E',
+    type: 'plan',
+    runGh,
+  });
+  assert.equal(recoveredPlan.content, planText.trim());
+
+  // 2. Design: create untracked working file, record local PASS anchor, archive & clean
+  const designFile = 'Design.T-E2E.md';
+  const designText = '# Design — E2E\n\n## Options\nA\n\n## Assumptions\nNone\n\n## Work Contract\nImplement X\n';
+  fs.writeFileSync(path.join(repoDir, designFile), designText, 'utf8');
+  const designSha = contractContentSha256(designText);
+
+  const loopId = 'rl-20261119000000-e2epass';
+  fs.mkdirSync(path.join(runtimeDir, loopId), { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDir, loopId, 'workflow.json'),
+    JSON.stringify({
+      reviewLoop: {
+        state: 'PASS',
+        designReview: { reviewTarget: designFile, designSha256: designSha, round: 1 },
+      },
+    }),
+    'utf8',
+  );
+
+  const designFmt = formatContractComments({
+    taskId: 'T-E2E',
+    type: 'design',
+    version: 'v1.0',
+    content: designText,
+    designSha256: designSha,
+  });
+  comments[1002] = {
+    id: 1002,
+    node_id: 'N1002',
+    issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/99',
+    user: { login: 'Jiaze-Li' },
+    body: designFmt.comments[0].body,
+  };
+  prBody = upsertContractIndex(prBody, {
+    taskId: 'T-E2E',
+    type: 'design',
+    version: 'v1.0',
+    commentIds: ['1002'],
+    sha256: designSha,
+    totalParts: 1,
+  });
+
+  const cleanupRes = await verifyDesignArchiveAndCleanupReady({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 99,
+    taskId: 'T-E2E',
+    loopId,
+    runtimeDir,
+    clean: true,
+    runGh,
+  });
+  assert.equal(cleanupRes.cleaned, true);
+  assert.equal(fs.existsSync(path.join(repoDir, designFile)), false);
+
+  // 3. Code: recover frozen Design with designSha256, commit code change, and verify final PR gate
+  const recoveredDesign = await recoverPrContract({
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 99,
+    taskId: 'T-E2E',
+    type: 'design',
+    expectedDesignSha256: designSha,
+    runGh,
+  });
+  assert.equal(recoveredDesign.content, designText.trim());
+
+  fs.writeFileSync(path.join(repoDir, 'feature.js'), 'export const x = 1;\n', 'utf8');
+  git(repoDir, ['add', 'feature.js']);
+  git(repoDir, ['commit', '-m', 'feat: implement x']);
+
+  const cleanGate = await runFinalPrGateReport({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 99,
+    runGh,
+  });
+  assert.equal(cleanGate.localCheck.status, 'PASS');
+  assert.deepEqual(cleanGate.localCheck.diff.checkedFiles, [{ status: 'A', path: 'feature.js' }]);
+  assert.equal(cleanGate.remoteProtection.status, 'NOT_ENFORCED');
+  assert.equal(cleanGate.prBotStatus.status, 'MISSING');
+
+  // Negative: wrong designSha256 is rejected
+  await assert.rejects(
+    () => recoverPrContract({
+      repo: 'Jiaze-Li/reviewloop',
+      prNumber: 99,
+      taskId: 'T-E2E',
+      type: 'design',
+      expectedDesignSha256: '0'.repeat(64),
+      runGh,
+    }),
+    (err) => err.code === 'PR_CONTRACT_DESIGN_ANCHOR_MISMATCH',
+  );
+
+  // Negative: committing a task-level Plan.md on the task branch fails the final diff guard
+  fs.writeFileSync(path.join(repoDir, 'Plan.md'), '# Sneaky Plan\n', 'utf8');
+  git(repoDir, ['add', 'Plan.md']);
+  git(repoDir, ['commit', '-m', 'chore: accidentally commit Plan.md']);
+  const dirtyGate = await runFinalPrGateReport({
+    cwd: repoDir,
+    repo: 'Jiaze-Li/reviewloop',
+    prNumber: 99,
+    runGh,
+  });
+  assert.equal(dirtyGate.localCheck.status, 'FAIL');
+  assert.equal(dirtyGate.localCheck.diff.violations.some((v) => v.path === 'Plan.md'), true);
+});
