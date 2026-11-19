@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T12:02:46.221Z",
+  "updatedAt": "2026-11-19T12:02:51.408Z",
   "task": {
     "id": "chore/agy-opus-medium-effort",
     "branch": "chore/agy-opus-medium-effort",
@@ -19,7 +19,14 @@
         "message": "Prefer medium reasoning effort for AGY Claude Opus reviewer"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 58,
+      "state": "open",
+      "title": "Prefer medium reasoning effort for AGY Claude Opus reviewer",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/58",
+      "merged": false,
+      "updatedAt": "2026-11-19T12:02:30Z"
+    },
     "completed": null,
     "outcome": null
   }
