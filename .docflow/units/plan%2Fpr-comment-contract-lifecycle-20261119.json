@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T05:20:00.226Z",
+  "updatedAt": "2026-11-19T05:23:20.240Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
     "current": "fix(pr-contract): address PR #54 review findings F001-F003",
-    "next": "等待 PR 54 审查机器人验证 F001-F003 修复并给出最终状态",
+    "next": "等待 PR 54 审查机器人验证 F001 最终修复",
     "history": [
       {
         "at": "2026-11-19T12:31:48+08:00",
