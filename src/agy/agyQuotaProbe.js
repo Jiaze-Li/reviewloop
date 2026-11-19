@@ -7,6 +7,8 @@ import { narrowReviewTransportCwd, narrowAgyGeminiDir } from '../reviewloop/adap
 
 const DEFAULT_TTL_MS = 90_000; // Short retry throttle for unavailable/unsupported probes.
 const SUCCESS_REFRESH_MS = 24 * 60 * 60 * 1000;
+const COOLDOWN_REFRESH_MS = 60 * 60 * 1000;
+const AGY_QUOTA_POOLS = Object.freeze(['agy-claude-gpt', 'agy-gemini']);
 const PROBE_TIMEOUT_MS = 12_000;
 const PROBE_MAX_BYTES = 256 * 1024;
 const execFileAsync = promisify(execFile);
@@ -97,9 +99,12 @@ export function createAgyQuotaPreflight({
     const last = quotaRegistry.lastUsageCheck();
     const lastAt = Date.parse(last?.checkedAt ?? '');
     const resetAt = Date.parse(last?.nextResetAt ?? '');
-    // The read-only snapshot is shared across MCP restarts. Check at least
-    // every 24h, or as soon as a previously reported quota reset is due.
-    const recent = Number.isFinite(lastAt) && t >= lastAt && t - lastAt < SUCCESS_REFRESH_MS;
+    // The read-only snapshot is shared across MCP restarts. Check every 24h
+    // when healthy, every 1h while any AGY pool is in COOLDOWN, or as soon as a
+    // previously reported quota reset is due.
+    const hasCooldown = AGY_QUOTA_POOLS.some((poolId) => quotaRegistry.get(poolId).status === 'COOLDOWN');
+    const refreshMs = hasCooldown ? COOLDOWN_REFRESH_MS : SUCCESS_REFRESH_MS;
+    const recent = Number.isFinite(lastAt) && t >= lastAt && t - lastAt < refreshMs;
     const resetDue = Number.isFinite(resetAt) && t >= resetAt
       && (!Number.isFinite(lastAt) || lastAt < resetAt);
     if (recent && !resetDue) return { checked: false, reason: 'cached' };
