@@ -283,12 +283,19 @@ export class QuotaPoolRegistry {
     });
   }
   usable(family) { return this.poolsFor(family).every((poolId) => this.get(poolId).status !== POOL_STATUS.COOLDOWN); }
-  recordReady(poolId, { source = 'runtime_probe', onlyIfSource = null } = {}) {
+  recordReady(poolId, { source = 'runtime_probe', onlyIfSource = null, onlyIfStatus = null, ifCheckedBeforeMs = null } = {}) {
     this._update(() => {
-      // A successful /usage snapshot must not clear an intervening provider's
-      // model-specific error or cooldown that it did not establish itself.
-      if (onlyIfSource && this.pools[poolId]?.source !== onlyIfSource) return;
-      this.pools[poolId] = { ...(this.pools[poolId] ?? { poolId }), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 };
+      const current = this.pools[poolId];
+      // A stale snapshot must never overwrite a newer cooldown or status change
+      // recorded after the probe started.
+      if (onlyIfSource && current?.source !== onlyIfSource) return;
+      const currentStatus = current?.status ?? POOL_STATUS.UNKNOWN;
+      if (onlyIfStatus && !onlyIfStatus.includes(currentStatus)) return;
+      if (Number.isFinite(ifCheckedBeforeMs)) {
+        const currentCheckedAt = Date.parse(current?.checkedAt ?? '');
+        if (Number.isFinite(currentCheckedAt) && currentCheckedAt > ifCheckedBeforeMs) return;
+      }
+      this.pools[poolId] = { ...(current ?? { poolId }), status: POOL_STATUS.READY, reason: null, checkedAt: nowIso(this.now()), cooldownSince: null, resetAt: null, retryAfter: null, source, failures: 0 };
     });
   }
   recordCooldown(poolId, { reason = 'quota_exhausted', resetAt = null, retryAfter = null, source = 'provider_error' } = {}) {

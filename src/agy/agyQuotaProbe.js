@@ -137,11 +137,16 @@ export function createAgyQuotaPreflight({
       const exhausted = snapshot.exhausted;
       // Both /usage preflight and provider quota rejections share one quota-availability
       // lock per pool: when a complete /usage snapshot confirms a pool has available
-      // quota, clear any active COOLDOWN or UNKNOWN state regardless of source.
+      // quota, clear any active COOLDOWN or UNKNOWN state — provided no newer state
+      // was recorded after this /usage probe started (`t`).
       for (const poolId of snapshot.availablePools) {
         const current = quotaRegistry.get(poolId);
         if (current.status === 'COOLDOWN' || current.status === 'UNKNOWN') {
-          quotaRegistry.recordReady(poolId, { source: 'agy_usage_preflight' });
+          quotaRegistry.recordReady(poolId, {
+            source: 'agy_usage_preflight',
+            onlyIfStatus: ['COOLDOWN', 'UNKNOWN'],
+            ifCheckedBeforeMs: t,
+          });
         }
       }
       for (const { poolId, resetAt } of exhausted) {
