@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T05:56:22.518Z",
+  "updatedAt": "2026-11-19T05:56:25.723Z",
   "task": {
     "id": "fix/unify-quota-lock",
     "branch": "fix/unify-quota-lock",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T13:47:21+08:00",
     "status": "In progress",
     "current": "Prevent stale /usage snapshots from clearing newer cooldowns",
-    "next": "",
+    "next": "等待自动评审机器人复核第55号拉取请求并合并",
     "history": [
       {
         "at": "2026-11-19T13:51:31+08:00",
