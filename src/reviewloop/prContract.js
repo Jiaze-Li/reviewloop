@@ -468,12 +468,27 @@ export async function fetchPrMetadata({ repo, prNumber, runGh = defaultRunGh }) 
   return parsed;
 }
 
-export async function fetchCommentWithEditHistory({ repo, commentId, runGh = defaultRunGh }) {
+export async function fetchCommentWithEditHistory({
+  repo,
+  prNumber = null,
+  commentId,
+  runGh = defaultRunGh,
+}) {
   const { owner, name } = splitRepoSlug(repo);
   const raw = await runGh(['api', `repos/${owner}/${name}/issues/comments/${commentId}`]);
   const comment = JSON.parse(raw);
   if (!comment || typeof comment !== 'object' || typeof comment.body !== 'string') {
     fail('PR_CONTRACT_NOT_FOUND', `comment ${commentId} returned invalid payload`);
+  }
+  if (prNumber != null) {
+    const expectedSuffix = `/repos/${owner}/${name}/issues/${Number(prNumber)}`.toLowerCase();
+    const issueUrl = typeof comment.issue_url === 'string' ? comment.issue_url.trim().toLowerCase() : '';
+    if (!issueUrl || !issueUrl.endsWith(expectedSuffix)) {
+      fail(
+        'PR_CONTRACT_COMMENT_PR_MISMATCH',
+        `comment ${commentId} issue_url (${comment.issue_url ?? 'missing'}) does not belong to ${repo}#${prNumber}`,
+      );
+    }
   }
 
   let editHistoryVerified = false;
@@ -565,7 +580,7 @@ export async function recoverPrContract({
   for (let i = 0; i < entry.commentIds.length; i += 1) {
     const commentId = entry.commentIds[i];
     // eslint-disable-next-line no-await-in-loop
-    const fetched = await fetchCommentWithEditHistory({ repo, commentId, runGh });
+    const fetched = await fetchCommentWithEditHistory({ repo, prNumber, commentId, runGh });
     if (!fetched.author || !trustedAuthors.has(fetched.author)) {
       fail(
         'PR_CONTRACT_UNTRUSTED_AUTHOR',
@@ -842,22 +857,29 @@ export async function checkFinalPrDiff({
 
   let rawDiff;
   try {
-    rawDiff = await runGit(cwd, ['diff', '--name-status', `${baseRef}...HEAD`]);
+    rawDiff = await runGit(cwd, ['diff', '--name-status', '-z', `${baseRef}...HEAD`]);
   } catch (err) {
     fail('PR_CONTRACT_GIT_FAILED', `git diff against ${baseRef} failed: ${err?.message ?? err}`);
   }
 
   const checkedFiles = [];
   const violations = [];
+  const tokens = rawDiff.split('\0');
 
-  for (const line of rawDiff.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const parts = line.split('\t');
-    const status = parts[0]?.trim() ?? '';
+  for (let i = 0; i < tokens.length; i += 1) {
+    const status = tokens[i];
+    if (!status) continue;
     const code = status[0];
-    // Only inspect Added / Modified / Renamed destination files; ignore Deleted.
-    if (code !== 'A' && code !== 'M' && code !== 'R') continue;
-    const rawFile = code === 'R' ? parts[2] : parts[1];
+    let rawFile;
+    if (code === 'R' || code === 'C') {
+      rawFile = tokens[i + 2];
+      i += 2;
+    } else {
+      rawFile = tokens[i + 1];
+      i += 1;
+    }
+    // Only inspect Added / Modified / Renamed / Copied destination files; ignore Deleted.
+    if (code !== 'A' && code !== 'M' && code !== 'R' && code !== 'C') continue;
     if (!rawFile) continue;
     const relPath = rawFile.replace(/\\/g, '/');
     checkedFiles.push({ status: code, path: relPath });

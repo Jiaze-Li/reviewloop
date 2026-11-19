@@ -102,10 +102,10 @@ test('formatContractComments & recoverPrContract handle >60,000 char multi-part 
       return JSON.stringify({ body: prBody, headRefOid: 'a'.repeat(40), baseRefName: 'main', headRefName: 'feat/x', url: 'https://github.com/Jiaze-Li/reviewloop/pull/99' });
     }
     if (args[0] === 'api' && args[1] === 'repos/Jiaze-Li/reviewloop/issues/comments/1001') {
-      return JSON.stringify({ id: 1001, node_id: 'IC_1', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
+      return JSON.stringify({ id: 1001, node_id: 'IC_1', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/99', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
     }
     if (args[0] === 'api' && args[1] === 'repos/Jiaze-Li/reviewloop/issues/comments/1002') {
-      return JSON.stringify({ id: 1002, node_id: 'IC_2', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
+      return JSON.stringify({ id: 1002, node_id: 'IC_2', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/99', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
     }
     if (args[0] === 'api' && args[1] === 'graphql') {
       return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
@@ -201,6 +201,7 @@ test('recoverPrContract fail-closed negative cases & GraphQL edit-history degrad
       return JSON.stringify({
         id: 55555,
         node_id: 'IC_5',
+        issue_url: overrides.issueUrl ?? 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/1',
         user: { login: overrides.author ?? 'Jiaze-Li' },
         body: overrides.commentBody ?? formatted.comments[0].body,
       });
@@ -242,6 +243,18 @@ test('recoverPrContract fail-closed negative cases & GraphQL edit-history degrad
   await assert.rejects(
     () => recoverPrContract({ repo: 'Jiaze-Li/reviewloop', prNumber: 1, taskId: 'T1', type: 'plan', runGh: baseGh({ commentError: new Error('404 Not Found') }) }),
     (err) => err.message.includes('404'),
+  );
+
+  // 4b. F005: comment from another PR/issue in the same repo must be rejected
+  await assert.rejects(
+    () => recoverPrContract({
+      repo: 'Jiaze-Li/reviewloop',
+      prNumber: 1,
+      taskId: 'T1',
+      type: 'plan',
+      runGh: baseGh({ issueUrl: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/999' }),
+    }),
+    (err) => err.code === 'PR_CONTRACT_COMMENT_PR_MISMATCH',
   );
 
   // 5. GraphQL edit history unreadable -> degrades with warning while hash passes
@@ -290,8 +303,8 @@ test('recoverPrContract rejects out-of-order / missing multi-part comments & Des
   // Swap part 2 into comment 20001 slot -> out-of-order
   const swappedGh = async (args) => {
     if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: 'a'.repeat(40) });
-    if (args[1].endsWith('/20001')) return JSON.stringify({ id: 20001, node_id: 'N1', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
-    if (args[1].endsWith('/20002')) return JSON.stringify({ id: 20002, node_id: 'N2', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
+    if (args[1].endsWith('/20001')) return JSON.stringify({ id: 20001, node_id: 'N1', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/1', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
+    if (args[1].endsWith('/20002')) return JSON.stringify({ id: 20002, node_id: 'N2', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/1', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
     return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
   };
   await assert.rejects(
@@ -302,8 +315,8 @@ test('recoverPrContract rejects out-of-order / missing multi-part comments & Des
   // Design anchor mismatch
   const normalGh = async (args) => {
     if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: 'a'.repeat(40) });
-    if (args[1].endsWith('/20001')) return JSON.stringify({ id: 20001, node_id: 'N1', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
-    if (args[1].endsWith('/20002')) return JSON.stringify({ id: 20002, node_id: 'N2', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
+    if (args[1].endsWith('/20001')) return JSON.stringify({ id: 20001, node_id: 'N1', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/1', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
+    if (args[1].endsWith('/20002')) return JSON.stringify({ id: 20002, node_id: 'N2', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/1', user: { login: 'Jiaze-Li' }, body: formatted.comments[1].body });
     return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
   };
   await assert.rejects(
@@ -359,7 +372,7 @@ test('verifyDesignArchiveAndCleanupReady enforces 4 preconditions and protects c
 
   const runGh = async (args) => {
     if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: 'a'.repeat(40) });
-    if (args[1].endsWith('/77777')) return JSON.stringify({ id: 77777, node_id: 'N7', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
+    if (args[1].endsWith('/77777')) return JSON.stringify({ id: 77777, node_id: 'N7', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/54', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
     return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
   };
 
@@ -547,11 +560,15 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
   const archivedContent = '# Plan — Archived\n\nSecret contract';
   const archivedSha = contractContentSha256(archivedContent);
 
-  // Add 1) approved long-term architecture doc, 2) unapproved task Design.v1.md, 3) disguised copy
-  fs.mkdirSync(path.join(repoDir, 'docs'), { recursive: true });
+  // Add 1) approved long-term architecture doc, 2) unapproved task Design.v1.md,
+  // 3) disguised copy, 4) F004 non-ASCII filename & non-ASCII disguised copy under quotePath=true
+  git(repoDir, ['config', 'core.quotePath', 'true']);
+  fs.mkdirSync(path.join(repoDir, 'docs', '中文'), { recursive: true });
   fs.writeFileSync(path.join(repoDir, 'docs/Architecture-Design.md'), '# Long-term Arch\n', 'utf8');
   fs.writeFileSync(path.join(repoDir, 'Design.v1.md'), '# Task Design\n', 'utf8');
   fs.writeFileSync(path.join(repoDir, 'disguised-notes.md'), archivedContent, 'utf8');
+  fs.writeFileSync(path.join(repoDir, 'docs/中文/Design.md'), '# Non-ASCII Design\n', 'utf8');
+  fs.writeFileSync(path.join(repoDir, '文档.md'), archivedContent, 'utf8');
   git(repoDir, ['add', '.']);
   git(repoDir, ['commit', '-m', 'test diff']);
   const headOid = git(repoDir, ['rev-parse', 'HEAD']).trim();
@@ -565,7 +582,7 @@ test('checkFinalPrDiff & runFinalPrGateReport block task contracts, allow approv
   });
   assert.equal(diffRes.ok, false);
   const violationPaths = diffRes.violations.map((v) => v.path).sort();
-  assert.deepEqual(violationPaths, ['Design.v1.md', 'disguised-notes.md']);
+  assert.deepEqual(violationPaths, ['Design.v1.md', 'disguised-notes.md', 'docs/中文/Design.md', '文档.md']);
 
   // Now test runFinalPrGateReport 3-state separation
   const prBody = upsertContractIndex('', {

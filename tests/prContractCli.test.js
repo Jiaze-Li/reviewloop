@@ -116,7 +116,7 @@ test('check-pr-handoff.js keeps legacy behavior unchanged and supports --check-c
   // 2. Extended --check-contract --check-diff PASS
   const runGh = async (args) => {
     if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: head, baseRefName: 'main' });
-    if (args[1].endsWith('/90001')) return JSON.stringify({ id: 90001, node_id: 'N9', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
+    if (args[1].endsWith('/90001')) return JSON.stringify({ id: 90001, node_id: 'N9', issue_url: 'https://api.github.com/repos/Jiaze-Li/reviewloop/issues/54', user: { login: 'Jiaze-Li' }, body: formatted.comments[0].body });
     if (args[1] === 'graphql') return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
     if (args.some((a) => String(a).endsWith('/protection'))) throw new PrContractError('PR_CONTRACT_NOT_FOUND', '404');
     if (args.some((a) => String(a).includes('/issues/54/comments'))) return JSON.stringify([]);
