@@ -252,7 +252,7 @@ reviewloop pr resume --loop <loopId>
 reviewloop pr stop --loop <loopId> [--reason "<reason>"]
 ```
 
-For opt-in `contract_storage: pr-comment` tasks (`personal-skills @305d9c0`), read-only contract recovery, Design cleanup verification, and final PR diff checks are available via `reviewloop contract` and `scripts/check-pr-handoff.js --check-contract --check-diff`:
+For new tasks, PR-comment contract storage is the default (legacy file-based `Plan.md`/`Design.md` contracts with older `policy_sha` remain supported as-is). Read-only contract recovery, 5-step Design archive/cleanup verification, and final PR diff + 3-state gate visibility (`localCheck` / `remoteProtection` / `prBotStatus`) are available via `reviewloop contract` and `scripts/check-pr-handoff.js --check-contract --check-diff`:
 
 ```sh
 reviewloop contract format --task-id <id> --type <plan|design> --version <ver> --file <path> [--json]

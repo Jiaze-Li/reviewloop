@@ -1,4 +1,4 @@
-// Opt-in `contract_storage: pr-comment` lifecycle support:
+// Default PR-comment contract lifecycle support (legacy file contracts remain supported):
 //   - strict <details>/</summary>...</details> formatting, splitting (>60k chars), and extraction
 //   - PR description contract index parsing and single-current updating
 //   - fail-closed comment recovery with author, part-sequence, hash, and GraphQL edit-history checks
@@ -721,12 +721,13 @@ async function defaultRunGit(cwd, args) {
 }
 
 /**
- * Verifies all 4 safety preconditions before allowing (optional) cleanup of
+ * Verifies all 5 safety checks before allowing (optional) cleanup of
  * an untracked local Design working file:
- *   1. Independent local ReviewLoop Design PASS anchor exists
- *   2. PR comment recovered Design matches anchor SHA-256
- *   3. PR description index has current entry with matching SHA-256
- *   4. Local target file is untracked in Git and its trimmed SHA-256 matches
+ *   1. PR comment recovered Design matches PR description index SHA-256
+ *   2. Independent local ReviewLoop Design PASS anchor exists for that SHA-256
+ *   3. Local target file exists and is a regular non-symlink file
+ *   4. Local target file is untracked in Git
+ *   5. Local target file trimmed SHA-256 matches Design PASS anchor
  *
  * Read-only unless `clean: true` is explicitly passed.
  */
