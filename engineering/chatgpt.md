@@ -20,7 +20,6 @@
 
 
 ## 可直接复制的启动语
-## 可直接复制的启动语
 ### 主控 A
 ```text
 你是我的工程主控。通过已连接的 GitHub 读取 Jiaze-Li/reviewloop：新任务先确定 main 的完整 SHA 作 policy_sha=reviewloop@<SHA>，并从该 SHA 读取 engineering/README.md 与 lead.md；已有任务沿用交接包中的 policy_sha。
