@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T06:18:18.586Z",
+  "updatedAt": "2026-11-19T06:18:25.061Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/pr-comment-contract-lifecycle-20261119",
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
-    "current": "fix(pr-contract): select highest-ID trusted bot session comment for F001",
+    "current": "fix(pr-contract): fix F004 NUL-delimited git diff and F005 PR comment binding",
     "next": "等待 PR 54 审查机器人验证 F004 与 F005 修复后给出 READY",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-19T13:23:15+08:00",
         "text": "fix(pr-contract): address PR #54 review findings F001-F003"
+      },
+      {
+        "at": "2026-11-19T14:18:13+08:00",
+        "text": "fix(pr-contract): select highest-ID trusted bot session comment for F001"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/pr-comment-contract-lifecycle-20261119",
         "timestamp": "2026-11-19T13:23:15+08:00",
         "message": "fix(pr-contract): select highest-ID trusted bot session comment for F001"
+      },
+      {
+        "sha": "d48822c6aa853db6bffe153f666f90dc289413b1",
+        "branch": "plan/pr-comment-contract-lifecycle-20261119",
+        "timestamp": "2026-11-19T14:18:13+08:00",
+        "message": "fix(pr-contract): fix F004 NUL-delimited git diff and F005 PR comment binding"
       }
     ],
     "pr": {
