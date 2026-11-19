@@ -36,6 +36,13 @@ import {
   pushPrHeadCli,
   triggerPrReviewCli,
 } from '../src/reviewloop/prCli.js';
+import {
+  checkFinalPrDiff,
+  formatContractComments,
+  recoverPrContract,
+  runFinalPrGateReport,
+  verifyDesignArchiveAndCleanupReady,
+} from '../src/reviewloop/prContract.js';
 
 async function listSessions() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
@@ -248,6 +255,152 @@ async function resume(rest) {
   console.log('------------------------------------------------------------');
 }
 
+function flagValues(args, name) {
+  const out = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i].startsWith(`${name}=`)) out.push(args[i].slice(name.length + 1));
+    else if (args[i] === name && i + 1 < args.length) {
+      out.push(args[i + 1]);
+      i += 1;
+    }
+  }
+  return out;
+}
+
+async function handleContractCommand(rest) {
+  const [sub, ...args] = rest;
+  const asJson = args.includes('--json');
+  const print = (obj, textLines) => {
+    if (asJson) console.log(JSON.stringify(obj, null, 2));
+    else for (const line of textLines) console.log(line);
+  };
+
+  if (sub === 'format') {
+    const taskId = flagValue(args, '--task-id');
+    const type = flagValue(args, '--type');
+    const version = flagValue(args, '--version');
+    const file = flagValue(args, '--file');
+    const designSha256 = flagValue(args, '--design-sha');
+    if (!taskId || !type || !version || !file) {
+      throw new Error('usage: reviewloop contract format --task-id <id> --type <plan|design> --version <ver> --file <path> [--design-sha <sha>] [--json]');
+    }
+    const content = await readFile(file, 'utf8');
+    const formatted = formatContractComments({ taskId, type, version, content, designSha256 });
+    print(formatted, [
+      `taskId: ${formatted.taskId}  type: ${formatted.type}  version: ${formatted.version}`,
+      `sha256: ${formatted.sha256}  parts: ${formatted.totalParts}`,
+      ...formatted.comments.flatMap((c) => [`--- part ${c.part}/${c.total} ---`, c.body]),
+    ]);
+    return;
+  }
+
+  if (sub === 'recover') {
+    const repo = flagValue(args, '--repo');
+    const prNumber = flagValue(args, '--pr');
+    const taskId = flagValue(args, '--task-id');
+    const type = flagValue(args, '--type');
+    const version = flagValue(args, '--version');
+    const expectedDesignSha256 = flagValue(args, '--design-sha');
+    const authors = flagValues(args, '--author');
+    const requireMcpLimit = args.includes('--mcp-limit');
+    if (!repo || !prNumber || !taskId || !type) {
+      throw new Error('usage: reviewloop contract recover --repo <owner/name> --pr <num> --task-id <id> --type <plan|design> [--version <ver>] [--design-sha <sha>] [--author <login>] [--mcp-limit] [--json]');
+    }
+    const res = await recoverPrContract({
+      repo,
+      prNumber: Number(prNumber),
+      taskId,
+      type,
+      version,
+      allowedAuthors: authors.length ? authors : null,
+      expectedDesignSha256,
+      requireMcpLimit,
+    });
+    print(res, [
+      `Recovered ${res.type} ${res.version} for ${res.taskId} (sha256=${res.sha256}, parts=${res.totalParts}, comments=${res.commentIds.join(',')})`,
+      `Trust: ${res.trustNote}`,
+      ...res.warnings.map((w) => `Warning: ${w}`),
+      '---',
+      res.content,
+    ]);
+    return;
+  }
+
+  if (sub === 'verify-archive') {
+    const repo = flagValue(args, '--repo');
+    const prNumber = flagValue(args, '--pr');
+    const taskId = flagValue(args, '--task-id');
+    const version = flagValue(args, '--version');
+    const loopId = flagValue(args, '--loop');
+    const reviewTarget = flagValue(args, '--target');
+    const cwd = flagValue(args, '--cwd') || process.cwd();
+    const clean = args.includes('--clean');
+    const authors = flagValues(args, '--author');
+    if (!repo || !prNumber || !taskId) {
+      throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--json]');
+    }
+    const res = await verifyDesignArchiveAndCleanupReady({
+      cwd,
+      repo,
+      prNumber: Number(prNumber),
+      taskId,
+      version,
+      loopId,
+      reviewTarget,
+      allowedAuthors: authors.length ? authors : null,
+      clean,
+    });
+    print(res, [
+      res.cleaned
+        ? `Cleaned untracked design file ${res.reviewTarget} (designSha256=${res.designSha256}, loop=${res.loopId}).`
+        : `Ready to clean ${res.reviewTarget} (designSha256=${res.designSha256}, loop=${res.loopId}); pass --clean to unlink.`,
+      ...res.warnings.map((w) => `Warning: ${w}`),
+    ]);
+    return;
+  }
+
+  if (sub === 'diff-check') {
+    const cwd = flagValue(args, '--cwd') || process.cwd();
+    const baseRef = flagValue(args, '--base') || 'main';
+    const approvedAssets = flagValues(args, '--approved-asset');
+    const archivedContractHashes = flagValues(args, '--archived-hash');
+    const res = await checkFinalPrDiff({ cwd, baseRef, approvedAssets, archivedContractHashes });
+    print(res, [
+      `localDiffCheck: ${res.ok ? 'PASS' : 'FAIL'} (base=${res.baseRef}, checked=${res.checkedFiles.length})`,
+      ...res.violations.map((v) => `  - [${v.reason}] ${v.path}: ${v.message}`),
+    ]);
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (sub === 'gate-report') {
+    const repo = flagValue(args, '--repo');
+    const prNumber = flagValue(args, '--pr');
+    const cwd = flagValue(args, '--cwd') || process.cwd();
+    const baseRef = flagValue(args, '--base');
+    const approvedAssets = flagValues(args, '--approved-asset');
+    if (!repo || !prNumber) {
+      throw new Error('usage: reviewloop contract gate-report --repo <owner/name> --pr <num> [--cwd <dir>] [--base <ref>] [--approved-asset <path>] [--json]');
+    }
+    const report = await runFinalPrGateReport({
+      cwd,
+      repo,
+      prNumber: Number(prNumber),
+      baseRef,
+      approvedAssets,
+    });
+    print(report, [
+      `localCheck: ${report.localCheck.status}${report.localCheck.errors.length ? ` (${report.localCheck.errors.join('; ')})` : ''}`,
+      `remoteProtection: ${report.remoteProtection.status} (${report.remoteProtection.detail})`,
+      `prBotStatus: ${report.prBotStatus.status} (${report.prBotStatus.detail})`,
+    ]);
+    if (report.localCheck.status !== 'PASS') process.exitCode = 1;
+    return;
+  }
+
+  throw new Error('usage: reviewloop contract <format|recover|verify-archive|diff-check|gate-report> ...');
+}
+
 async function handlePrCommand(rest) {
   const [sub, ...args] = rest;
   const loopId = flagValue(args, '--loop');
@@ -399,6 +552,9 @@ async function main() {
     case 'pr':
       await handlePrCommand(rest);
       break;
+    case 'contract':
+      await handleContractCommand(rest);
+      break;
     case 'install': {
       const res = await installGlobal();
       console.log('ReviewLoop installed globally.');
@@ -412,7 +568,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|pr|contract|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);
