@@ -122,7 +122,7 @@ test('agy:opus is the Reviewer head, shares the agy-claude-gpt pool, and resolve
   const reg = MODEL_FAMILY_REGISTRY['agy:opus'];
   assert.equal(reg.provider, 'agy-claude-gpt');
   assert.equal(reg.catalogPrefix, 'claude-opus-');
-  assert.equal(reg.defaultEffort, null);
+  assert.equal(reg.defaultEffort, 'medium');
   assert.equal(reg.stableAlias, null);
 
   // No catalog -> provider default, nothing pinned.
