@@ -79,10 +79,10 @@ export const MODEL_FAMILY_REGISTRY = Object.freeze({
   // (`agy-claude-gpt`) with agy:sonnet + agy:gpt-oss, so a quota cooldown on
   // that pool takes all three out of routing without a wasted probe.
   // `catalogPrefix: 'claude-opus-'` resolves the newest Opus in the live
-  // `agy models` catalog at pool-construction time (currently
-  // `claude-opus-4-6`) — deliberately NOT a long-term concrete version pin, so
-  // ReviewLoop source needs no edit when AGY advances its Opus release. No
-  // reasoning-effort suffix variants exist for it, so `defaultEffort` is null.
+  // `agy models` catalog at pool-construction time (e.g. `claude-opus-5-5-medium`)
+  // — deliberately NOT a long-term concrete version pin, so ReviewLoop source
+  // needs no edit when AGY advances its Opus release. Prefer `-medium` when
+  // reasoning-effort suffix variants exist, matching the Reviewer policy.
   // Same isolated `reviewloop-minimal` AGY transport / token accounting /
   // ModelSpendAuthority / sentinel / bounded-failover path as the other AGY
   // families.
@@ -92,7 +92,7 @@ export const MODEL_FAMILY_REGISTRY = Object.freeze({
     cli: 'agy',
     catalogPrefix: 'claude-opus-',
     envKeys: Object.freeze(['REVIEWLOOP_AGY_OPUS_MODEL', 'AGY_OPUS_MODEL', 'AGY_MODEL']),
-    defaultEffort: null,
+    defaultEffort: 'medium',
     stableAlias: null,
   }),
   // AGY-hosted Claude Sonnet. Shares the AGY "Claude & GPT" quota pool with
