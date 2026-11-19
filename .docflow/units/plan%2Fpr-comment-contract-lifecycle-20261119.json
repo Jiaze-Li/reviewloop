@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T04:32:01.688Z",
+  "updatedAt": "2026-11-19T04:32:09.114Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -8,15 +8,26 @@
     "task": "Development branch: plan/pr-comment-contract-lifecycle-20261119",
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
-    "current": "chore: initialize PR for contract lifecycle plan [empty]",
+    "current": "feat(pr-contract): add opt-in PR comment contract lifecycle, cleanup guard, and diff check",
     "next": "等待 PR 54 的自动测试和审查机器人完成检查后决定是否合并",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-19T12:31:48+08:00",
+        "text": "chore: initialize PR for contract lifecycle plan [empty]"
+      }
+    ],
     "commits": [
       {
         "sha": "a1c2ea875245e8748c67326c66f9246d5edf9687",
         "branch": "plan/pr-comment-contract-lifecycle-20261119",
         "timestamp": "2026-11-19T11:52:54+08:00",
         "message": "chore: initialize PR for contract lifecycle plan [empty]"
+      },
+      {
+        "sha": "645c79ed1489be235979d40bfc0dc6ada8e457e6",
+        "branch": "plan/pr-comment-contract-lifecycle-20261119",
+        "timestamp": "2026-11-19T12:31:48+08:00",
+        "message": "feat(pr-contract): add opt-in PR comment contract lifecycle, cleanup guard, and diff check"
       }
     ],
     "pr": {
