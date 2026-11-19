@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T05:52:22.692Z",
+  "updatedAt": "2026-11-19T05:52:28.167Z",
   "task": {
     "id": "fix/unify-quota-lock",
     "branch": "fix/unify-quota-lock",
@@ -30,7 +30,14 @@
         "message": "Shorten AGY quota preflight refresh interval to 1 hour during cooldown"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 55,
+      "state": "open",
+      "title": "fix(agy): unify quota pool lock and use 1h preflight refresh during cooldown",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/55",
+      "merged": false,
+      "updatedAt": "2026-11-19T05:52:14Z"
+    },
     "completed": null,
     "outcome": null
   }
