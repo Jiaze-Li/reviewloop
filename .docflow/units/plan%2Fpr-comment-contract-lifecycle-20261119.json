@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-19T04:32:12.582Z",
+  "updatedAt": "2026-11-19T05:19:51.114Z",
   "task": {
     "id": "plan/pr-comment-contract-lifecycle-20261119",
     "branch": "plan/pr-comment-contract-lifecycle-20261119",
@@ -9,7 +9,7 @@
     "started": "2026-11-19T11:52:54+08:00",
     "status": "In progress",
     "current": "feat(pr-contract): add opt-in PR comment contract lifecycle, cleanup guard, and diff check",
-    "next": "等待 PR 54 的自动测试和审查机器人完成检查后决定是否合并",
+    "next": "等待 PR 54 审查机器人验证 F001-F003 修复并给出最终状态",
     "history": [
       {
         "at": "2026-11-19T12:31:48+08:00",
