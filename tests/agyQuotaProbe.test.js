@@ -101,7 +101,7 @@ test('predicted reset causes a recheck before 24 hours, even across MCP restarts
     assert.equal(original.lastUsageCheck().nextResetAt, reset(5));
     assert.equal(original.usable('agy:opus'), false);
 
-    current += 3600_000;
+    current += 1800_000;
     const restarted = new QuotaPoolRegistry({ filePath, now: () => current });
     const afterRestart = createAgyQuotaPreflight({
       quotaRegistry: restarted, now: () => current, exec: fakeExec,
@@ -119,7 +119,7 @@ test('predicted reset causes a recheck before 24 hours, even across MCP restarts
   }
 });
 
-test('24-hour recheck detects an early promotional reset and unblocks the /usage pool', async () => {
+test('1-hour recheck during cooldown detects an early promotional reset and unblocks the pool', async () => {
   let current = NOW;
   let reads = 0;
   const registry = new QuotaPoolRegistry({ filePath: null, now: () => current });
@@ -135,27 +135,88 @@ test('24-hour recheck detects an early promotional reset and unblocks the /usage
   });
   assert.equal((await preflight()).checked, true);
   assert.equal(registry.usable('agy:opus'), false);
-  current = NOW + 23 * 3600_000;
+  current = NOW + 30 * 60_000;
   assert.deepEqual(await preflight(), { checked: false, reason: 'cached' });
-  current = NOW + 24 * 3600_000 + 1;
+  current = NOW + 60 * 60_000 + 1;
+  assert.deepEqual(await preflight(), { checked: true, exhaustedPools: [] });
+  assert.equal(reads, 2);
+  assert.equal(registry.get('agy-claude-gpt').status, 'READY');
+  assert.equal(registry.usable('agy:opus'), true);
+  // Once all AGY pools are healthy again, the 24-hour cache applies.
+  current += 23 * 3600_000;
+  assert.deepEqual(await preflight(), { checked: false, reason: 'cached' });
+  assert.equal(reads, 2);
+});
+
+test('1-hour recheck also applies when COOLDOWN was recorded by provider_error after a healthy /usage check', async () => {
+  let current = NOW;
+  let reads = 0;
+  const registry = new QuotaPoolRegistry({ filePath: null, now: () => current });
+  const preflight = createAgyQuotaPreflight({
+    quotaRegistry: registry, now: () => current,
+    exec: (_cmd, args) => {
+      if (args.includes('--version')) return '1.2.6';
+      reads += 1;
+      return usage([group('Claude and GPT models', [{ remaining_fraction: 0.9, reset_time: reset(72) }])]);
+    },
+  });
+  assert.deepEqual(await preflight(), { checked: true, exhaustedPools: [] });
+  assert.equal(reads, 1);
+
+  current += 10 * 60_000;
+  registry.recordCooldown('agy-claude-gpt', { source: 'provider_error', resetAt: reset(72) });
+  assert.equal(registry.usable('agy:opus'), false);
+
+  current = NOW + 30 * 60_000;
+  assert.deepEqual(await preflight(), { checked: false, reason: 'cached' });
+  assert.equal(reads, 1);
+
+  current = NOW + 60 * 60_000 + 1;
   assert.deepEqual(await preflight(), { checked: true, exhaustedPools: [] });
   assert.equal(reads, 2);
   assert.equal(registry.get('agy-claude-gpt').status, 'READY');
   assert.equal(registry.usable('agy:opus'), true);
 });
 
-test('positive /usage never overrides a model-specific provider quota cooldown', async () => {
-  const registry = new QuotaPoolRegistry({ filePath: null, now: () => NOW });
-  registry.recordCooldown('agy-claude-gpt', { source: 'provider_error', resetAt: reset(72) });
+test('stale /usage snapshot never erases a newer provider_error cooldown recorded while /usage was running', async () => {
+  let current = NOW;
+  const registry = new QuotaPoolRegistry({ filePath: null, now: () => current });
   const preflight = createAgyQuotaPreflight({
-    quotaRegistry: registry, now: () => NOW,
-    exec: (_cmd, args) => args.includes('--version') ? '1.2.6'
-      : usage([group('Claude and GPT models', [{ remaining_fraction: 0.7, reset_time: reset(72) }])]),
+    quotaRegistry: registry,
+    now: () => current,
+    exec: async (_cmd, args) => {
+      if (args.includes('--version')) return '1.2.6';
+      // Simulate another call (or shared-file MCP process) hitting a provider
+      // quota error while the /usage subprocess is in flight.
+      current += 2000;
+      registry.recordCooldown('agy-claude-gpt', { source: 'provider_error', resetAt: reset(72) });
+      return usage([group('Claude and GPT models', [{ remaining_fraction: 0.9, reset_time: reset(72) }])]);
+    },
   });
   assert.deepEqual(await preflight(), { checked: true, exhaustedPools: [] });
   assert.equal(registry.get('agy-claude-gpt').status, 'COOLDOWN');
   assert.equal(registry.get('agy-claude-gpt').source, 'provider_error');
   assert.equal(registry.usable('agy:opus'), false);
+});
+
+test('positive /usage clears a provider_error or inferred_backoff quota cooldown (single unified lock)', async () => {
+  const registry = new QuotaPoolRegistry({ filePath: null, now: () => NOW });
+  registry.recordCooldown('agy-claude-gpt', { source: 'provider_error', resetAt: reset(72) });
+  registry.recordCooldown('agy-gemini', { resetAt: null }); // inferred_backoff
+  const preflight = createAgyQuotaPreflight({
+    quotaRegistry: registry, now: () => NOW,
+    exec: (_cmd, args) => args.includes('--version') ? '1.2.6'
+      : usage([
+        group('Claude and GPT models', [{ remaining_fraction: 0.7, reset_time: reset(72) }]),
+        group('Gemini Models', [{ remaining_fraction: 0.5, reset_time: reset(5) }]),
+      ]),
+  });
+  assert.deepEqual(await preflight(), { checked: true, exhaustedPools: [] });
+  assert.equal(registry.get('agy-claude-gpt').status, 'READY');
+  assert.equal(registry.get('agy-claude-gpt').source, 'agy_usage_preflight');
+  assert.equal(registry.usable('agy:opus'), true);
+  assert.equal(registry.get('agy-gemini').status, 'READY');
+  assert.equal(registry.usable('agy:gemini-reviewer'), true);
 });
 
 test('all exhausted windows must recover before a shared quota pool becomes eligible', () => {

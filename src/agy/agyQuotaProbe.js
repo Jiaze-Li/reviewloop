@@ -7,6 +7,8 @@ import { narrowReviewTransportCwd, narrowAgyGeminiDir } from '../reviewloop/adap
 
 const DEFAULT_TTL_MS = 90_000; // Short retry throttle for unavailable/unsupported probes.
 const SUCCESS_REFRESH_MS = 24 * 60 * 60 * 1000;
+const COOLDOWN_REFRESH_MS = 60 * 60 * 1000;
+const AGY_QUOTA_POOLS = Object.freeze(['agy-claude-gpt', 'agy-gemini']);
 const PROBE_TIMEOUT_MS = 12_000;
 const PROBE_MAX_BYTES = 256 * 1024;
 const execFileAsync = promisify(execFile);
@@ -97,9 +99,12 @@ export function createAgyQuotaPreflight({
     const last = quotaRegistry.lastUsageCheck();
     const lastAt = Date.parse(last?.checkedAt ?? '');
     const resetAt = Date.parse(last?.nextResetAt ?? '');
-    // The read-only snapshot is shared across MCP restarts. Check at least
-    // every 24h, or as soon as a previously reported quota reset is due.
-    const recent = Number.isFinite(lastAt) && t >= lastAt && t - lastAt < SUCCESS_REFRESH_MS;
+    // The read-only snapshot is shared across MCP restarts. Check every 24h
+    // when healthy, every 1h while any AGY pool is in COOLDOWN, or as soon as a
+    // previously reported quota reset is due.
+    const hasCooldown = AGY_QUOTA_POOLS.some((poolId) => quotaRegistry.get(poolId).status === 'COOLDOWN');
+    const refreshMs = hasCooldown ? COOLDOWN_REFRESH_MS : SUCCESS_REFRESH_MS;
+    const recent = Number.isFinite(lastAt) && t >= lastAt && t - lastAt < refreshMs;
     const resetDue = Number.isFinite(resetAt) && t >= resetAt
       && (!Number.isFinite(lastAt) || lastAt < resetAt);
     if (recent && !resetDue) return { checked: false, reason: 'cached' };
@@ -130,14 +135,18 @@ export function createAgyQuotaPreflight({
       const snapshot = parseAgyQuotaSnapshot(output, t);
       if (!snapshot) return { checked: false, reason: 'unknown_response' };
       const exhausted = snapshot.exhausted;
-      // If a promotional quota reset occurred early, release ONLY a cooldown
-      // previously established by /usage itself. A provider's model-specific
-      // quota rejection remains authoritative and must not be cleared here.
+      // Both /usage preflight and provider quota rejections share one quota-availability
+      // lock per pool: when a complete /usage snapshot confirms a pool has available
+      // quota, clear any active COOLDOWN or UNKNOWN state — provided no newer state
+      // was recorded after this /usage probe started (`t`).
       for (const poolId of snapshot.availablePools) {
         const current = quotaRegistry.get(poolId);
-        if (current.source === 'agy_usage_preflight'
-          && (current.status === 'COOLDOWN' || current.status === 'UNKNOWN')) {
-          quotaRegistry.recordReady(poolId, { source: 'agy_usage_preflight', onlyIfSource: 'agy_usage_preflight' });
+        if (current.status === 'COOLDOWN' || current.status === 'UNKNOWN') {
+          quotaRegistry.recordReady(poolId, {
+            source: 'agy_usage_preflight',
+            onlyIfStatus: ['COOLDOWN', 'UNKNOWN'],
+            ifCheckedBeforeMs: t,
+          });
         }
       }
       for (const { poolId, resetAt } of exhausted) {
