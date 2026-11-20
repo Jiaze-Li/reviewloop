@@ -93,7 +93,7 @@ export function humanExcludedFamilies(reservations) {
   return out;
 }
 
-function isHumanAcknowledgedUnresolved(record) {
+export function isHumanAcknowledgedUnresolved(record) {
   return record?.status === RESERVATION_STATUS.UNRESOLVED
     && record?.humanAcknowledgement?.accepted === true
     && record?.humanAcknowledgement?.accountingRecorded === true;

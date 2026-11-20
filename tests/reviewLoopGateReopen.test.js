@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeHarness, finding } from './helpers/reviewLoopHarness.js';
-import { reopenExhaustedGate, MAX_HUMAN_REOPENS } from '../src/reviewloop/gateReopen.js';
+import { reopenExhaustedGate, STANDARD_HUMAN_REOPENS } from '../src/reviewloop/gateReopen.js';
+import { effectiveCallLimits } from '../src/reviewloop/callAllowance.js';
 
 const phases = ['p1', 'p2'].map((id) => ({ id, objective: id, exitCriteria: ['ok'] }));
 const blocker = (t) => ({ findings: [finding('P2', 'a.js', t)] });
@@ -45,7 +46,7 @@ test('a human can reopen an exhausted gate; completed work and spend are preserv
   assert.equal(next.status, 'PHASE_PASS');
 });
 
-test('reopen refuses loops that are not exhausted, tripped, or reopened too often', async () => {
+test('reopen refuses loops that are not exhausted or tripped', async () => {
   const fresh = makeHarness();
   const { loopId } = await fresh.controller.begin({ goal: 'g', cwd: '/r' });
   await assert.rejects(reopenExhaustedGate({ persistence: fresh.persistence, loopId, reason: 'x' }), /only a HUMAN_REQUIRED loop/);
@@ -57,8 +58,26 @@ test('reopen refuses loops that are not exhausted, tripped, or reopened too ofte
   await assert.rejects(reopenExhaustedGate({ persistence: w.persistence, loopId: w.loopId, reason: 'x' }), /Token Sentinel/);
   await w.persistence.updateWorkflowState(w.loopId, { reviewLoopTokenAnomaly: { tripped: false } });
 
+});
+
+test('past the standard reopen count a human can still reopen, but only with an enforced call budget (AC14)', async () => {
+  const w = await exhaustedLoop();
   const raw = await w.persistence.readWorkflowState(w.loopId);
-  raw.reviewLoop.humanReopens = Array.from({ length: MAX_HUMAN_REOPENS }, () => ({ at: 't', reason: 'r' }));
+  raw.reviewLoop.humanReopens = Array.from({ length: STANDARD_HUMAN_REOPENS }, () => ({ at: 't', reason: 'r' }));
   await w.persistence.writeWorkflowState(w.loopId, raw);
-  await assert.rejects(reopenExhaustedGate({ persistence: w.persistence, loopId: w.loopId, reason: 'x' }), /already reopened/);
+  const frozen = JSON.stringify(await w.persistence.readWorkflowState(w.loopId));
+  await assert.rejects(reopenExhaustedGate({ persistence: w.persistence, loopId: w.loopId, reason: 'x' }), /--max-reviewer-calls/);
+  assert.equal(JSON.stringify(await w.persistence.readWorkflowState(w.loopId)), frozen, 'refusal writes nothing');
+
+  const currentLimits = effectiveCallLimits({ workflow: await w.persistence.readWorkflowState(w.loopId), env: {} });
+  const res = await reopenExhaustedGate({
+    persistence: w.persistence, loopId: w.loopId, reason: 'a new attempt after the scope was cut',
+    allowance: { reviewerCalls: 2 }, currentLimits,
+  });
+  assert.equal(res.tier, 'EXTENDED');
+  const after = await w.persistence.readWorkflowState(w.loopId);
+  const used = after.reviewLoopSpend.records.filter((r) => r.role === 'reviewer').length;
+  assert.equal(after.reviewLoopCallAllowance.maxReviewerCalls, used + 2);
+  assert.equal(after.reviewLoop.humanReopens.at(-1).tier, 'EXTENDED');
+  assert.equal(after.reviewLoop.state, 'REWORK');
 });

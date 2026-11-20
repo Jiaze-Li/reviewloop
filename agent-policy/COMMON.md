@@ -34,7 +34,7 @@ Inline proof only (Reviewer reads no files).
   `resumePacket` + repo rules.
 - `PASS`: LOCAL task done.
 - `REWORK`: fix findings/missing proof, review.
-- `HUMAN_REQUIRED`: STOP/report; no new loop to bypass budgets.
+- `HUMAN_REQUIRED`: show `reportText` verbatim; STOP; no new loop.
 - `WAITING_FOR_REVIEW`: wait, retry.
 - `NO_PROGRESS`: change state/evidence; never resend same evidence.
 

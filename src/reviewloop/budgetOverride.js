@@ -8,6 +8,7 @@
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
 import { resolveReviewLoopLimits } from './reviewSpend.js';
 import { reviewGateCount } from './phaseState.js';
+import { callCeilingsFromState, commitGuardedUpdate, fingerprint } from './humanActionGuard.js';
 
 const STATE_KEY = 'reviewLoop';
 const SPEND_KEY = 'reviewLoopSpend';
@@ -39,16 +40,15 @@ export async function overrideLoopBudget({
   }
 
   const workflow = await persistence.readWorkflowState(loopId);
+  const before = fingerprint(workflow);
   const loop = workflow?.[STATE_KEY];
   if (!loop) throw new Error(`unknown loopId ${loopId}`);
   if (loop.objective?.mode === 'PR') {
     throw new Error('ReviewLoop PR session retired; cannot override budget; use claude-review-bot');
   }
 
-  const expectedUpdatedAt = loop.updatedAt;
-
   if (workflow?.[ANOMALY_KEY]?.tripped) {
-    throw new Error('the Token Sentinel tripped for this loop; that safety stop needs its own review and cannot be overridden by budget expansion');
+    throw new Error('the Token Sentinel tripped for this loop; that safety stop cannot be overridden by budget expansion; a human confirms it with `reviewloop acknowledge-token-anomaly` (see `reviewloop report --loop <id>`)');
   }
 
   // Calculate accumulated usage from durable spend records
@@ -72,7 +72,7 @@ export async function overrideLoopBudget({
 
   const effectiveLimits = resolveReviewLoopLimits(env, {
     gateCount,
-    budgetOverrides: existingOverridesObj,
+    budgetOverrides: { ...existingOverridesObj, ...callCeilingsFromState(workflow) },
   });
 
   const previousUsageLimit = effectiveLimits.maxUsageVolume;
@@ -121,9 +121,6 @@ export async function overrideLoopBudget({
   };
 
   const existingOverrides = Array.isArray(loop.budgetOverrides) ? loop.budgetOverrides : [];
-  loop.budgetOverrides = [...existingOverrides, record];
-  if (parsedUsage != null) loop.maxUsageVolumeOverride = parsedUsage;
-  if (parsedCost != null) loop.maxCostUsdOverride = parsedCost;
 
   // If the loop was halted in HUMAN_REQUIRED due to spend denial, restore it to REWORK
   // so the Worker can continue with the new authorized ceiling.
@@ -137,7 +134,7 @@ export async function overrideLoopBudget({
   //    token anomaly (MODEL_SPEND_TOKEN_ANOMALY_BLOCKED), call ceilings, etc.
   // 3. Exhausted limit clearance: The new ceiling must actually clear the limit that was
   //    exhausted (e.g. raising only --max-cost cannot restore a usage-exhausted loop).
-  let stateRestored = false;
+  let canRestore = false;
   if (loop.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
     const lastTransition = [...(loop.history ?? [])]
       .reverse()
@@ -192,34 +189,36 @@ export async function overrideLoopBudget({
       // The new ceiling must actually clear the limit that was exhausted.
       const wasVolumeOrCostExhausted = usageExhausted || costExhausted;
 
-      const canRestore = wasVolumeOrCostExhausted
+      canRestore = wasVolumeOrCostExhausted
         && (!usageExhausted || usageCleared)
         && (!costExhausted || costCleared);
+    }
+  }
 
+  let stateRestored = false;
+  await commitGuardedUpdate({
+    persistence,
+    loopId,
+    before,
+    action: 'overriding the loop budget',
+    buildPatch: () => {
+      loop.budgetOverrides = [...existingOverrides, record];
+      if (parsedUsage != null) loop.maxUsageVolumeOverride = parsedUsage;
+      if (parsedCost != null) loop.maxCostUsdOverride = parsedCost;
       if (canRestore) {
         recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human budget override: ${reason}`);
         recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human budget override: ${reason}`);
         loop.budgetExhausted = false;
         stateRestored = true;
       }
-    }
-  }
-
-  // Guard against lost updates if another actor modified the loop concurrently
-  const freshWorkflow = await persistence.readWorkflowState(loopId);
-  const freshLoop = freshWorkflow?.[STATE_KEY];
-  if (freshLoop && expectedUpdatedAt && freshLoop.updatedAt !== expectedUpdatedAt) {
-    throw new Error(
-      `concurrent modification detected in loop ${loopId} (state changed while preparing budget override)`,
-    );
-  }
-
-  await persistence.updateWorkflowState(loopId, {
-    [STATE_KEY]: loop,
-    budgetOverrides: {
-      maxUsageVolume: loop.maxUsageVolumeOverride ?? null,
-      maxCostUsd: loop.maxCostUsdOverride ?? null,
-      history: loop.budgetOverrides,
+      return {
+        [STATE_KEY]: loop,
+        budgetOverrides: {
+          maxUsageVolume: loop.maxUsageVolumeOverride ?? null,
+          maxCostUsd: loop.maxCostUsdOverride ?? null,
+          history: loop.budgetOverrides,
+        },
+      };
     },
   });
 

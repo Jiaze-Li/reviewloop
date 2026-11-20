@@ -7,6 +7,8 @@ import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
 import { buildReviewRecord } from './reviewRecord.js';
+import { safeBuildHumanRequiredReport } from './humanRequiredReport.js';
+import { readLoopWorkflow } from './humanActionGuard.js';
 import {
   createDesignTwoStageRunner, decideDesignTransition, finalizePassComment, initialDesignTwoStageState, DESIGN_LIMITS,
 } from './designTwoStage.js';
@@ -432,7 +434,8 @@ export function createReviewLoopController({
           reason: 'another reviewloop_review is already running for this loop'
             + (lease.heldBy?.pid ? ` (holder pid ${lease.heldBy.pid} on ${lease.heldBy.host ?? '?'})` : '')
             + '; wait for it to finish, then call reviewloop_review again',
-          nextAction: 'Wait for the in-flight review of this loop to finish, then call reviewloop_review again.',
+          nextAction: 'Wait for the in-flight review of this loop to finish, then call reviewloop_review again. If it never finishes, a human can run `reviewloop lock-status --loop '
+            + `${loopId}\` to see who holds the loop (the lock is never reclaimed while that process is alive).`,
           telemetry: { ...emptyTelemetry(), note: 'another process owns this loop; telemetry not read to keep this path side-effect-free' },
           safetyEvents: [],
         };
@@ -454,6 +457,25 @@ export function createReviewLoopController({
             safetyEvents: [],
           };
         }
+        // A state record that cannot be parsed is not a crash to hand back raw:
+        // the human gets the standard report (preserve-evidence steps, no
+        // in-place repair promise). Anything else is rethrown unchanged.
+        const unreadable = await readLoopWorkflow(persistence, loopId);
+        if (unreadable.status === 'UNREADABLE') {
+          return withStatusLine(loopId, {
+            status: 'HUMAN_REQUIRED',
+            loopId,
+            terminal: true,
+            stateUnreadable: {
+              errorClass: unreadable.errorClass,
+              errorMessage: unreadable.errorMessage,
+              dir: typeof persistence.workflowDir === 'function' ? persistence.workflowDir(loopId) : null,
+            },
+            reason: 'the durable state record of this task cannot be read; nothing was changed',
+            telemetry: emptyTelemetry(),
+            safetyEvents: [],
+          });
+        }
         throw err;
       } finally {
         activeLeaseGuards.delete(loopId);
@@ -474,17 +496,29 @@ export function createReviewLoopController({
     if (!result || typeof result !== 'object') return result;
     let taskType = 'code';
     let reviewRecord;
+    let loadedLoop = null;
     try {
-      const loaded = await loadLoop(loopId);
-      taskType = loaded.objective?.taskType ?? 'code';
-      reviewRecord = buildReviewRecord(loaded, result);
+      loadedLoop = await loadLoop(loopId);
+      taskType = loadedLoop.objective?.taskType ?? 'code';
+      reviewRecord = buildReviewRecord(loadedLoop, result);
     } catch {
       reviewRecord = buildReviewRecord(null, { ...result, loopId });
     }
+    // HUMAN_REQUIRED always carries the standard report (read-only, zero model
+    // calls, never throws): the cause must be visible in the first status line.
+    let humanRequired = null;
+    if (result.status === 'HUMAN_REQUIRED') {
+      let workflow = null;
+      try { workflow = await persistence.readWorkflowState(loopId); } catch { /* degrade inside the builder */ }
+      humanRequired = safeBuildHumanRequiredReport({ loopId, loop: loadedLoop ?? workflow?.reviewLoop ?? null, workflow, result });
+    }
     return {
       ...result,
-      statusLine: reviewStatusLine({ taskType, loopId, round: result.round, status: result.status }),
+      statusLine: reviewStatusLine({
+        taskType, loopId, round: result.round, status: result.status, headline: humanRequired?.headline,
+      }),
       reviewRecord,
+      ...(humanRequired ? { humanRequiredReport: humanRequired, reportText: humanRequired.reportText } : {}),
     };
   }
 
@@ -1659,7 +1693,10 @@ export function createReviewLoopController({
       status: loopState.state, loopId: loopState.loopId, round: loopState.round,
       terminal: true,
       budgetExhausted: budgetExhausted || undefined,
-      reason: budgetExhausted
+      reason: loopState.state === REVIEW_LOOP_STATES.STOPPED && loopState.humanStop
+        ? `this task was ended by a human (${String(loopState.humanStop.reason ?? '').slice(0, 160)}); all records are kept. `
+          + 'Report to the user and stop; do NOT reviewloop_begin again in this task. Continuing the same work needs a new, explicit user instruction.'
+        : budgetExhausted
         ? 'this loop already reached HUMAN_REQUIRED — its review-round budget is spent. Report to the '
           + 'user and stop; do NOT reviewloop_begin again in this task. A new user instruction starts a fresh loop.'
         : 'loop already terminal',

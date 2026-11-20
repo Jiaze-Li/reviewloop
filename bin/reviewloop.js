@@ -4,7 +4,12 @@
 //   reviewloop doctor       zero-token prerequisite + repo-invariant check
 //   reviewloop status       list local ReviewLoop sessions and their state
 //   reviewloop profile      read-only per-loop physical-call/token breakdown
+//   reviewloop report       read-only HUMAN_REQUIRED report rebuilt from the durable loop state
+//   reviewloop acknowledge-token-anomaly  human confirmation of a tripped Token Sentinel stop
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
+//   reviewloop extend-calls task-level: more Reviewer/Supervisor calls for ONE loop (audited)
+//   reviewloop stop-loop    human end of a task: STOPPED, every record kept
+//   reviewloop lock-status  read-only: who holds a loop's lock and what to do about it
 //   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
 //   reviewloop uninstall    remove the global ReviewLoop integration
@@ -20,10 +25,16 @@ import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { runCliCommand } from '../scripts/cliLink.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
-import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
+import { acquireLoopFileLease, describeLoopLease } from '../src/reviewloop/loopLease.js';
+import { leaseRefusalMessage } from '../src/reviewloop/leaseGuidance.js';
+import { extendCalls, effectiveCallLimits } from '../src/reviewloop/callAllowance.js';
+import { stopLoop } from '../src/reviewloop/loopStop.js';
+import { readLoopWorkflow } from '../src/reviewloop/humanActionGuard.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
+import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
+import { buildHumanRequiredReport } from '../src/reviewloop/humanRequiredReport.js';
 import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenProfile.js';
 import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInspect.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
@@ -61,6 +72,19 @@ async function listSessions() {
   if (!found) console.log('No ReviewLoop sessions found.');
 }
 
+// Take the loop lease for a human action, or explain exactly why not. Never
+// deletes or overwrites a lock and never signals the holder (leaseGuidance.js).
+async function takeLoopLease(loopId, action) {
+  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+  if (lease.ok) return lease;
+  let held = lease.heldBy;
+  try {
+    const seen = await describeLoopLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+    if (seen.status === 'HELD') held = seen;
+  } catch { /* keep the raw holder record */ }
+  throw new Error(leaseRefusalMessage({ action, loopId, held }));
+}
+
 function flagValue(args, name) {
   const eq = args.find((x) => x.startsWith(`${name}=`));
   if (eq) return eq.slice(name.length + 1);
@@ -81,15 +105,7 @@ async function acknowledgeSpend(rest) {
     );
   }
 
-  const lease = await acquireLoopFileLease({
-    runtimeRoot: REVIEWLOOP_RUNTIME_ROOT,
-    loopId,
-  });
-  if (!lease.ok) {
-    throw new Error(
-      `cannot acknowledge spend while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`,
-    );
-  }
+  const lease = await takeLoopLease(loopId, 'acknowledge spend');
   try {
     const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
     const result = await acknowledgeUnresolvedSpend({
@@ -112,24 +128,146 @@ async function acknowledgeSpend(rest) {
   }
 }
 
+async function currentCallLimits(persistence, loopId) {
+  const read = await readLoopWorkflow(persistence, loopId);
+  if (read.status !== 'OK') return null; // the action itself reports unknown/unreadable
+  return effectiveCallLimits({ workflow: read.workflow });
+}
+
 async function reopenGate(rest) {
   const loopId = flagValue(rest, '--loop');
   const reason = flagValue(rest, '--reason');
-  if (!loopId || !reason) throw new Error('usage: reviewloop reopen-gate --loop <loopId> --reason "<why this gate should get another attempt>"');
-  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
-  if (!lease.ok) {
-    throw new Error(`cannot reopen while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`);
-  }
+  if (!loopId || !reason) throw new Error('usage: reviewloop reopen-gate --loop <loopId> --reason "<why this gate should get another attempt>" [--max-reviewer-calls <n>] [--max-supervisor-calls <n>]  (the call budget is required from the 4th reopen on)');
+  const lease = await takeLoopLease(loopId, 'reopen the gate');
   try {
-    const result = await reopenExhaustedGate({ persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, reason });
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await reopenExhaustedGate({
+      persistence, loopId, reason,
+      allowance: { reviewerCalls: flagValue(rest, '--max-reviewer-calls'), supervisorCalls: flagValue(rest, '--max-supervisor-calls') },
+      currentLimits: await currentCallLimits(persistence, loopId),
+    });
     console.log('Gate reopened with a fresh convergence budget.');
-    console.log(`  loop: ${result.loopId}  (human reopen ${result.reopens})`);
+    console.log(`  loop: ${result.loopId}  (human reopen ${result.reopens}, ${result.tier})`);
     console.log('  kept: objective, baseline, completed phases, model spend, call ceilings');
-    console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; raise MAX_REVIEWER_CALLS / MAX_SUPERVISOR_CALLS in reviewloop.settings.json if they are the limit');
+    for (const a of result.allowance ?? []) console.log(`  call ceiling enforced for this loop (${a.role}): ${a.previousCeiling} -> ${a.newCeiling} (used ${a.usedAtGrant}, this attempt may use ${a.granted})`);
+    console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; if they are the limit, `reviewloop extend-calls` raises them for THIS loop only');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
   } finally {
     await lease.release();
   }
+}
+
+async function report(rest) {
+  const loopId = flagValue(rest, '--loop');
+  if (!loopId) throw new Error('usage: reviewloop report --loop <loopId> [--json]');
+  const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+  const read = await readLoopWorkflow(persistence, loopId);
+  if (read.status === 'MISSING') throw new Error(`unknown loopId ${loopId}: no task with that id was found`);
+  if (read.status === 'UNREADABLE') {
+    // Not a crash: the standard report, with the steps that keep the evidence.
+    const unreadable = buildHumanRequiredReport({
+      loopId, loop: null, workflow: null,
+      result: {
+        stateUnreadable: {
+          errorClass: read.errorClass, errorMessage: read.errorMessage, dir: persistence.workflowDir(loopId),
+        },
+      },
+    });
+    console.log(rest.includes('--json') ? JSON.stringify(unreadable, null, 2) : unreadable.reportText);
+    return;
+  }
+  const { workflow, loop } = read;
+  if (loop.state !== 'HUMAN_REQUIRED') {
+    throw new Error(`loop is ${loop.state}; a HUMAN_REQUIRED report only exists for a loop waiting for a human`);
+  }
+  const built = buildHumanRequiredReport({ loopId, loop, workflow });
+  console.log(rest.includes('--json') ? JSON.stringify(built, null, 2) : built.reportText);
+}
+
+async function acknowledgeAnomaly(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const latchAt = flagValue(rest, '--latch');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !latchAt || !reason) {
+    throw new Error('usage: reviewloop acknowledge-token-anomaly --loop <loopId> --latch <latch timestamp shown in the report> --reason "<why continuing is safe>" [--max-reviewer-calls <n>] [--max-supervisor-calls <n>]  (the call budget is required from the 4th acknowledgement on)');
+  }
+  const lease = await takeLoopLease(loopId, 'acknowledge the token anomaly');
+  try {
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await acknowledgeTokenAnomaly({
+      persistence, loopId, latchAt, reason,
+      allowance: { reviewerCalls: flagValue(rest, '--max-reviewer-calls'), supervisorCalls: flagValue(rest, '--max-supervisor-calls') },
+      currentLimits: await currentCallLimits(persistence, loopId),
+    });
+    console.log('Token Sentinel stop acknowledged by a human.');
+    console.log(`  loop: ${result.loopId}  (acknowledgement ${result.acknowledgements}, ${result.tier})`);
+    for (const a of result.allowance ?? []) console.log(`  call ceiling enforced for this loop (${a.role}): ${a.previousCeiling} -> ${a.newCeiling} (used ${a.usedAtGrant}, this attempt may use ${a.granted})`);
+    console.log(`  event: ${result.trigger ?? '?'} latched at ${result.latchAt}; ${result.acknowledgedRecords} existing spend record(s) will not re-latch`);
+    console.log('  kept: spend ledger, anomaly record, objective, baseline, phases, evidence, other safety stops');
+    console.log('  note: a NEW over-threshold call latches again; budgets, call ceilings and the independent Reviewer still apply');
+    console.log('  note: identical evidence is never re-sent (no-new-information rule); the Worker must change the code/evidence materially before the next review');
+    console.log('Next: tell the Worker to fix what the report pointed at, then call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function extendCallsCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reviewerCalls = flagValue(rest, '--reviewer-calls');
+  const supervisorCalls = flagValue(rest, '--supervisor-calls');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason || (!reviewerCalls && !supervisorCalls)) {
+    throw new Error('usage: reviewloop extend-calls --loop <loopId> --reviewer-calls <n> [--supervisor-calls <n>] --reason "<why this loop needs more calls>"');
+  }
+  const lease = await takeLoopLease(loopId, 'extend the call allowance');
+  try {
+    const result = await extendCalls({
+      persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, reviewerCalls, supervisorCalls, reason,
+    });
+    console.log('Call allowance extended for this loop only.');
+    console.log(`  loop: ${result.loopId}  (state stays ${result.loopState})`);
+    for (const g of result.granted) console.log(`  ${g.role} calls: ceiling ${g.previousCeiling} -> ${g.newCeiling} (used ${g.usedAtGrant}, granted ${g.granted} more)`);
+    console.log('  kept: global settings and every other loop are untouched; budgets, the Token Sentinel and the independent Reviewer still apply');
+    console.log('Next: tell the Worker to call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function stopLoopCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason) throw new Error('usage: reviewloop stop-loop --loop <loopId> --reason "<why this task is being ended>"');
+  const lease = await takeLoopLease(loopId, 'stop the loop');
+  try {
+    const result = await stopLoop({ persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, reason });
+    if (result.alreadyStopped) {
+      console.log(`Loop ${result.loopId} was already stopped${result.stoppedAt ? ` (at ${result.stoppedAt})` : ''}; nothing was changed.`);
+    } else {
+      console.log('Task ended by a human (STOPPED).');
+      console.log(`  loop: ${result.loopId}  (was ${result.priorState}, round ${result.round})`);
+      console.log('  kept: every spend record, the Token Sentinel record and confirmations, evidence, contract, baseline and the full history');
+      console.log('  note: this is not a pass; no further model call is made for this loop, and it cannot be resumed');
+      console.log('Next: continuing the same work needs a new, explicit instruction to start a new task.');
+    }
+  } finally {
+    await lease.release();
+  }
+}
+
+async function lockStatusCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  if (!loopId) throw new Error('usage: reviewloop lock-status --loop <loopId>');
+  const seen = await describeLoopLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+  if (seen.status === 'FREE') { console.log(`No lock is held for ${loopId}.`); return; }
+  if (seen.status === 'MALFORMED') { console.log(`The lock file for ${loopId} is unreadable as JSON; the next command reclaims it by itself.`); return; }
+  if (seen.status === 'UNREADABLE') { console.log(`The lock file for ${loopId} cannot be read (${seen.error}); nothing can be proven about its owner.`); return; }
+  if (seen.status === 'RECLAIMABLE') {
+    console.log(`The lock for ${loopId} belongs to a process that is gone (pid ${seen.pid} on ${seen.host}); the next command reclaims it by itself.`);
+    return;
+  }
+  console.log(leaseRefusalMessage({ action: 'run a recovery command', loopId, held: seen }));
 }
 
 async function overrideBudget(rest) {
@@ -140,10 +278,7 @@ async function overrideBudget(rest) {
   if (!loopId || !reason || (!maxUsage && !maxCost)) {
     throw new Error('usage: reviewloop override-budget --loop <loopId> --reason "<explanation>" [--max-usage <tokens>] [--max-cost <usd>]');
   }
-  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
-  if (!lease.ok) {
-    throw new Error(`cannot override budget while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`);
-  }
+  const lease = await takeLoopLease(loopId, 'override the budget');
   try {
     const result = await overrideLoopBudget({
       persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT),
@@ -439,8 +574,23 @@ async function main() {
     case 'reopen-gate':
       await reopenGate(rest);
       break;
+    case 'report':
+      await report(rest);
+      break;
+    case 'acknowledge-token-anomaly':
+      await acknowledgeAnomaly(rest);
+      break;
     case 'override-budget':
       await overrideBudget(rest);
+      break;
+    case 'extend-calls':
+      await extendCallsCommand(rest);
+      break;
+    case 'stop-loop':
+      await stopLoopCommand(rest);
+      break;
+    case 'lock-status':
+      await lockStatusCommand(rest);
       break;
     case 'resume':
       await resume(rest);
@@ -467,7 +617,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|lock-status|contract|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);

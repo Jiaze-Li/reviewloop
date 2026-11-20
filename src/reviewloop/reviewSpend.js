@@ -26,7 +26,9 @@ import { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageV
 export { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageVolumeOf, accountingProvenanceOf, usageBreakdownOf, payloadMetaOf, effectiveContextInputTokens, contextOverheadTokens } from './usageAccounting.js';
 import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../orchestrator/modelSpendReservation.js';
 import { AuthorizationError, AUTHORIZATION_ERROR_CODES, isAuthorizationFailure } from '../orchestrator/errors.js';
+import { ackIdForRecord, acknowledgedIds, TOKEN_ANOMALY_ACKS_KEY } from './tokenAnomalyAck.js';
 import { parsePositiveNumber, parsePositiveInt, parseBoundedNumber } from './settingsFile.js';
+import { callCeilingsFromState } from './humanActionGuard.js';
 import {
   NewInformationLedger,
   InformationStore,
@@ -166,6 +168,14 @@ export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budg
     if (Number.isFinite(budgetOverrides.maxCostUsd) && budgetOverrides.maxCostUsd > 0) {
       resolved.maxCostUsd = budgetOverrides.maxCostUsd;
     }
+    // Task-level call ceilings a human set for this loop (extend-calls, or the
+    // call allowance attached to an extended confirmation).
+    if (Number.isInteger(budgetOverrides.maxReviewerCalls) && budgetOverrides.maxReviewerCalls > 0) {
+      resolved.maxReviewerCalls = budgetOverrides.maxReviewerCalls;
+    }
+    if (Number.isInteger(budgetOverrides.maxSupervisorCalls) && budgetOverrides.maxSupervisorCalls > 0) {
+      resolved.maxSupervisorCalls = budgetOverrides.maxSupervisorCalls;
+    }
   }
   return resolved;
 }
@@ -191,10 +201,12 @@ export class ReviewLoopSpendStore {
     const fromLoop = state?.reviewLoop;
     const maxUsageVolume = fromRoot?.maxUsageVolume ?? fromLoop?.maxUsageVolumeOverride ?? null;
     const maxCostUsd = fromRoot?.maxCostUsd ?? fromLoop?.maxCostUsdOverride ?? null;
-    if (maxUsageVolume != null || maxCostUsd != null) {
+    const callCeilings = callCeilingsFromState(state);
+    if (maxUsageVolume != null || maxCostUsd != null || Object.keys(callCeilings).length) {
       return {
         ...(maxUsageVolume != null ? { maxUsageVolume: Number(maxUsageVolume) } : {}),
         ...(maxCostUsd != null ? { maxCostUsd: Number(maxCostUsd) } : {}),
+        ...callCeilings,
       };
     }
     return null;
@@ -250,6 +262,14 @@ export class ReviewLoopTokenAnomalyStore {
     const state = await this._persistence.readWorkflowState(loopId);
     const raw = state?.[TOKEN_ANOMALY_STATE_KEY];
     return raw && raw.tripped === true ? raw : null;
+  }
+
+  // Append-only human acknowledgements of earlier latches (see tokenAnomalyAck.js).
+  async loadAcks(loopId) {
+    if (!loopId || !this._persistence || typeof this._persistence.readWorkflowState !== 'function') return [];
+    const state = await this._persistence.readWorkflowState(loopId);
+    const raw = state?.[TOKEN_ANOMALY_ACKS_KEY];
+    return Array.isArray(raw) ? raw : [];
   }
 
   // Returns { persisted } — `persisted:true` ONLY when the latch is durably on
@@ -429,7 +449,22 @@ export function createReviewLoopSpend({
         { loopId },
       );
     }
-    for (const r of records) {
+    // Spend records a human already acknowledged (acknowledge-token-anomaly)
+    // must not re-latch on restart. An unreadable acknowledgement list is
+    // UNKNOWN, never "none": fail closed like an unreadable latch.
+    let acknowledged;
+    try {
+      acknowledged = acknowledgedIds(await anomalyStore.loadAcks(loopId));
+    } catch (error) {
+      throw new AuthorizationError(
+        AUTHORIZATION_ERROR_CODES.MODEL_SPEND_TOKEN_ANOMALY_STATE_UNAVAILABLE,
+        `token anomaly re-inference could not read the human acknowledgements for ${JSON.stringify(loopId)} `
+          + `(${error?.message ?? error}); further internal model spend is blocked until this can be established`,
+        { loopId },
+      );
+    }
+    for (const [recordIndex, r] of records.entries()) {
+      if (acknowledged.has(ackIdForRecord(r, recordIndex))) continue;
       const uv = Number.isFinite(r.usageVolume) ? r.usageVolume : null;
       const co = Number.isFinite(r.contextOverheadTokens) ? r.contextOverheadTokens : null;
       // Only a record whose volume settled reliably can trip on usage.
