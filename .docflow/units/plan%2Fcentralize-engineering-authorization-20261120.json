@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:36:30.134Z",
+  "updatedAt": "2026-11-20T07:41:22.252Z",
   "task": {
     "id": "plan/centralize-engineering-authorization-20261120",
     "branch": "plan/centralize-engineering-authorization-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/centralize-engineering-authorization-20261120",
     "started": "2026-11-20T15:08:36+08:00",
     "status": "In progress",
-    "current": "Align chatgpt.md and lead.md authorization rules with engineering/authorization.md",
+    "current": "Use exact carryForwardInvariants phase field name in COMMON.md",
     "next": "等待第 61 号拉取请求的自动复审与持续集成结果，确认就绪后再决定是否合并",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-20T15:36:12+08:00",
         "text": "Centralize engineering authorization policy into engineering/authorization.md"
+      },
+      {
+        "at": "2026-11-20T15:41:09+08:00",
+        "text": "Align chatgpt.md and lead.md authorization rules with engineering/authorization.md"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "plan/centralize-engineering-authorization-20261120",
         "timestamp": "2026-11-20T15:36:12+08:00",
         "message": "Align chatgpt.md and lead.md authorization rules with engineering/authorization.md"
+      },
+      {
+        "sha": "cc9f555e6af346219662dbf971d96b675a2a36ca",
+        "branch": "plan/centralize-engineering-authorization-20261120",
+        "timestamp": "2026-11-20T15:41:09+08:00",
+        "message": "Use exact carryForwardInvariants phase field name in COMMON.md"
       }
     ],
     "pr": {
