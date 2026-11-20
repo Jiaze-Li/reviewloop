@@ -19,7 +19,14 @@
         "message": "chore(plan): bootstrap HUMAN_REQUIRED diagnosis and recovery draft PR (empty tree)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 59,
+      "state": "open",
+      "title": "plan: diagnose HUMAN_REQUIRED failures and enable audited human recovery",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/59",
+      "merged": false,
+      "updatedAt": "2026-11-20T03:54:21Z"
+    },
     "completed": null,
     "outcome": null
   }
