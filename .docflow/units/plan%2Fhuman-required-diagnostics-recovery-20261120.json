@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:32:13.135Z",
+  "updatedAt": "2026-11-20T07:26:28.489Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
     "title": "plan/human-required-diagnostics-recovery-20261120",
     "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
     "started": "2026-11-20T11:54:16+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Share controller loop lock and full-snapshot guard across all human recovery actions",
     "next": "等待 PR 59 自动复审与测试检查通过后决定是否合并",
     "history": [
@@ -92,13 +92,15 @@
     ],
     "pr": {
       "number": 59,
-      "state": "open",
+      "state": "closed",
       "title": "plan: diagnose HUMAN_REQUIRED failures and enable audited human recovery",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/59",
-      "merged": false,
-      "updatedAt": "2026-11-20T06:32:00Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T07:26:19Z",
+      "closedAt": "2026-11-20T07:26:19Z",
+      "updatedAt": "2026-11-20T07:26:19Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T07:26:19Z",
+    "outcome": "Merged"
   }
 }
