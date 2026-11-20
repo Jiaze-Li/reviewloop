@@ -8,6 +8,7 @@
 // The digest is a content-consistency check, NOT a proof of Design PASS or of
 // user authorization.
 import { createHash } from 'node:crypto';
+import { constants as fsConstantsDefault } from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
@@ -185,4 +186,77 @@ export async function readRepoFile({ cwd, rel, maxBytes }) {
   let text;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { fail('DESIGN_TARGET_NOT_UTF8', `${rel} is not valid UTF-8`); }
   return { path: rel, text, bytes: buf.length };
+}
+
+// Hardened, bounded, strict-UTF-8 read of a tracked repository file for
+// line-range EXCERPTS (Design v1.0 §4 steps 2-3). Unlike readRepoFile (kept
+// unchanged, I5) the final component is opened with O_NOFOLLOW|O_NONBLOCK and
+// the open handle is re-checked with fstat (regular file, same dev/ino as the
+// lstat walk, size within the scan cap), then at most size+1 bytes are read.
+// The scan cap is a LOCAL read bound only; models never see more than the
+// requested excerpt. Returns the raw bytes so callers can compare them with
+// the committed blob byte-for-byte.
+export async function readRepoFileBytesBounded({ cwd, rel, maxBytes, fsConstants = fsConstantsDefault }) {
+  const found = await lstatNoSymlinks(cwd, rel);
+  if (found.missing) fail('DESIGN_TARGET_MISSING', `${rel} does not exist`);
+  if (!found.stat.isFile()) fail('DESIGN_TARGET_NOT_FILE', `${rel} is not a regular file`);
+  if (found.stat.size > maxBytes) fail('DESIGN_SOURCE_TOO_LARGE', `${rel} exceeds the ${maxBytes}-byte source scan cap`);
+  const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fsConstants ?? {};
+  // Fail closed where the platform cannot refuse a symlink or a blocking FIFO
+  // at open time (e.g. Windows): the protection must never silently vanish.
+  if (typeof O_RDONLY !== 'number' || typeof O_NOFOLLOW !== 'number' || typeof O_NONBLOCK !== 'number') {
+    fail('DESIGN_TARGET_UNREADABLE', `${rel}: this platform cannot open files with O_NOFOLLOW/O_NONBLOCK; excerpt reads are refused`);
+  }
+  let fh;
+  try {
+    fh = await fsp.open(path.join(cwd, rel), O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+  } catch (err) {
+    if (err?.code === 'ELOOP' || err?.code === 'EMLINK') fail('DESIGN_TARGET_SYMLINK', `${rel} became a symbolic link; refusing to follow it`);
+    fail('DESIGN_TARGET_UNREADABLE', `cannot open ${rel}: ${err?.code ?? err?.message ?? err}`);
+  }
+  let raw;
+  try {
+    let st;
+    try { st = await fh.stat(); } catch (err) { fail('DESIGN_TARGET_UNREADABLE', `cannot stat ${rel}: ${err?.code ?? err}`); }
+    if (!st.isFile()) fail('DESIGN_TARGET_NOT_FILE', `${rel} is not a regular file`);
+    if (st.dev !== found.stat.dev || st.ino !== found.stat.ino) {
+      fail('DESIGN_TARGET_UNREADABLE', `${rel} changed between the path check and open`);
+    }
+    if (st.size > maxBytes) fail('DESIGN_SOURCE_TOO_LARGE', `${rel} exceeds the ${maxBytes}-byte source scan cap`);
+    const cap = st.size + 1;
+    const buf = Buffer.alloc(cap);
+    let off = 0;
+    while (off < cap) {
+      let bytesRead;
+      // eslint-disable-next-line no-await-in-loop
+      try { ({ bytesRead } = await fh.read(buf, off, cap - off, off)); } catch (err) {
+        fail('DESIGN_TARGET_UNREADABLE', `cannot read ${rel}: ${err?.code ?? err}`);
+      }
+      if (bytesRead === 0) break;
+      off += bytesRead;
+    }
+    if (off > st.size) fail('DESIGN_SOURCE_CHANGED', `${rel} changed during read`);
+    raw = buf.subarray(0, off);
+  } finally {
+    await fh.close().catch(() => {});
+  }
+  let text;
+  try {
+    // ignoreBOM keeps a leading BOM as part of line 1, so text <-> bytes is lossless.
+    text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw);
+  } catch {
+    fail('DESIGN_TARGET_NOT_UTF8', `${rel} is not valid UTF-8`);
+  }
+  return { path: rel, raw, text, bytes: raw.length };
+}
+
+// Line rule (Design v1.0 §4 step 4): split on "\n", 1-based; a trailing "\n" at
+// EOF does not create an extra line; "\r", a BOM and every other byte stay
+// verbatim. An empty file has 0 lines.
+export function splitSourceLines(text) {
+  const s = String(text ?? '');
+  if (s === '') return [];
+  const lines = s.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  return lines;
 }

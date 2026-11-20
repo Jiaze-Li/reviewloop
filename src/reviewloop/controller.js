@@ -1336,7 +1336,7 @@ export function createReviewLoopController({
 
     const adj = out.adjudication;
     const dirtyVerifiedPaths = new Set(
-      (out.factVerification?.checkedFiles ?? []).filter((f) => f.dirty).map((f) => f.path),
+      (out.factVerification?.checkedFiles ?? []).filter((f) => f.dirty).map((f) => f.citation ?? f.path),
     );
     const decision = decideDesignTransition({
       adjudication: adj,
