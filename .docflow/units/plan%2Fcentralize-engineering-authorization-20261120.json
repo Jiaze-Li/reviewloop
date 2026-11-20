@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:31:04.564Z",
+  "updatedAt": "2026-11-20T07:36:23.371Z",
   "task": {
     "id": "plan/centralize-engineering-authorization-20261120",
     "branch": "plan/centralize-engineering-authorization-20261120",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/centralize-engineering-authorization-20261120",
     "started": "2026-11-20T15:08:36+08:00",
     "status": "In progress",
-    "current": "Centralize engineering authorization policy into engineering/authorization.md",
+    "current": "Align chatgpt.md and lead.md authorization rules with engineering/authorization.md",
     "next": "等待第 61 号拉取请求的自动审查与持续集成结果，确认无误后决定是否合并",
     "history": [
       {
         "at": "2026-11-20T15:30:44+08:00",
         "text": "chore: bootstrap authorization policy planning PR (no file changes)"
+      },
+      {
+        "at": "2026-11-20T15:36:12+08:00",
+        "text": "Centralize engineering authorization policy into engineering/authorization.md"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/centralize-engineering-authorization-20261120",
         "timestamp": "2026-11-20T15:30:44+08:00",
         "message": "Centralize engineering authorization policy into engineering/authorization.md"
+      },
+      {
+        "sha": "931de65e43f91cf4e7fd0e69848cac127eb38606",
+        "branch": "plan/centralize-engineering-authorization-20261120",
+        "timestamp": "2026-11-20T15:36:12+08:00",
+        "message": "Align chatgpt.md and lead.md authorization rules with engineering/authorization.md"
       }
     ],
     "pr": {
