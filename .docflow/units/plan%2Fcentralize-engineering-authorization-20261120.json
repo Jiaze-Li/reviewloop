@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:08:45.544Z",
+  "updatedAt": "2026-11-20T07:09:00.297Z",
   "task": {
     "id": "plan/centralize-engineering-authorization-20261120",
     "branch": "plan/centralize-engineering-authorization-20261120",
@@ -19,7 +19,14 @@
         "message": "chore: bootstrap authorization policy planning PR (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 61,
+      "state": "open",
+      "title": "plan: centralize engineering authorization policy",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/61",
+      "merged": false,
+      "updatedAt": "2026-11-20T07:08:39Z"
+    },
     "completed": null,
     "outcome": null
   }
