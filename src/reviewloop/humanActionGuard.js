@@ -1,8 +1,12 @@
 // Shared building blocks for the explicit HUMAN recovery actions
 // (acknowledge-token-anomaly, reopen-gate, extend-calls, stop-loop).
 //
-// Leaf module on purpose (no imports): the actions, the spend authority and the
-// report builder all depend on it, so it must not depend on any of them.
+// Leaf module on purpose (imports only loopLease.js + node:crypto): the
+// actions, the spend authority and the report builder all depend on it, so it
+// must not depend on any of them.
+
+import { createHash } from 'node:crypto';
+import { withInProcessLoopLock } from './loopLease.js';
 //
 //   * assertUnchanged   - re-read right before the single write and refuse if
 //                         anything the decision was based on has moved.
@@ -49,7 +53,8 @@ export function parseCallCount(value, { name, max }) {
   return n;
 }
 
-// Key facts a human decision is based on. Callers compare before/after.
+// Key facts a human decision is based on, plus a full-snapshot digest so a
+// concurrent change to any workflow field (not just summary counts) is caught.
 export function fingerprint(workflow) {
   const loop = workflow?.reviewLoop;
   return {
@@ -61,6 +66,7 @@ export function fingerprint(workflow) {
     records: Array.isArray(workflow?.[SPEND_STATE_KEY]?.records) ? workflow[SPEND_STATE_KEY].records.length : 0,
     allowanceEntries: Array.isArray(workflow?.[CALL_ALLOWANCE_KEY]?.history) ? workflow[CALL_ALLOWANCE_KEY].history.length : 0,
     reopens: Array.isArray(loop?.humanReopens) ? loop.humanReopens.length : 0,
+    snapshotHash: createHash('sha256').update(JSON.stringify(workflow ?? null)).digest('hex'),
   };
 }
 
@@ -72,32 +78,12 @@ export async function assertUnchanged({ persistence, loopId, before, action }) {
   }
 }
 
-const persistenceLoopLocks = new WeakMap();
-
-async function withLoopLock(persistence, loopId, fn) {
-  let byLoop = persistenceLoopLocks.get(persistence);
-  if (!byLoop) {
-    byLoop = new Map();
-    persistenceLoopLocks.set(persistence, byLoop);
-  }
-  const prev = byLoop.get(loopId) ?? Promise.resolve();
-  let release;
-  const mine = new Promise((resolve) => { release = resolve; });
-  const tail = prev.then(() => mine, () => mine);
-  byLoop.set(loopId, tail);
-  await prev;
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (byLoop.get(loopId) === tail) byLoop.delete(loopId);
-  }
-}
-
-// Serialize the pre-write re-read + single write per (persistence, loopId) so
-// two in-process actors cannot both pass assertUnchanged before either writes.
+// Serialize the pre-write re-read + single write on the controller's own
+// per-loop lock (`withInProcessLoopLock`), so a human action cannot interleave
+// between its check and write with a running review or another human action.
+// Cross-process exclusion is enforced by `acquireLoopFileLease` in bin/reviewloop.js.
 export async function commitGuardedUpdate({ persistence, loopId, before, action, buildPatch }) {
-  return withLoopLock(persistence, loopId, async () => {
+  return withInProcessLoopLock(loopId, async () => {
     await assertUnchanged({ persistence, loopId, before, action });
     const patch = typeof buildPatch === 'function' ? await buildPatch() : buildPatch;
     await persistence.updateWorkflowState(loopId, patch);

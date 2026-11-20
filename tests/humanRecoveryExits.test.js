@@ -7,6 +7,7 @@ import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import { extendCalls, effectiveCallLimits } from '../src/reviewloop/callAllowance.js';
 import { stopLoop } from '../src/reviewloop/loopStop.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
+import { withInProcessLoopLock } from '../src/reviewloop/loopLease.js';
 import { makeHarness, finding, MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 const ENV2 = { REVIEWLOOP_MAX_REVIEWER_CALLS: '2' };
@@ -248,4 +249,54 @@ test('two real concurrent recovery exits (extend-calls and stop-loop) against on
   const wf = await persistence.readWorkflowState('A');
   assert.equal(wf.reviewLoop.state, 'HUMAN_REQUIRED', 'losing stop-loop wrote nothing');
   assert.ok(wf.reviewLoopCallAllowance.maxReviewerCalls > 2, 'winning extend-calls persisted');
+});
+
+test('override-budget uses commitGuardedUpdate: racing override-budget and extend-calls lets only one win (F005)', async () => {
+  const persistence = new MemoryPersistence();
+  await persistence.updateWorkflowState('OV', { reviewLoop: loopRecord('OV') });
+  const s = createReviewLoopSpend({ loopId: 'OV', persistence, env: ENV2 });
+  await meter(s); await meter(s);
+  const realUpdate = persistence.updateWorkflowState.bind(persistence);
+  persistence.updateWorkflowState = async (id, patch) => {
+    await new Promise((r) => setTimeout(r, 20));
+    return realUpdate(id, patch);
+  };
+
+  const results = await Promise.allSettled([
+    overrideLoopBudget({ persistence, loopId: 'OV', maxUsage: 900000, reason: 'raise usage', env: ENV2 }),
+    extendCalls({ persistence, loopId: 'OV', reviewerCalls: 2, reason: 'raise calls', env: ENV2 }),
+  ]);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  const err = results.filter((r) => r.status === 'rejected');
+  assert.equal(ok.length, 1);
+  assert.equal(err.length, 1);
+  assert.match(err[0].reason.message, /concurrent modification/);
+});
+
+test('human action shares the controller in-process loop lock and refuses if a running review mutates any field (F004)', async () => {
+  const persistence = new MemoryPersistence();
+  await persistence.updateWorkflowState('LC', { reviewLoop: loopRecord('LC') });
+  const s = createReviewLoopSpend({ loopId: 'LC', persistence, env: ENV2 });
+  await meter(s); await meter(s);
+
+  // Simulate a live controller holding `withInProcessLoopLock('LC', ...)` and mutating
+  // a field outside the old summary counts (budgetOverrides) before releasing.
+  let releaseReview;
+  const reviewEntered = new Promise((resolve) => {
+    withInProcessLoopLock('LC', async () => {
+      resolve();
+      await new Promise((r) => { releaseReview = r; });
+      await persistence.updateWorkflowState('LC', { budgetOverrides: { maxUsageVolume: 999999 } });
+    });
+  });
+  await reviewEntered;
+
+  const actionPromise = extendCalls({ persistence, loopId: 'LC', reviewerCalls: 2, reason: 'r', env: ENV2 });
+  // Give extendCalls a tick to finish its initial read and block on withInProcessLoopLock.
+  await new Promise((r) => setTimeout(r, 15));
+  releaseReview();
+
+  await assert.rejects(() => actionPromise, /concurrent modification/);
+  const wf = await persistence.readWorkflowState('LC');
+  assert.equal(wf.reviewLoopCallAllowance, undefined, 'refused human action wrote nothing');
 });
