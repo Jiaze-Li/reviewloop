@@ -40,6 +40,10 @@ test('the prompt names the loop, the current phase, and forbids a new loop', () 
   assert.match(text, /keep model pure/, 'invariants from completed phases are carried');
   assert.match(text, /FULL CONTRACT/);
   assert.match(text, /git add/);
+  assert.match(text, /authorization\.md/);
+  assert.match(text, /handoff\.md/);
+  assert.doesNotMatch(text, /status, nextDiffScope, usageVolume/);
+  assert.doesNotMatch(text, /do not commit unless authorized/);
 });
 
 test('REWORK shows the findings; after the last phase it points at the final gate', () => {
