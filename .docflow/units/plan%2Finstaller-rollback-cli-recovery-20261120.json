@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:27:23.585Z",
+  "updatedAt": "2026-11-20T05:27:34.419Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
@@ -36,7 +36,7 @@
       "title": "plan: make global installation rollback safe and restore ReviewLoop CLI entry",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/60",
       "merged": false,
-      "updatedAt": "2026-11-20T04:27:23Z"
+      "updatedAt": "2026-11-20T05:27:16Z"
     },
     "completed": null,
     "outcome": null
