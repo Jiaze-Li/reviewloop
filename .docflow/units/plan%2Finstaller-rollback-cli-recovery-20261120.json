@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:39:39.833Z",
+  "updatedAt": "2026-11-20T05:39:44.370Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T12:26:52+08:00",
     "status": "In progress",
     "current": "Fix PR review findings: protect concurrent edits on rollback, stricter CLI link checks",
-    "next": "等待自动代码审查和检查结果；你决定后再修复本机那条失效的全局命令链接。",
+    "next": "等自动审查复核这轮修复；通过后你决定是否合并，并另行授权修复本机失效的全局命令链接。",
     "history": [
       {
         "at": "2026-11-20T13:27:13+08:00",
