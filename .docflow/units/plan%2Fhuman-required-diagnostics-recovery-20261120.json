@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:00:17.590Z",
+  "updatedAt": "2026-11-20T06:02:34.448Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
-    "current": "Fix review findings: recheck state before confirming a token stop, keep old header support",
+    "current": "Merge main into the human-required recovery branch (combine CLI usage lists)",
     "next": "新设计的代码已本地审查通过，等你授权提交并推送到 PR 59，之后由机器人重新审查",
     "history": [
       {
@@ -18,6 +18,14 @@
       {
         "at": "2026-11-20T12:29:59+08:00",
         "text": "Add standard HUMAN_REQUIRED report, Token Sentinel human recovery, and contract index header fix"
+      },
+      {
+        "at": "2026-11-20T14:01:56+08:00",
+        "text": "Fix review findings: recheck state before confirming a token stop, keep old header support"
+      },
+      {
+        "at": "2026-11-20T14:02:23+08:00",
+        "text": "Give every stopped task a human exit: stop-loop, per-task call limits, safe lock guidance"
       }
     ],
     "commits": [
@@ -38,6 +46,18 @@
         "branch": "plan/human-required-diagnostics-recovery-20261120",
         "timestamp": "2026-11-20T12:29:59+08:00",
         "message": "Fix review findings: recheck state before confirming a token stop, keep old header support"
+      },
+      {
+        "sha": "f9129934af5cec188d8675ba9c24bebec503b22f",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T14:01:56+08:00",
+        "message": "Give every stopped task a human exit: stop-loop, per-task call limits, safe lock guidance"
+      },
+      {
+        "sha": "e580ad397f567c2ab283f32bc158b7f5853ff23f",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T14:02:23+08:00",
+        "message": "Merge main into the human-required recovery branch (combine CLI usage lists)"
       }
     ],
     "pr": {
