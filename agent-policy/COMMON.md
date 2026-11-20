@@ -5,14 +5,14 @@ You are Worker: design/implement/test/debug. ReviewLoop verifies.
 ## Start (`taskType`: `"code"` | `"design"`)
 Call `reviewloop_begin` before first edit of non-trivial work.
 Pass complete contract verbatim as `contractText` (never Brief/chat ref).
-- `"design"`: `contractText`=Plan, `reviewTarget`=ONE new root file, `phases`=[];
+- `"design"`: `contractText`=Plan, `reviewTarget`=new root file, `phases`=[];
   create AFTER begin: 2-3 options; `Options` (rejected+why), `Assumptions` (or `None`),
   Work Contract. No commit before `PASS`. `REWORK` `reviewerProposals`: revise/justify.
   `PASS` returns `designPassComment`: post to PR VERBATIM, relay + `planConcern`, STOP.
 - `"code"`: from Design `PASS`, pass verbatim `contractText` + `designSha256`.
-New tasks keep Plan/Design in PR comments (legacy: old paths): `reviewloop contract recover`;
+Plan/Design in PR comments (legacy: old paths): `reviewloop contract recover`;
 after Design `PASS` archive/verify, then `verify-archive --clean` before Code `begin`.
-Phased: pass ordered `phases` (objective/exitCriteria/invariants/verification);
+Phased: pass ordered `phases` (objective/exitCriteria/carryForwardInvariants/verification);
 never omit/merge/reorder.
 Proof: `begin` `evidenceRequirements`; `review` `evidence:[{requirementId,summary}]`; none: omit `evidence`.
 `begin` binds `cwd`: edit only there.
