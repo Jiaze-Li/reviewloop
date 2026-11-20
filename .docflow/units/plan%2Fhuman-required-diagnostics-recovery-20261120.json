@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:02:41.718Z",
+  "updatedAt": "2026-11-20T06:14:12.793Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
-    "current": "Merge main into the human-required recovery branch (combine CLI usage lists)",
+    "current": "Treat sent-but-unsettled calls as live blockers in the stop report, matching the spend authority",
     "next": "新设计的代码已本地审查通过，等你授权提交并推送到 PR 59，之后由机器人重新审查",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-20T14:02:23+08:00",
         "text": "Give every stopped task a human exit: stop-loop, per-task call limits, safe lock guidance"
+      },
+      {
+        "at": "2026-11-20T14:14:00+08:00",
+        "text": "Merge main into the human-required recovery branch (combine CLI usage lists)"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "plan/human-required-diagnostics-recovery-20261120",
         "timestamp": "2026-11-20T14:02:23+08:00",
         "message": "Merge main into the human-required recovery branch (combine CLI usage lists)"
+      },
+      {
+        "sha": "583175a2ceb708509be1e7fa4b0fe093c46ef4b3",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T14:14:00+08:00",
+        "message": "Treat sent-but-unsettled calls as live blockers in the stop report, matching the spend authority"
       }
     ],
     "pr": {
