@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T04:24:33.738Z",
+  "updatedAt": "2026-11-20T04:30:09.277Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
-    "current": "Add standard HUMAN_REQUIRED report, Token Sentinel human recovery, and contract index header fix",
+    "current": "Fix review findings: recheck state before confirming a token stop, keep old header support",
     "next": "等 PR 机器人审查 PR 59，你验收后决定是否标记为可合并",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
         "text": "chore(plan): bootstrap HUMAN_REQUIRED diagnosis and recovery draft PR (empty tree)"
+      },
+      {
+        "at": "2026-11-20T12:29:59+08:00",
+        "text": "Add standard HUMAN_REQUIRED report, Token Sentinel human recovery, and contract index header fix"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/human-required-diagnostics-recovery-20261120",
         "timestamp": "2026-11-20T12:24:10+08:00",
         "message": "Add standard HUMAN_REQUIRED report, Token Sentinel human recovery, and contract index header fix"
+      },
+      {
+        "sha": "256200d2e4c4fec87709a876f39c356b7b8df0e0",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T12:29:59+08:00",
+        "message": "Fix review findings: recheck state before confirming a token stop, keep old header support"
       }
     ],
     "pr": {
