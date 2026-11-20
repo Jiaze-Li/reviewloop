@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:41:22.252Z",
+  "updatedAt": "2026-11-20T07:45:50.711Z",
   "task": {
     "id": "plan/centralize-engineering-authorization-20261120",
     "branch": "plan/centralize-engineering-authorization-20261120",
     "title": "plan/centralize-engineering-authorization-20261120",
     "task": "Development branch: plan/centralize-engineering-authorization-20261120",
     "started": "2026-11-20T15:08:36+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Use exact carryForwardInvariants phase field name in COMMON.md",
     "next": "等待第 61 号拉取请求的自动复审与持续集成结果，确认就绪后再决定是否合并",
     "history": [
@@ -52,13 +52,15 @@
     ],
     "pr": {
       "number": 61,
-      "state": "open",
+      "state": "closed",
       "title": "plan: centralize engineering authorization policy",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/61",
-      "merged": false,
-      "updatedAt": "2026-11-20T07:41:12Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T07:45:33Z",
+      "closedAt": "2026-11-20T07:45:34Z",
+      "updatedAt": "2026-11-20T07:45:34Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T07:45:33Z",
+    "outcome": "Merged"
   }
 }
