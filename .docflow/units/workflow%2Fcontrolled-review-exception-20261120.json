@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T13:04:18.948Z",
+  "updatedAt": "2026-11-20T13:04:44.817Z",
   "task": {
     "id": "workflow/controlled-review-exception-20261120",
     "branch": "workflow/controlled-review-exception-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T20:24:01+08:00",
     "status": "In progress",
     "current": "Add human-authorized Design exception for review-tool stops",
-    "next": "",
+    "next": "由你把 PR 67 切换为待审，交给 PR bot 与 CI 做正式代码审查",
     "history": [
       {
         "at": "2026-11-20T21:04:04+08:00",
