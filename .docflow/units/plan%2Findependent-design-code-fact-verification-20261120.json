@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:31:39.421Z",
+  "updatedAt": "2026-11-20T07:41:30.151Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T15:31:24+08:00",
     "status": "In progress",
     "current": "chore(plan): bootstrap independent design code-fact verification (empty tree)",
-    "next": "",
+    "next": "等待第 61 号拉取请求的自动复审与持续集成结果，确认就绪后再决定是否合并",
     "history": [],
     "commits": [
       {
