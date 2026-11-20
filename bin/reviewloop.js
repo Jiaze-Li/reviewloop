@@ -19,9 +19,9 @@
 // The agent-facing surface is the MCP server (reviewloop_begin /
 // reviewloop_review) — not this CLI.
 
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { constants as fsConstants, existsSync } from 'node:fs';
 import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { runCliCommand } from '../scripts/cliLink.js';
@@ -284,6 +284,10 @@ async function designExceptionCommand(rest) {
   const designSha256 = flagValue(rest, '--design-sha');
   if (!loopId || !reason || !reportPath || !repo || !prNumber || !taskId || !designVersion || !designSha256) throw new Error(usage);
   const reportText = await readFile(reportPath, 'utf8');
+  const archiveOut = flagValue(rest, '--archive-out');
+  // Preflight BEFORE anything is recorded: an archive path that cannot be
+  // written must refuse the command, not lose the archive text afterwards.
+  if (archiveOut) await assertWritableTarget(archiveOut);
   const lease = await takeLoopLease(loopId, 'grant a Design exception');
   let res;
   try {
@@ -295,8 +299,17 @@ async function designExceptionCommand(rest) {
     await lease.release();
   }
   const a = res.active;
-  const archiveOut = flagValue(rest, '--archive-out');
-  if (archiveOut) await writeFile(archiveOut, `${res.archiveText}\n`, 'utf8');
+  // The decision is already recorded; from here on nothing may be lost.
+  let archiveWritten = false;
+  let archiveError = null;
+  if (archiveOut) {
+    try {
+      await writeFile(archiveOut, `${res.archiveText}\n`, 'utf8');
+      archiveWritten = true;
+    } catch (err) {
+      archiveError = err?.message ?? String(err);
+    }
+  }
   console.log('Human-authorized Design exception recorded (NOT a ReviewLoop Design PASS).');
   console.log(`  loop: ${a.loopId}  (stays ${a.loopAnchor.state}, round ${a.loopAnchor.round}; review state, spend and safety records unchanged)`);
   console.log(`  exception: ${a.id}  design ${a.designSha256.slice(0, 12)}…  for ${a.repo}#${a.prNumber} ${a.taskId} ${a.designVersion}`);
@@ -308,9 +321,29 @@ async function designExceptionCommand(rest) {
   console.log(`  1. archive the record: reviewloop contract format --task-id ${a.taskId} --type exception --version ${a.designVersion} --file ${archiveOut ?? '<archive file>'} ; post it and add it to the PR contract index`);
   console.log(`  2. archive the design with: reviewloop contract format ... --type design --exception (never the PASS trailer)`);
   console.log(`  3. reviewloop contract verify-archive --repo ${a.repo} --pr ${a.prNumber} --task-id ${a.taskId} --loop ${a.loopId}`);
-  if (!archiveOut) {
+  if (!archiveWritten) {
     console.log('--- archive record (save it to a file to archive) ---');
     console.log(res.archiveText);
+  }
+  if (archiveError) {
+    console.error(`Warning: the exception IS recorded, but writing the archive file ${archiveOut} failed (${archiveError}); the full archive record is printed above — save it and archive it from there.`);
+    process.exitCode = 1;
+  }
+}
+
+// Refuse early when the archive output path cannot be written: its directory
+// must exist and be writable, and an existing path must be a writable file.
+async function assertWritableTarget(file) {
+  try {
+    const st = await stat(file).catch((err) => (err?.code === 'ENOENT' ? null : Promise.reject(err)));
+    if (st) {
+      if (!st.isFile()) throw new Error('it exists and is not a regular file');
+      await access(file, fsConstants.W_OK);
+    } else {
+      await access(path.dirname(path.resolve(file)), fsConstants.W_OK);
+    }
+  } catch (err) {
+    throw new Error(`--archive-out ${file} cannot be written (${err?.message ?? err}); nothing was recorded`);
   }
 }
 

@@ -420,3 +420,42 @@ test('validateExternalReviewReport is pure and bound to exact hashes', () => {
   assert.equal(s.openFindings, 1);
   assert.throws(() => validateExternalReviewReport(reportJson({ openFindings: 'none' }), { planSha256: PLAN_SHA, designSha256: DESIGN_SHA }), /"openFindings" as a list/);
 });
+
+// ---- PR #67 F001: the archive text is never lost -------------------------------
+
+function cliGrant(runtimeDir, archivePath) {
+  const dir = tmp('rl-exc-cli2-');
+  const reportPath = path.join(dir, 'report.json');
+  fs.writeFileSync(reportPath, reportJson());
+  return spawnSync(process.execPath, [CLI, 'accept-design-exception', '--loop', LOOP, '--repo', REPO, '--pr', String(PR),
+    '--task-id', TASK, '--design-version', VERSION, '--design-sha', DESIGN_SHA, '--review-report', reportPath,
+    '--reason', 'tool cannot read large files', '--archive-out', archivePath], {
+    encoding: 'utf8', env: { ...process.env, REVIEWLOOP_RUNTIME_DIR: runtimeDir },
+  });
+}
+
+test('F001: an unwritable --archive-out refuses BEFORE anything is recorded', async () => {
+  const { runtimeDir } = await setup();
+  const frozen = fs.readFileSync(path.join(runtimeDir, LOOP, 'workflow.json'), 'utf8');
+  const out = cliGrant(runtimeDir, path.join(tmp('rl-exc-x-'), 'no-such-dir', 'archive.md'));
+  assert.notEqual(out.status, 0);
+  assert.match(out.stderr, /cannot be written .*nothing was recorded/);
+  assert.equal(fs.readFileSync(path.join(runtimeDir, LOOP, 'workflow.json'), 'utf8'), frozen, 'no exception was recorded');
+});
+
+test('F001: if the archive write still fails after the grant, the full archive text is printed and the command exits non-zero', async () => {
+  const { runtimeDir } = await setup();
+  // A dangling symlink passes the preflight (its directory is writable) but the write fails.
+  const dir = tmp('rl-exc-y-');
+  const archivePath = path.join(dir, 'archive.md');
+  fs.symlinkSync(path.join(dir, 'missing-dir', 'target.md'), archivePath);
+  const out = cliGrant(runtimeDir, archivePath);
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /the exception IS recorded, but writing the archive file/);
+  const wf = JSON.parse(fs.readFileSync(path.join(runtimeDir, LOOP, 'workflow.json'), 'utf8'));
+  const active = wf[DESIGN_EXCEPTION_KEY].active;
+  const printed = out.stdout.split('--- archive record (save it to a file to archive) ---\n')[1];
+  assert.ok(printed, 'archive record printed');
+  assert.equal(contractContentSha256(printed), active.archiveSha256, 'the printed text is exactly the archived record');
+  assert.equal(wf.reviewLoop.state, 'HUMAN_REQUIRED');
+});
