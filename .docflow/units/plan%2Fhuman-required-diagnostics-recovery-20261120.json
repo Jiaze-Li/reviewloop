@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:26:15.545Z",
+  "updatedAt": "2026-11-20T06:32:08.017Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
-    "current": "Serialize guarded human-action re-read and write and test two-actor interleaving",
+    "current": "Share controller loop lock and full-snapshot guard across all human recovery actions",
     "next": "等待 PR 59 自动复审与测试检查通过后决定是否合并",
     "history": [
       {
@@ -34,6 +34,10 @@
       {
         "at": "2026-11-20T14:25:56+08:00",
         "text": "Treat sent-but-unsettled calls as live blockers in the stop report, matching the spend authority"
+      },
+      {
+        "at": "2026-11-20T14:31:57+08:00",
+        "text": "Serialize guarded human-action re-read and write and test two-actor interleaving"
       }
     ],
     "commits": [
@@ -78,6 +82,12 @@
         "branch": "plan/human-required-diagnostics-recovery-20261120",
         "timestamp": "2026-11-20T14:25:56+08:00",
         "message": "Serialize guarded human-action re-read and write and test two-actor interleaving"
+      },
+      {
+        "sha": "0089b7504fdcf177030ada8adb1c12075dedf114",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T14:31:57+08:00",
+        "message": "Share controller loop lock and full-snapshot guard across all human recovery actions"
       }
     ],
     "pr": {
