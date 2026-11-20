@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:27:48.619Z",
+  "updatedAt": "2026-11-20T05:39:39.833Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/installer-rollback-cli-recovery-20261120",
     "started": "2026-11-20T12:26:52+08:00",
     "status": "In progress",
-    "current": "Keep symlinks and MCP registrations safe on install rollback; add global command repair",
+    "current": "Fix PR review findings: protect concurrent edits on rollback, stricter CLI link checks",
     "next": "等待自动代码审查和检查结果；你决定后再修复本机那条失效的全局命令链接。",
     "history": [
       {
         "at": "2026-11-20T13:27:13+08:00",
         "text": "chore: initialize installer safety and CLI recovery planning PR (no file changes)"
+      },
+      {
+        "at": "2026-11-20T13:39:27+08:00",
+        "text": "Keep symlinks and MCP registrations safe on install rollback; add global command repair"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/installer-rollback-cli-recovery-20261120",
         "timestamp": "2026-11-20T13:27:13+08:00",
         "message": "Keep symlinks and MCP registrations safe on install rollback; add global command repair"
+      },
+      {
+        "sha": "6374db210278565d3e816e1d74e596ddbb05c891",
+        "branch": "plan/installer-rollback-cli-recovery-20261120",
+        "timestamp": "2026-11-20T13:39:27+08:00",
+        "message": "Fix PR review findings: protect concurrent edits on rollback, stricter CLI link checks"
       }
     ],
     "pr": {
