@@ -46,13 +46,24 @@ test('stale personal-skills reference, broken link, missing stage file and versi
     const arch = path.join(dir, 'engineering', 'architect.md');
     writeFileSync(arch, readFileSync(arch, 'utf8').replace(/v\d+\.\d+\.\d+/, 'v0.0.1') + '\n读取 personal-skills 的 engineering-architect。[x](nope.md)\n');
     const readme = path.join(dir, 'engineering', 'README.md');
-    writeFileSync(readme, readFileSync(readme, 'utf8').replace('| pr | README.md |', '| pr | README.md, ghost.md |'));
+    writeFileSync(readme, readFileSync(readme, 'utf8').replace('| pr | README.md, authorization.md |', '| pr | README.md, authorization.md, ghost.md |'));
     const res = checkEngineeringConsistency({ root: dir });
     const all = res.issues.join('\n');
     assert.match(all, /current reference to personal-skills/);
     assert.match(all, /broken link nope\.md/);
     assert.match(all, /missing file ghost\.md/);
     assert.match(all, /title version differs/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('missing authorization.md from stage table is detected', () => {
+  const dir = fixture();
+  try {
+    const readme = path.join(dir, 'engineering', 'README.md');
+    writeFileSync(readme, readFileSync(readme, 'utf8').replace('| pr | README.md, authorization.md |', '| pr | README.md |'));
+    const res = checkEngineeringConsistency({ root: dir });
+    assert.equal(res.ok, false);
+    assert.match(res.issues.join('\n'), /stage "pr" must include authorization\.md/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

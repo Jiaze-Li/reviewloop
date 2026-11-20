@@ -1,6 +1,6 @@
-# AI Engineering Workflow v1.2.0
+# AI Engineering Workflow v1.3.0
 
-方法的唯一权威（Worker 规则归 `agent-policy/COMMON.md`，工具接口归 MCP schema；边界见 [docs/BOUNDARY.md](../docs/BOUNDARY.md)）。
+方法的唯一权威（Worker 规则归 `agent-policy/COMMON.md`，授权规则归 `authorization.md`，工具接口归 MCP schema；边界见 [docs/BOUNDARY.md](../docs/BOUNDARY.md)）。
 
 ## 结论
 所有新工程任务走同一条流程：**Plan → Design → Code**，每个阶段结束都停下，等你明确说下一步。设计和代码由本地 Agent 经 ReviewLoop 独立审查；PR 审查归 PR bot。
@@ -19,17 +19,17 @@ Plan（ChatGPT 或本地 Agent）──停──你说“Design”──▶ Desi
 
 - **不按风险等级跳过任何阶段。** 小任务写短 Plan、短设计，同样走完。
 - **阶段内的普通返工自动继续**（`REWORK`、`PHASE_PASS`）；`HUMAN_REQUIRED`、新增重大决定、权限缺口才停下来找你。
-- **设计通过不等于授权。** 修改、commit、push、PR、merge、部署、破坏性操作和权限/凭据变更各自单独记录授权，没写视为未授权。
+- **授权语义见 `authorization.md`。** 阶段切换与高影响操作（`merge`、部署、权限变更等）必须人工明确授权；已授权阶段内本任务范围的常规修改、验证、`commit`/`push` 与合同归档按 `authorization.md` 自动完成。
 
 
 ## 阶段必读文件（`reviewloop spec <阶段>` 读取本表，不另存清单）
 | 阶段 | 必读文件 |
 |---|---|
-| plan | README.md, lead.md, handoff.md |
-| design | README.md, architect.md, contracts.md, handoff.md |
-| code | README.md, task-spec.md |
-| review | README.md, reviewer.md, handoff.md |
-| pr | README.md |
+| plan | README.md, authorization.md, lead.md, handoff.md |
+| design | README.md, authorization.md, architect.md, contracts.md, handoff.md |
+| code | README.md, authorization.md, task-spec.md |
+| review | README.md, authorization.md, reviewer.md, handoff.md |
+| pr | README.md, authorization.md |
 
 `chatgpt.md`（ChatGPT 设置与启动语）和 `evals.md`（评测）只在配置/评测时读。新任务的 `policy_sha` 写作 `reviewloop@<40 位 SHA>`（取自 `reviewloop spec` 输出的 `policy_ref`），任务内固定；开工回复以 `已读规范：<文件> @<sha7>` 起头。
 ReviewLoop 的 PR 合并后，Worker 把本地更新到最新 main 并提醒用户开新会话。
@@ -59,5 +59,5 @@ ReviewLoop 的 PR 合并后，Worker 把本地更新到最新 main 并提醒用�
 - **Plan 与 Design：** Design 可提出更好路线、补充前提，但不得暗改验收标准；需求矛盾回到你。Brief 和五句话不是审查合同。
 - **一份设计直接执行：** 设计末尾的 Work Contract 就是 Code 的合同；Code 逐字交给 ReviewLoop 并带 `designSha256`，对不上就停。该值只是内容一致性检查，不证明 PASS，也不替代授权。
 - **版本各管各的：** `policy_sha` 固定方法；Plan 版本固定需求；`designSha256` 固定设计；提交固定被审代码；不得互相替代。
-- **逐项授权：** 不因要交付 PR 就默认已授权 commit/push/merge；未授权动作不得执行。
+- **授权与禁区：** 所有阶段与角色的授权边界统一遵循 `authorization.md`，未获阶段授权或触及高影响禁区时不得执行。
 - **Reviewer 不绕过 Worker Policy：** 下发可执行修复 Prompt 前核实原 loop 状态与 PR HEAD/bot 证据；`HUMAN_REQUIRED` 停止；预算与 bot 关卡不能靠新任务或改 AC 绕过。输出格式遵循 handoff.md。

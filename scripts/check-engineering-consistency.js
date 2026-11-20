@@ -82,12 +82,19 @@ export function checkEngineeringConsistency({ root = DEFAULT_ROOT } = {}) {
   const tableStart = readme.indexOf('## 阶段必读文件');
   if (tableStart < 0) issues.push('engineering/README.md: stage table missing');
   else {
-    for (const m of readme.slice(tableStart).split('\n').slice(1).join('\n').split(/\n## /)[0].matchAll(/^\|\s*[a-z]+\s*\|\s*([^|]+?)\s*\|$/gm)) {
-      for (const f of m[1].split(',').map((s) => s.trim())) {
+    for (const m of readme.slice(tableStart).split('\n').slice(1).join('\n').split(/\n## /)[0].matchAll(/^\|\s*([a-z]+)\s*\|\s*([^|]+?)\s*\|$/gm)) {
+      const stageFiles = m[2].split(',').map((s) => s.trim()).filter(Boolean);
+      for (const f of stageFiles) {
         if (!existsSync(path.join(engDir, f))) issues.push(`engineering/README.md: stage table lists missing file ${f}`);
+      }
+      if (!stageFiles.includes('authorization.md')) {
+        issues.push(`engineering/README.md: stage "${m[1]}" must include authorization.md`);
       }
     }
   }
+  // centralized authorization doc referenced and present
+  if (!existsSync(path.join(engDir, 'authorization.md'))) issues.push('engineering/authorization.md missing');
+  if (!/authorization\.md/.test(readme)) issues.push('engineering/README.md does not reference authorization.md');
   // boundary doc referenced and present
   if (!existsSync(path.join(root, 'docs', 'BOUNDARY.md'))) issues.push('docs/BOUNDARY.md missing');
   if (!/docs\/BOUNDARY\.md/.test(readme)) issues.push('engineering/README.md does not reference docs/BOUNDARY.md');
