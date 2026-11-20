@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:17:58.514Z",
+  "updatedAt": "2026-11-20T08:23:21.391Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/independent-design-code-fact-verification-20261120",
     "started": "2026-11-20T15:31:24+08:00",
     "status": "In progress",
-    "current": "Enforce pendingClaims closure, unverified git status guard, and over-cap rejection logging",
+    "current": "Give Stage 2 fact fetch an independent budget and mechanically block dirty critical claims",
     "next": "等待 PR 62 自动审查与测试通过后确认合并",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-20T16:17:44+08:00",
         "text": "Add independent code-fact verification to two-stage design review"
+      },
+      {
+        "at": "2026-11-20T16:23:10+08:00",
+        "text": "Enforce pendingClaims closure, unverified git status guard, and over-cap rejection logging"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "plan/independent-design-code-fact-verification-20261120",
         "timestamp": "2026-11-20T16:17:44+08:00",
         "message": "Enforce pendingClaims closure, unverified git status guard, and over-cap rejection logging"
+      },
+      {
+        "sha": "3535f0323877a6f453101e362ba5e2aba27a8292",
+        "branch": "plan/independent-design-code-fact-verification-20261120",
+        "timestamp": "2026-11-20T16:23:10+08:00",
+        "message": "Give Stage 2 fact fetch an independent budget and mechanically block dirty critical claims"
       }
     ],
     "pr": {
