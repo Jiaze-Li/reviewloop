@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T14:28:40.782Z",
+  "updatedAt": "2026-11-20T14:29:16.348Z",
   "task": {
     "id": "fix/design-review-bounded-source-reads-20261120",
     "branch": "fix/design-review-bounded-source-reads-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T19:35:28+08:00",
     "status": "In progress",
     "current": "Let Design review verify large source files through bounded line ranges",
-    "next": "Design 已以人工授权例外归档，等待 Jack 决定是否进入 Code 阶段",
+    "next": "Code 已本地审查通过并推送，等待 Jack 决定是否标记 Ready for review 交给 PR bot 审查",
     "history": [
       {
         "at": "2026-11-20T22:28:30+08:00",
