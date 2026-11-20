@@ -32,6 +32,7 @@ test('V1: every stage prints exactly the files in the README stage table', () =>
       const spec = readSpec({ repoRoot: dir, stage });
       assert.equal(spec.policyRef, `reviewloop@${head}`);
       assert.deepEqual(spec.files.map((f) => f.path), files.map((f) => `engineering/${f}`));
+      assert.ok(files.includes('authorization.md'), `stage ${stage} must include authorization.md`);
       assert.ok(spec.files.every((f) => f.content.length > 0));
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
