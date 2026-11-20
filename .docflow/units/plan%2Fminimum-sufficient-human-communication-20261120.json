@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:43:01.081Z",
+  "updatedAt": "2026-11-20T08:43:05.190Z",
   "task": {
     "id": "plan/minimum-sufficient-human-communication-20261120",
     "branch": "plan/minimum-sufficient-human-communication-20261120",
@@ -46,7 +46,7 @@
       "title": "plan: simplify ReviewLoop human communication around necessary decisions",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/63",
       "merged": false,
-      "updatedAt": "2026-11-20T08:03:38Z"
+      "updatedAt": "2026-11-20T08:42:54Z"
     },
     "completed": null,
     "outcome": null
