@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T10:53:24.549Z",
+  "task": {
+    "id": "fix/ack-spend-preexisting-unknown-20261120",
+    "branch": "fix/ack-spend-preexisting-unknown-20261120",
+    "title": "fix/ack-spend-preexisting-unknown-20261120",
+    "task": "Development branch: fix/ack-spend-preexisting-unknown-20261120",
+    "started": "2026-11-20T18:53:11+08:00",
+    "status": "In progress",
+    "current": "chore: bootstrap unresolved-spend recovery Plan PR (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "2965e452da56f0c6d1faa86baeef9e82febc7ebb",
+        "branch": "fix/ack-spend-preexisting-unknown-20261120",
+        "timestamp": "2026-11-20T18:53:11+08:00",
+        "message": "chore: bootstrap unresolved-spend recovery Plan PR (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
