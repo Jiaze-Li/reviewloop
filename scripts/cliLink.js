@@ -59,7 +59,7 @@ function probeRunnable(binLink, name, execFileSync) {
   // reviewloop-mcp is a stdio server: do not start it, only prove the file is executable.
   try {
     if (name === 'reviewloop') {
-      execFileSync(binLink, ['spec', 'plan'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 });
+      execFileSync(binLink, ['spec', 'plan', '--allow-dirty'], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 });
     } else {
       fs.accessSync(binLink, fs.constants.X_OK);
     }
@@ -119,11 +119,13 @@ function inspectOne({ name, prefix, repoRoot, pathEnv, execFileSync }) {
     return { ...base, status: 'broken', detail: `links resolve but the command does not run: ${probe.error}`, repairable: false, next: 'Run `node bin/reviewloop.js doctor` from the checkout for details.' };
   }
   const first = firstOnPath(name, pathEnv);
-  const onPathDirs = String(pathEnv || '').split(path.delimiter);
-  if (first && realpathOrNull(first) !== realpathOrNull(binLink)) {
+  if (!first) {
+    return { ...base, runnable: true, status: 'not-on-path', detail: `links resolve and run, but no \`${name}\` is on PATH (${path.dirname(binLink)} is not in PATH)`, repairable: false, next: `Not touched: add ${path.dirname(binLink)} to PATH in your shell profile.` };
+  }
+  if ( realpathOrNull(first) !== realpathOrNull(binLink)) {
     return { ...base, runnable: true, status: 'path-shadowed', detail: `PATH resolves \`${name}\` to ${first} first`, repairable: false, shadow: first, next: `Not touched: put ${path.dirname(binLink)} before ${path.dirname(first)} in PATH, or remove the other program yourself.` };
   }
-  return { ...base, runnable: true, status: 'ok', detail: 'links resolve and the command runs', repairable: false, onPath: onPathDirs.includes(path.dirname(binLink)), next: null };
+  return { ...base, runnable: true, status: 'ok', detail: 'links resolve and the command runs', repairable: false, next: null };
 }
 
 export function inspectCliLinks({

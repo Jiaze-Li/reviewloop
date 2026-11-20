@@ -9,6 +9,9 @@ import {
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+const SKIP_ROOT = isRoot ? 'permission-bit fault injection does not apply to root' : false;
+
 import { installGlobal, uninstallGlobal, extractManagedPolicy } from '../bin/install-plugin.js';
 
 const COMMON = fileURLToPath(new URL('../agent-policy/COMMON.md', import.meta.url));
@@ -17,7 +20,7 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 // File-backed fake of the claude/codex CLIs: registrations live in
 // ~/.claude.json and ~/.codex/config.toml (where the real CLIs keep them), so
 // restoring those snapshotted files really restores the registration.
-function makeFileBackedCli(home, { failOn = null, onCall = null } = {}) {
+function makeFileBackedCli(home, { failOn = null, onCall = null, agy = false } = {}) {
   const calls = [];
   const claudeFile = path.join(home, '.claude.json');
   const codexFile = path.join(home, '.codex', 'config.toml');
@@ -26,7 +29,7 @@ function makeFileBackedCli(home, { failOn = null, onCall = null } = {}) {
     calls.push([command, ...args]);
     if (onCall) onCall(command, args);
     if (args[0] === '--version') {
-      if (command === 'agy') throw new Error('agy: command not found');
+      if (command === 'agy' && !agy) throw new Error('agy: command not found');
       return `${command} test\n`;
     }
     if (command === 'claude' && args[0] === 'mcp') {
@@ -121,7 +124,7 @@ test('G1: codex registration failure keeps a Stow-style symlinked rules file a s
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });
 
-test('G1: a LATE failure (read-only codex rules file) after the claude rules file was already written still restores the symlink', async () => {
+test('G1: a LATE failure (read-only codex rules file) after the claude rules file was already written still restores the symlink', { skip: SKIP_ROOT }, async () => {
   const sb = await sandbox();
   try {
     const claudeMd = path.join(sb.home, '.claude', 'CLAUDE.md');
@@ -176,7 +179,7 @@ test('G1: a registration that did not exist before is removed on failure', async
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });
 
-test('G1: a failed rollback is reported structurally (path, expected, actual, next step) and never as success', async () => {
+test('G1: a failed rollback is reported structurally (path, expected, actual, next step) and never as success', { skip: SKIP_ROOT }, async () => {
   const sb = await sandbox();
   const claudeJson = path.join(sb.home, '.claude.json');
   try {
@@ -247,5 +250,54 @@ test('G1: directories created by a failed install are cleaned up; pre-existing o
     await assert.rejects(() => installGlobal(baseOpts(sb, cli)), /boom codex add/);
     assert.equal(existsSync(sb.configDir), true);
     assert.deepEqual(await readdir(sb.configDir), ['mcp_config.json']);
+  } finally { await rm(sb.tmp, { recursive: true, force: true }); }
+});
+
+test('G1: directories the failed install created (fresh agy config dir) are really removed', { skip: SKIP_ROOT }, async () => {
+  const sb = await sandbox();
+  try {
+    const agents = path.join(sb.home, '.codex', 'AGENTS.md');
+    await writeFile(agents, '# codex\n');
+    await chmod(agents, 0o444); // fails AFTER the agy files were written
+    const cli = makeFileBackedCli(sb.home, { agy: true });
+    assert.equal(existsSync(sb.configDir), false);
+    await assert.rejects(() => installGlobal(baseOpts(sb, cli)));
+    assert.equal(existsSync(sb.configDir), false, 'agy config dir created by the install must be gone');
+  } finally { await chmod(path.join(sb.home, '.codex', 'AGENTS.md'), 0o644).catch(() => {}); await rm(sb.tmp, { recursive: true, force: true }); }
+});
+
+test('G1: a concurrent user edit made during the install is not overwritten by rollback and is reported', async () => {
+  const sb = await sandbox();
+  try {
+    const claudeMd = path.join(sb.home, '.claude', 'CLAUDE.md');
+    await writeFile(claudeMd, '# before\n');
+    const cli = makeFileBackedCli(sb.home, {
+      failOn: { command: 'codex', action: 'add' },
+      onCall: (command, args) => { if (command === 'codex' && args[1] === 'add') writeFileSync(claudeMd, '# before\nmy concurrent edit\n'); },
+    });
+    const err = await installGlobal(baseOpts(sb, cli)).then(() => null, (e) => e);
+    assert.ok(err);
+    assert.equal(await readFile(claudeMd, 'utf8'), '# before\nmy concurrent edit\n', 'concurrent edit must survive');
+    const entry = err.rollback.residual.find((r) => r.path === claudeMd);
+    assert.ok(entry && /someone else/.test(entry.what));
+  } finally { await rm(sb.tmp, { recursive: true, force: true }); }
+});
+
+test('G2-adjacent: an AGY mcp_config edited while the install runs keeps the edit (fresh re-read before write)', async () => {
+  const sb = await sandbox();
+  try {
+    await mkdir(sb.configDir, { recursive: true });
+    const cfg = path.join(sb.configDir, 'mcp_config.json');
+    await writeFile(cfg, JSON.stringify({ mcpServers: { a: { command: 'a' } } }));
+    const cli = makeFileBackedCli(sb.home, {
+      agy: true,
+      onCall: (command, args) => {
+        if (command === 'codex' && args[1] === 'add') writeFileSync(cfg, JSON.stringify({ mcpServers: { a: { command: 'a' }, added_meanwhile: { command: 'b' } } }));
+      },
+    });
+    await installGlobal(baseOpts(sb, cli));
+    const after = JSON.parse(await readFile(cfg, 'utf8'));
+    assert.ok(after.mcpServers.added_meanwhile, 'edit made during install must be kept');
+    assert.ok(after.mcpServers.reviewloop && after.mcpServers.a);
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });

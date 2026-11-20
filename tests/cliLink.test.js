@@ -172,3 +172,24 @@ test('package.json exposes cli:status and cli:repair', async () => {
   assert.match(pkg.scripts['cli:status'], /reviewloop\.js cli status/);
   assert.match(pkg.scripts['cli:repair'], /reviewloop\.js cli repair/);
 });
+
+test('links ok but bin dir not on PATH is not-on-path (not a false "ok")', async () => {
+  const { prefix } = await prefixWith();
+  try {
+    const r = inspect(prefix, { pathEnv: '/nonexistent-dir' });
+    assert.equal(r.links[0].status, 'not-on-path');
+    assert.equal(r.ok, false);
+    assert.equal(planCliRepair(r).length, 0);
+    assert.match(r.links[0].next, /PATH/);
+  } finally { await rm(prefix, { recursive: true, force: true }); }
+});
+
+test('the runnable probe does not call a healthy link broken when engineering/ has uncommitted edits', async () => {
+  const { prefix } = await prefixWith();
+  const probe = [];
+  try {
+    const r = inspect(prefix, { execFileSync: (file, args, o) => { probe.push(args); return exec(file, args, o); } });
+    assert.equal(r.links[0].status, 'ok');
+    assert.ok(probe.some((a) => a.includes('--allow-dirty')), 'probe must pass --allow-dirty');
+  } finally { await rm(prefix, { recursive: true, force: true }); }
+});

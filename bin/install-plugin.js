@@ -91,12 +91,24 @@ async function mkdirTracked(dir, ctx) {
   if (first && ctx) ctx.createdDirs.push(first);
 }
 
+// Remember what the install itself left on disk at a path. Rollback only
+// overwrites a path whose current bytes are the pre-install bytes or one of
+// these; anything else was changed by someone else in the meantime.
+async function noteWritten(ctx, filePath) {
+  try {
+    const hash = sha256(await readFile(filePath));
+    if (!ctx.written.has(filePath)) ctx.written.set(filePath, new Set());
+    ctx.written.get(filePath).add(hash);
+  } catch { /* path unreadable/absent: nothing to remember */ }
+}
+
 async function upsertManagedPolicy(filePath, content, ctx) {
   await mkdirTracked(path.dirname(filePath), ctx);
   const existing = existsSync(filePath) ? await readFile(filePath, 'utf8') : '';
   const unmanaged = stripManagedPolicy(existing).trimEnd();
   const next = `${unmanaged ? `${unmanaged}\n\n` : ''}${managedBlock(content)}\n`;
   await writeFile(filePath, next, 'utf8');
+  if (ctx) await noteWritten(ctx, filePath);
 }
 
 async function removeManagedPolicy(filePath) {
@@ -256,6 +268,10 @@ async function pruneEmptyDirs(dir) {
   try { await rmdir(dir); return true; } catch { return false; }
 }
 
+async function currentHash(filePath) {
+  try { return sha256(await readFile(filePath)); } catch { return null; }
+}
+
 async function restoreFileStates(snapshots, ctx) {
   const restored = [];
   const residual = [];
@@ -263,7 +279,22 @@ async function restoreFileStates(snapshots, ctx) {
     if (snap.kind === 'dangling' || snap.kind === 'unsupported') continue;
     try {
       // eslint-disable-next-line no-await-in-loop
-      if (!(await verifyAgainst(filePath, snap)).ok) await restoreFileState(filePath, snap);
+      if ((await verifyAgainst(filePath, snap)).ok) { restored.push(filePath); continue; }
+      // eslint-disable-next-line no-await-in-loop
+      const current = await currentHash(filePath);
+      const snapHash = snap.bytes ? sha256(snap.bytes) : null;
+      if (current !== null && current !== snapHash && !ctx.written.get(filePath)?.has(current)) {
+        residual.push({
+          path: filePath,
+          what: 'changed by someone else during the install',
+          expected: describeSnapshot(snap),
+          actual: 'content differs from both the pre-install content and what this install wrote; left untouched',
+          next: `Review ${filePath} yourself (it may hold your concurrent edit); the install did not overwrite it.`,
+        });
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await restoreFileState(filePath, snap);
     } catch (err) {
       residual.push({
         path: filePath,
@@ -405,7 +436,9 @@ export async function installGlobal({
   if (agyWillWrite) willWrite.push(mcpConfigFile, agyPolicyFile, geminiPolicyFile);
   for (const filePath of willWrite) assertWritable(filePath, snapshots.get(filePath));
 
-  const ctx = { createdDirs: [] };
+  const ctx = { createdDirs: [], written: new Map() };
+  const claudeJsonFile = path.join(homeDir, '.claude.json');
+  const codexConfigFile = path.join(homeDir, '.codex', 'config.toml');
   const mcpBefore = {
     claude: present.claude ? { [MCP_NAME]: hasClaudeMcp(execFileSync), [LEGACY_MCP_NAME]: hasClaudeMcp(execFileSync, LEGACY_MCP_NAME) } : null,
     codex: present.codex ? { [MCP_NAME]: hasCodexMcp(execFileSync), [LEGACY_MCP_NAME]: hasCodexMcp(execFileSync, LEGACY_MCP_NAME) } : null,
@@ -414,8 +447,15 @@ export async function installGlobal({
   const migrated = { legacyBlocks: [], legacyMcp: [], legacySkill: false };
 
   try {
-    if (present.claude) registerClaudeMcp(execFileSync, nodeBin, mcpBin);
-    if (present.codex) registerCodexMcp(execFileSync, nodeBin, mcpBin);
+    // The CLIs own their config files; checkpoint what each call left behind
+    // (even when it failed part-way) so rollback can tell its own output from
+    // someone else's concurrent edit.
+    if (present.claude) {
+      try { registerClaudeMcp(execFileSync, nodeBin, mcpBin); } finally { await noteWritten(ctx, claudeJsonFile); }
+    }
+    if (present.codex) {
+      try { registerCodexMcp(execFileSync, nodeBin, mcpBin); } finally { await noteWritten(ctx, codexConfigFile); }
+    }
 
     if (snapshots.get(mcpConfigFile).kind !== 'missing' && agyConfig.mcpServers[LEGACY_MCP_NAME]) {
       migrated.legacyMcp.push('agy');
@@ -425,9 +465,14 @@ export async function installGlobal({
     if (agyWillWrite) {
       await mkdirTracked(agyConfigDir, ctx);
       await mkdirTracked(agySkillTargetDir, ctx);
-      agyConfig.mcpServers[MCP_NAME] = { command: nodeBin, args: [mcpBin] };
-      await writeFile(mcpConfigFile, `${JSON.stringify(agyConfig, null, 2)}\n`, 'utf8');
+      // Re-read right before writing so edits made since the first read are kept.
+      const freshAgyConfig = await readAgyConfig(mcpConfigFile);
+      delete freshAgyConfig.mcpServers[LEGACY_MCP_NAME];
+      freshAgyConfig.mcpServers[MCP_NAME] = { command: nodeBin, args: [mcpBin] };
+      await writeFile(mcpConfigFile, `${JSON.stringify(freshAgyConfig, null, 2)}\n`, 'utf8');
+      await noteWritten(ctx, mcpConfigFile);
       await writeFile(agyPolicyFile, renderAgySkill(commonPolicy), 'utf8');
+      await noteWritten(ctx, agyPolicyFile);
     }
 
     for (const [frontend, policyPath] of [
