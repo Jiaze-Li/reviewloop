@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T14:32:08.614Z",
+  "updatedAt": "2026-11-20T14:41:44.016Z",
   "task": {
     "id": "fix/design-review-bounded-source-reads-20261120",
     "branch": "fix/design-review-bounded-source-reads-20261120",
     "title": "fix/design-review-bounded-source-reads-20261120",
     "task": "Development branch: fix/design-review-bounded-source-reads-20261120",
     "started": "2026-11-20T19:35:28+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Merge main (#67 Design exception) into bounded source reads branch",
     "next": "Code 已本地审查通过并推送，等待 Jack 决定是否标记 Ready for review 交给 PR bot 审查",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 66,
-      "state": "open",
+      "state": "closed",
       "title": "plan: bounded large-source evidence for independent Design review",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/66",
-      "merged": false,
-      "updatedAt": "2026-11-20T14:31:57Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T14:41:34Z",
+      "closedAt": "2026-11-20T14:41:34Z",
+      "updatedAt": "2026-11-20T14:41:34Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T14:41:34Z",
+    "outcome": "Merged"
   }
 }
