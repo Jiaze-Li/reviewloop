@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T15:21:27.733Z",
+  "task": {
+    "id": "fix/settings-effective-authority-20261120",
+    "branch": "fix/settings-effective-authority-20261120",
+    "title": "fix/settings-effective-authority-20261120",
+    "task": "Development branch: fix/settings-effective-authority-20261120",
+    "started": "2026-11-20T23:21:15+08:00",
+    "status": "In progress",
+    "current": "chore: bootstrap effective settings authority plan (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "3df4db6a1f1c3eff8cda62caaf671ccf2c4575fa",
+        "branch": "fix/settings-effective-authority-20261120",
+        "timestamp": "2026-11-20T23:21:15+08:00",
+        "message": "chore: bootstrap effective settings authority plan (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
