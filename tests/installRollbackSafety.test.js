@@ -240,16 +240,27 @@ test('G1: repeat install and uninstall keep the symlink identity and only touch 
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });
 
-test('G1: directories created by a failed install are cleaned up; pre-existing ones are not', async () => {
+test('G1: a pre-existing AGY config dir and file are left byte-identical, and the skill dir the install added is removed', { skip: SKIP_ROOT }, async () => {
   const sb = await sandbox();
   try {
-    const cli = makeFileBackedCli(sb.home, { failOn: { command: 'codex', action: 'add' } });
-    // an agy config exists so the agy branch is active
     await mkdir(sb.configDir, { recursive: true });
-    await writeFile(path.join(sb.configDir, 'mcp_config.json'), JSON.stringify({ mcpServers: { keep: { command: 'k' } } }));
-    await assert.rejects(() => installGlobal(baseOpts(sb, cli)), /boom codex add/);
-    assert.equal(existsSync(sb.configDir), true);
-    assert.deepEqual(await readdir(sb.configDir), ['mcp_config.json']);
+    const cfg = path.join(sb.configDir, 'mcp_config.json');
+    const original = JSON.stringify({ mcpServers: { keep: { command: 'k' } } });
+    await writeFile(cfg, original);
+    // The failure must come AFTER the AGY files were written (AGY writes precede the
+    // rules-file writes), so the codex rules file is made read-only.
+    const agents = path.join(sb.home, '.codex', 'AGENTS.md');
+    await writeFile(agents, '# codex\n');
+    await chmod(agents, 0o444);
+    const cli = makeFileBackedCli(sb.home, { agy: true });
+    const before = sha(await readFile(cfg));
+    const err = await installGlobal(baseOpts(sb, cli)).then(() => null, (e) => e);
+    await chmod(agents, 0o644);
+    assert.ok(err, 'install must fail after the AGY files were written');
+    assert.ok(cli.calls.some((c) => c[0] === 'agy' && c[1] === '--version'));
+    assert.equal(existsSync(sb.configDir), true, 'pre-existing dir must stay');
+    assert.equal(sha(await readFile(cfg)), before, 'pre-existing config bytes must be unchanged');
+    assert.deepEqual(await readdir(sb.configDir), ['mcp_config.json'], 'skills dir created by the install must be gone');
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });
 
