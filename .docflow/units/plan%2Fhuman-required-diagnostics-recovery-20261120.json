@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:26:11.374Z",
+  "updatedAt": "2026-11-20T06:26:15.545Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
     "current": "Serialize guarded human-action re-read and write and test two-actor interleaving",
-    "next": "等机器人对最新提交的审查结果，有意见再修复；你决定何时标记可合并",
+    "next": "等待 PR 59 自动复审与测试检查通过后决定是否合并",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
