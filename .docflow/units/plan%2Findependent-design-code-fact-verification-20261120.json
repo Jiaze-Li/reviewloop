@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:27:14.865Z",
+  "updatedAt": "2026-11-20T08:27:22.383Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T15:31:24+08:00",
     "status": "In progress",
     "current": "Isolate Stage 2 fact-fetch rejections from Stage 1 and add end-to-end dirty file test",
-    "next": "等待 PR 62 复核结果与测试通过后确认合并",
+    "next": "等待 PR 62 最终复核与测试通过后确认合并",
     "history": [
       {
         "at": "2026-11-20T16:00:25+08:00",
