@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T12:32:43.232Z",
+  "updatedAt": "2026-11-20T13:04:15.504Z",
   "task": {
     "id": "workflow/controlled-review-exception-20261120",
     "branch": "workflow/controlled-review-exception-20261120",
@@ -8,15 +8,26 @@
     "task": "Development branch: workflow/controlled-review-exception-20261120",
     "started": "2026-11-20T20:24:01+08:00",
     "status": "In progress",
-    "current": "chore: bootstrap controlled review exception planning PR (no file changes)",
+    "current": "Add human-authorized Design exception for review-tool stops",
     "next": "",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-20T21:04:04+08:00",
+        "text": "chore: bootstrap controlled review exception planning PR (no file changes)"
+      }
+    ],
     "commits": [
       {
         "sha": "9b6051230539db9d51502e2a4280fb4616c850d0",
         "branch": "workflow/controlled-review-exception-20261120",
         "timestamp": "2026-11-20T20:24:01+08:00",
         "message": "chore: bootstrap controlled review exception planning PR (no file changes)"
+      },
+      {
+        "sha": "6233ffbc2b69358f5ee71212ca5ff82a284ba0c3",
+        "branch": "workflow/controlled-review-exception-20261120",
+        "timestamp": "2026-11-20T21:04:04+08:00",
+        "message": "Add human-authorized Design exception for review-tool stops"
       }
     ],
     "pr": {
