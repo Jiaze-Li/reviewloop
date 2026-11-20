@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T07:08:45.544Z",
+  "task": {
+    "id": "plan/centralize-engineering-authorization-20261120",
+    "branch": "plan/centralize-engineering-authorization-20261120",
+    "title": "plan/centralize-engineering-authorization-20261120",
+    "task": "Development branch: plan/centralize-engineering-authorization-20261120",
+    "started": "2026-11-20T15:08:36+08:00",
+    "status": "In progress",
+    "current": "chore: bootstrap authorization policy planning PR (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "a152c3d3101b727089ce6e19c690a6d38fef175b",
+        "branch": "plan/centralize-engineering-authorization-20261120",
+        "timestamp": "2026-11-20T15:08:36+08:00",
+        "message": "chore: bootstrap authorization policy planning PR (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
