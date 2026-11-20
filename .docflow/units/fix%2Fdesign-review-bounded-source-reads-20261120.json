@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T11:38:09.796Z",
+  "updatedAt": "2026-11-20T14:13:26.171Z",
   "task": {
     "id": "fix/design-review-bounded-source-reads-20261120",
     "branch": "fix/design-review-bounded-source-reads-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T19:35:28+08:00",
     "status": "In progress",
     "current": "chore: bootstrap bounded design source verification planning PR (no file changes)",
-    "next": "",
+    "next": "Design 已以人工授权例外归档，等待 Jack 决定是否进入 Code 阶段",
     "history": [],
     "commits": [
       {
