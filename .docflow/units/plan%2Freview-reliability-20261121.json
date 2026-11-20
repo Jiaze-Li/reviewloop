@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T16:07:20.863Z",
+  "updatedAt": "2026-11-20T16:10:53.093Z",
   "task": {
     "id": "plan/review-reliability-20261121",
     "branch": "plan/review-reliability-20261121",
@@ -19,7 +19,14 @@
         "message": "plan: bootstrap review reliability foundations (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 69,
+      "state": "open",
+      "title": "plan: harden ReviewLoop review reliability and governed recovery",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/69",
+      "merged": false,
+      "updatedAt": "2026-11-20T16:10:40Z"
+    },
     "completed": null,
     "outcome": null
   }
