@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T14:41:44.016Z",
+  "updatedAt": "2026-11-20T14:42:18.797Z",
   "task": {
     "id": "fix/design-review-bounded-source-reads-20261120",
     "branch": "fix/design-review-bounded-source-reads-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T19:35:28+08:00",
     "status": "Completed",
     "current": "Merge main (#67 Design exception) into bounded source reads branch",
-    "next": "Code 已本地审查通过并推送，等待 Jack 决定是否标记 Ready for review 交给 PR bot 审查",
+    "next": "",
     "history": [
       {
         "at": "2026-11-20T22:28:30+08:00",
