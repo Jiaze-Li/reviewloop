@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T09:32:03.879Z",
+  "updatedAt": "2026-11-20T09:36:08.566Z",
   "task": {
     "id": "workflow/continuous-stage-handoff-20261120",
     "branch": "workflow/continuous-stage-handoff-20261120",
@@ -19,7 +19,14 @@
         "message": "chore: bootstrap continuous stage handoff planning PR (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 64,
+      "state": "open",
+      "title": "plan: continuous Plan–Design–Code handoff and PR delivery",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/64",
+      "merged": false,
+      "updatedAt": "2026-11-20T09:35:51Z"
+    },
     "completed": null,
     "outcome": null
   }
