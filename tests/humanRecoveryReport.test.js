@@ -54,6 +54,10 @@ const SCENARIOS = {
     loopId: 'rl-x', loop: null, workflow: null,
     result: { stateUnreadable: { errorClass: 'SyntaxError', errorMessage: 'Unexpected token', dir: '/runtime/rl-x' } },
   }),
+  DESIGN_SOURCE_LIMIT: () => report(loopWith({
+    reason: 'critical code facts could not be independently verified within repository/read boundaries',
+    extra: { objective: { mode: 'LOCAL', taskType: 'design', reviewTarget: 'Design.md' } },
+  })),
   OTHER: () => report(loopWith({ reason: 'zzz nothing matches' })),
 };
 

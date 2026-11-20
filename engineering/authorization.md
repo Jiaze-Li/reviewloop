@@ -1,4 +1,4 @@
-# Engineering Authorization Policy — v1.3.0
+# Engineering Authorization Policy — v1.3.1
 
 **本文件是工程授权规则的唯一权威。** 所有阶段与角色规范（`README.md`、`lead.md`、`architect.md`、`task-spec.md`、`reviewer.md`、`chatgpt.md`、`handoff.md`、`agent-policy/COMMON.md`）均引用本文件语义，不再另行定义互相竞争的授权清单。
 
@@ -35,7 +35,7 @@
 2. **越权与污染：** 跨仓库写入、向非本任务分支（尤其是 `main`/`master`）写入、覆盖或清理工作区内来源不明的他人改动。
 3. **外部副作用：** 目标仓库在 `push` 或 Draft PR 更新时若会触发生产部署、外部客户通知或其他不可逆副作用（或情况未知），不得凭动作名称自动推送。
 4. **敏感信息外发：** 向公开 PR 评论或提交中写入密钥、凭据、私人数据或未脱敏敏感材料。
-5. **绕过安全关卡：** 在 `HUMAN_REQUIRED`、重大产品/科研/共享架构决定、权限缺口或真实工具阻断下继续执行；新开 loop、修改冻结 AC 或弱化验证以绕过预算/bot 状态。
+5. **绕过安全关卡：** 在 `HUMAN_REQUIRED`、重大产品/科研/共享架构决定、权限缺口或真实工具阻断下继续执行；新开 loop、修改冻结 AC 或弱化验证以绕过预算/bot 状态。Design 审查工具故障时的人工授权例外（`reviewloop accept-design-exception`，见 `contracts.md` §3）只能由用户本人运行，Worker 不得代为运行；它只放行该设计的归档清理与进入 Code，不是 Design PASS，也不放行本节任何其他动作。
 
 ## 5. 旧任务兼容
 

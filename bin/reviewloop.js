@@ -9,6 +9,7 @@
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
 //   reviewloop extend-calls task-level: more Reviewer/Supervisor calls for ONE loop (audited)
 //   reviewloop stop-loop    human end of a task: STOPPED, every record kept
+//   reviewloop accept-design-exception  human-authorized Design exception after a review-TOOL stop (never a PASS)
 //   reviewloop lock-status  read-only: who holds a loop's lock and what to do about it
 //   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
@@ -18,9 +19,9 @@
 // The agent-facing surface is the MCP server (reviewloop_begin /
 // reviewloop_review) — not this CLI.
 
-import { readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { existsSync } from 'node:fs';
+import { constants as fsConstants, existsSync } from 'node:fs';
 import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
 import { runCliCommand } from '../scripts/cliLink.js';
@@ -29,6 +30,7 @@ import { acquireLoopFileLease, describeLoopLease } from '../src/reviewloop/loopL
 import { leaseRefusalMessage } from '../src/reviewloop/leaseGuidance.js';
 import { extendCalls, effectiveCallLimits } from '../src/reviewloop/callAllowance.js';
 import { stopLoop } from '../src/reviewloop/loopStop.js';
+import { grantDesignException, revokeDesignException } from '../src/reviewloop/designException.js';
 import { readLoopWorkflow } from '../src/reviewloop/humanActionGuard.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
@@ -256,6 +258,95 @@ async function stopLoopCommand(rest) {
   }
 }
 
+// Human-authorized Design exception (never a Design PASS). CLI-only, lease-guarded.
+async function designExceptionCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reason = flagValue(rest, '--reason');
+  if (rest.includes('--revoke')) {
+    if (!loopId || !reason) throw new Error('usage: reviewloop accept-design-exception --revoke --loop <loopId> --reason "<why the exception is withdrawn>"');
+    const lease = await takeLoopLease(loopId, 'revoke the Design exception');
+    try {
+      const res = await revokeDesignException({ persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, reason });
+      console.log('Human Design exception revoked.');
+      console.log(`  loop: ${res.loopId}  exception: ${res.revoked}  (kept in history)`);
+      console.log('  note: the original Design review state was never changed and still is not a PASS');
+    } finally {
+      await lease.release();
+    }
+    return;
+  }
+  const usage = 'usage: reviewloop accept-design-exception --loop <loopId> --repo <owner/name> --pr <num> --task-id <id> --design-version <ver> --design-sha <sha256> --review-report <report.json> --reason "<why an alternative independent review is accepted>" [--accept-risk "<unverified risk you accept>"] [--archive-out <file>]';
+  const reportPath = flagValue(rest, '--review-report');
+  const repo = flagValue(rest, '--repo');
+  const prNumber = flagValue(rest, '--pr');
+  const taskId = flagValue(rest, '--task-id');
+  const designVersion = flagValue(rest, '--design-version');
+  const designSha256 = flagValue(rest, '--design-sha');
+  if (!loopId || !reason || !reportPath || !repo || !prNumber || !taskId || !designVersion || !designSha256) throw new Error(usage);
+  const reportText = await readFile(reportPath, 'utf8');
+  const archiveOut = flagValue(rest, '--archive-out');
+  // Preflight BEFORE anything is recorded: an archive path that cannot be
+  // written must refuse the command, not lose the archive text afterwards.
+  if (archiveOut) await assertWritableTarget(archiveOut);
+  const lease = await takeLoopLease(loopId, 'grant a Design exception');
+  let res;
+  try {
+    res = await grantDesignException({
+      persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, repo, prNumber, taskId, designVersion, designSha256,
+      reportText, reason, acceptRisk: flagValue(rest, '--accept-risk'),
+    });
+  } finally {
+    await lease.release();
+  }
+  const a = res.active;
+  // The decision is already recorded; from here on nothing may be lost.
+  let archiveWritten = false;
+  let archiveError = null;
+  if (archiveOut) {
+    try {
+      await writeFile(archiveOut, `${res.archiveText}\n`, 'utf8');
+      archiveWritten = true;
+    } catch (err) {
+      archiveError = err?.message ?? String(err);
+    }
+  }
+  console.log('Human-authorized Design exception recorded (NOT a ReviewLoop Design PASS).');
+  console.log(`  loop: ${a.loopId}  (stays ${a.loopAnchor.state}, round ${a.loopAnchor.round}; review state, spend and safety records unchanged)`);
+  console.log(`  exception: ${a.id}  design ${a.designSha256.slice(0, 12)}…  for ${a.repo}#${a.prNumber} ${a.taskId} ${a.designVersion}`);
+  if (res.superseded) console.log(`  replaced earlier exception ${res.superseded} (kept in history)`);
+  if (a.acceptedRisk) console.log(`  unverified risk accepted by you: ${a.acceptedRisk}`);
+  console.log(`  allows only: ${a.allows.join(', ')}; never: ${a.forbids.join(', ')}`);
+  console.log(`  archive record sha256: ${a.archiveSha256}`);
+  console.log('Next (Worker):');
+  console.log(`  1. archive the record: reviewloop contract format --task-id ${a.taskId} --type exception --version ${a.designVersion} --file ${archiveOut ?? '<archive file>'} ; post it and add it to the PR contract index`);
+  console.log(`  2. archive the design with: reviewloop contract format ... --type design --exception (never the PASS trailer)`);
+  console.log(`  3. reviewloop contract verify-archive --repo ${a.repo} --pr ${a.prNumber} --task-id ${a.taskId} --loop ${a.loopId}`);
+  if (!archiveWritten) {
+    console.log('--- archive record (save it to a file to archive) ---');
+    console.log(res.archiveText);
+  }
+  if (archiveError) {
+    console.error(`Warning: the exception IS recorded, but writing the archive file ${archiveOut} failed (${archiveError}); the full archive record is printed above — save it and archive it from there.`);
+    process.exitCode = 1;
+  }
+}
+
+// Refuse early when the archive output path cannot be written: its directory
+// must exist and be writable, and an existing path must be a writable file.
+async function assertWritableTarget(file) {
+  try {
+    const st = await stat(file).catch((err) => (err?.code === 'ENOENT' ? null : Promise.reject(err)));
+    if (st) {
+      if (!st.isFile()) throw new Error('it exists and is not a regular file');
+      await access(file, fsConstants.W_OK);
+    } else {
+      await access(path.dirname(path.resolve(file)), fsConstants.W_OK);
+    }
+  } catch (err) {
+    throw new Error(`--archive-out ${file} cannot be written (${err?.message ?? err}); nothing was recorded`);
+  }
+}
+
 async function lockStatusCommand(rest) {
   const loopId = flagValue(rest, '--loop');
   if (!loopId) throw new Error('usage: reviewloop lock-status --loop <loopId>');
@@ -411,11 +502,12 @@ async function handleContractCommand(rest) {
     const version = flagValue(args, '--version');
     const file = flagValue(args, '--file');
     const designSha256 = flagValue(args, '--design-sha');
+    const humanException = args.includes('--exception');
     if (!taskId || !type || !version || !file) {
-      throw new Error('usage: reviewloop contract format --task-id <id> --type <plan|design> --version <ver> --file <path> [--design-sha <sha>] [--json]');
+      throw new Error('usage: reviewloop contract format --task-id <id> --type <plan|design|exception> --version <ver> --file <path> [--design-sha <sha>] [--exception] [--json]');
     }
     const content = await readFile(file, 'utf8');
-    const formatted = formatContractComments({ taskId, type, version, content, designSha256 });
+    const formatted = formatContractComments({ taskId, type, version, content, designSha256, humanException });
     print(formatted, [
       `taskId: ${formatted.taskId}  type: ${formatted.type}  version: ${formatted.version}`,
       `sha256: ${formatted.sha256}  parts: ${formatted.totalParts}`,
@@ -434,7 +526,7 @@ async function handleContractCommand(rest) {
     const authors = flagValues(args, '--author');
     const requireMcpLimit = args.includes('--mcp-limit');
     if (!repo || !prNumber || !taskId || !type) {
-      throw new Error('usage: reviewloop contract recover --repo <owner/name> --pr <num> --task-id <id> --type <plan|design> [--version <ver>] [--design-sha <sha>] [--author <login>] [--mcp-limit] [--json]');
+      throw new Error('usage: reviewloop contract recover --repo <owner/name> --pr <num> --task-id <id> --type <plan|design|exception> [--version <ver>] [--design-sha <sha>] [--author <login>] [--mcp-limit] [--json]');
     }
     const res = await recoverPrContract({
       repo,
@@ -480,7 +572,11 @@ async function handleContractCommand(rest) {
       allowedAuthors: authors.length ? authors : null,
       clean,
     });
+    const source = res.authority === 'HUMAN_EXCEPTION'
+      ? `Design source: HUMAN-AUTHORIZED EXCEPTION ${res.exceptionId} — NOT a ReviewLoop Design PASS (original review loop ${res.loopId} is unchanged).`
+      : `Design source: ReviewLoop Design PASS (loop ${res.loopId}).`;
     print(res, [
+      source,
       res.cleaned
         ? `Cleaned untracked design file ${res.reviewTarget} (designSha256=${res.designSha256}, loop=${res.loopId}).`
         : `Ready to clean ${res.reviewTarget} (designSha256=${res.designSha256}, loop=${res.loopId}); pass --clean to unlink.`,
@@ -589,6 +685,9 @@ async function main() {
     case 'stop-loop':
       await stopLoopCommand(rest);
       break;
+    case 'accept-design-exception':
+      await designExceptionCommand(rest);
+      break;
     case 'lock-status':
       await lockStatusCommand(rest);
       break;
@@ -617,7 +716,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|lock-status|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);

@@ -1,4 +1,4 @@
-# Actionable Handoff — v1.3.0
+# Actionable Handoff — v1.3.1
 
 本文件是用户交接的唯一详细规范；各角色只引用。授权边界与默认放行范围统一引用 `authorization.md`，交接时在同一代码块或摘要中直接写明适用范围与停止点，不要求用户拼接多份规则文件。
 
