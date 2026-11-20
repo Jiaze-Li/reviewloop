@@ -87,7 +87,7 @@ test('reviewer + supervisor pools have eligible internal candidates', () => {
 
 test('runDoctor passes on core prerequisites and reports Worker as external', () => {
   const lines = [];
-  const report = runDoctor({
+  const report = runDoctor({ cliLinkCheck: () => ({ ok: true, issues: [] }),
     execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
     log: (l) => lines.push(l),
     env: {},
@@ -107,7 +107,7 @@ test('a stale / absent global install is a warning, never a doctor failure', asy
     assert.equal(policy.frontends.codex.reason, 'stale-content');
 
     const lines = [];
-    const report = runDoctor({
+    const report = runDoctor({ cliLinkCheck: () => ({ ok: true, issues: [] }),
       execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
       log: (l) => lines.push(l),
       env: {},
@@ -150,7 +150,7 @@ test('checkLegacyManagedEnv and runDoctor warn when a legacy managed REVIEWLOOP_
   assert.deepEqual(dirty.present, ['REVIEWLOOP_MAX_SINGLE_CALL_USAGE']);
 
   const lines = [];
-  const report = runDoctor({
+  const report = runDoctor({ cliLinkCheck: () => ({ ok: true, issues: [] }),
     execSync: fakeExec({ 'git --version': 'git version 2.42.0' }),
     log: (l) => lines.push(l),
     env: { REVIEWLOOP_MAX_SINGLE_CALL_USAGE: '80000' },

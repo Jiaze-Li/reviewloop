@@ -68,7 +68,7 @@ test('V13: COMMON and README must reference docs/BOUNDARY.md', () => {
 test('doctor runs the engineering consistency check and fails on drift', async () => {
   const { runDoctor, checkEngineering } = await import('../scripts/doctor.js');
   const lines = [];
-  runDoctor({ log: (l) => lines.push(l), execSync: () => 'ok', env: {} });
+  runDoctor({ cliLinkCheck: () => ({ ok: true, issues: [] }), log: (l) => lines.push(l), execSync: () => 'ok', env: {} });
   assert.ok(lines.some((l) => /ok\s+engineering_consistency/.test(l)), lines.join('\n'));
   assert.equal(checkEngineering().ok, true);
 });
@@ -76,7 +76,7 @@ test('doctor runs the engineering consistency check and fails on drift', async (
 test('doctor reports ok=false and prints FAIL when the engineering check finds drift', async () => {
   const { runDoctor } = await import('../scripts/doctor.js');
   const lines = [];
-  const report = runDoctor({
+  const report = runDoctor({ cliLinkCheck: () => ({ ok: true, issues: [] }),
     log: (l) => lines.push(l), execSync: () => 'ok', env: {},
     engineeringCheck: () => ({ ok: false, issues: ['simulated drift'] }),
   });
