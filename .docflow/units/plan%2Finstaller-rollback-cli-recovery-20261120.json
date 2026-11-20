@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:54:17.368Z",
+  "updatedAt": "2026-11-20T05:57:28.911Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/installer-rollback-cli-recovery-20261120",
     "started": "2026-11-20T12:26:52+08:00",
     "status": "In progress",
-    "current": "Skip the permission-denied repair test when run as root",
+    "current": "Make the pre-existing AGY directory test reach the AGY branch and assert unchanged bytes",
     "next": "等自动审查复核这轮修复；通过后你决定是否合并，并另行授权修复本机失效的全局命令链接。",
     "history": [
       {
@@ -26,6 +26,10 @@
       {
         "at": "2026-11-20T13:54:02+08:00",
         "text": "Treat a failed MCP registration query as unknown so rollback never removes an existing one"
+      },
+      {
+        "at": "2026-11-20T13:57:12+08:00",
+        "text": "Skip the permission-denied repair test when run as root"
       }
     ],
     "commits": [
@@ -58,6 +62,12 @@
         "branch": "plan/installer-rollback-cli-recovery-20261120",
         "timestamp": "2026-11-20T13:54:02+08:00",
         "message": "Skip the permission-denied repair test when run as root"
+      },
+      {
+        "sha": "813fa83eeee5e5e0590082ced800f617320b1969",
+        "branch": "plan/installer-rollback-cli-recovery-20261120",
+        "timestamp": "2026-11-20T13:57:12+08:00",
+        "message": "Make the pre-existing AGY directory test reach the AGY branch and assert unchanged bytes"
       }
     ],
     "pr": {
