@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T09:32:03.879Z",
+  "task": {
+    "id": "workflow/continuous-stage-handoff-20261120",
+    "branch": "workflow/continuous-stage-handoff-20261120",
+    "title": "workflow/continuous-stage-handoff-20261120",
+    "task": "Development branch: workflow/continuous-stage-handoff-20261120",
+    "started": "2026-11-20T17:31:53+08:00",
+    "status": "In progress",
+    "current": "chore: bootstrap continuous stage handoff planning PR (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "f83b98904fe8486f1782c9ff748eb3a4ca1a3096",
+        "branch": "workflow/continuous-stage-handoff-20261120",
+        "timestamp": "2026-11-20T17:31:53+08:00",
+        "message": "chore: bootstrap continuous stage handoff planning PR (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
