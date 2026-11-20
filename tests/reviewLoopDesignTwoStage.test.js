@@ -1,7 +1,8 @@
 // Two-stage Design review: Reviewer independent proposal + Supervisor adjudication.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +12,7 @@ import {
   collectDesignContext, collectCodeIdentity, parseGitStatusDirtyPaths, validateFactFileRequest,
   readRequestedFiles, DESIGN_LIMITS, buildProposalPrompt, buildAdjudicationPrompt,
 } from '../src/reviewloop/designTwoStage.js';
-import { designContentSha256 } from '../src/reviewloop/designTarget.js';
+import { designContentSha256, readRepoFileBytesBounded, splitSourceLines } from '../src/reviewloop/designTarget.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 const PLAN = '# Plan\n- Goal: ship a thing\n- Non-goals: nothing else';
@@ -820,4 +821,433 @@ test('F003 & F004: Stage 1 overflow rejections do not force HUMAN_REQUIRED, and 
   }
 
   rmSync(cwd, { recursive: true, force: true });
+});
+
+// ------------------------------------------- line-range excerpts (RL-DESIGN-SOURCE-20261120)
+
+const rawSha = (buf) => createHash('sha256').update(buf).digest('hex');
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+const BIG_LINE = (i) => `// line ${i} ${'x'.repeat(50)}`;
+const BIG_LINES = 1000;
+
+// gitRepo() plus a committed src/big.js (~60 KiB, 1000 numbered lines).
+function bigRepo(extra = {}) {
+  const cwd = gitRepo();
+  mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  writeFileSync(path.join(cwd, 'src/big.js'), `${Array.from({ length: BIG_LINES }, (_, i) => BIG_LINE(i + 1)).join('\n')}\n`);
+  for (const [rel, content] of Object.entries(extra)) {
+    mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+    writeFileSync(path.join(cwd, rel), content);
+  }
+  git(cwd, 'add', '.');
+  git(cwd, 'commit', '-qm', 'big');
+  return cwd;
+}
+const range = (p, startLine, endLine) => ({ path: p, startLine, endLine });
+
+test('AC-01: a >24 KiB tracked file is rejected whole (with totalLines) but its exact line range is provided, nothing outside it', async () => {
+  const cwd = bigRepo();
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  assert.ok(Buffer.byteLength(readFileSync(path.join(cwd, 'src/big.js'))) > 60 * 1024 - 2000);
+  const whole = await readRequestedFiles({ cwd, context, requested: ['src/big.js'] });
+  assert.equal(whole.files.length, 0);
+  assert.deepEqual(whole.rejected, [{ path: 'src/big.js', reason: 'DESIGN_TARGET_TOO_LARGE', totalLines: BIG_LINES }]);
+
+  const r = await readRequestedFiles({ cwd, context, requested: [range('src/big.js', 120, 260)] });
+  assert.deepEqual(r.rejected, []);
+  assert.equal(r.files.length, 1);
+  const f = r.files[0];
+  assert.equal(f.citation, 'src/big.js#L120-L260');
+  assert.equal(f.text, Array.from({ length: 141 }, (_, i) => BIG_LINE(120 + i)).join('\n'));
+  assert.ok(f.bytes <= DESIGN_LIMITS.maxFileBytes, 'charged bytes incl. prefixes within the per-item cap');
+  assert.equal(f.bytes, Buffer.byteLength(f.body));
+
+  const prompt = buildAdjudicationPrompt({
+    plan: PLAN, proposals: PROPOSALS.proposals, designText: DESIGN, history: [], exchangeCount: 0, context, files: r.files,
+  });
+  assert.match(prompt, /VERIFIED SOURCE EXCERPT src\/big\.js#L120-L260 \(lines 120-260 of 1000; NOT the whole file; fileSha256=[0-9a-f]{64}, excerptSha256=[0-9a-f]{64}, headBlobMatch=true, dirty=false/);
+  assert.match(prompt, /\n120\| \/\/ line 120 /);
+  assert.match(prompt, /\n260\| \/\/ line 260 /);
+  assert.ok(!prompt.includes('// line 119 '), 'line before the range never reaches the model');
+  assert.ok(!prompt.includes('// line 261 '), 'line after the range never reaches the model');
+  assert.match(prompt, /src\/big\.js \[large: \d+ bytes — request line ranges\]/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC-02: hashes, CRLF, no trailing newline, multibyte edges, empty file and headBlobMatch on clean vs post-status edit', async () => {
+  const crlf = 'a\r\nb\r\nc\r\n';
+  const noNl = 'one\ntwo\nthree';
+  const multi = 'α首行\nβ第二行😀\nγ\n';
+  const cwd = bigRepo({ 'crlf.txt': crlf, 'nonl.txt': noNl, 'multi.txt': multi, 'empty.txt': '' });
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const r = await readRequestedFiles({
+    cwd, context, requested: [range('crlf.txt', 2, 3), range('nonl.txt', 3, 3), range('multi.txt', 1, 2), range('empty.txt', 1, 1)],
+  });
+  const by = Object.fromEntries(r.files.map((f) => [f.citation, f]));
+  assert.equal(by['crlf.txt#L2-L3'].text, 'b\r\nc\r', 'CR kept verbatim');
+  assert.equal(by['crlf.txt#L2-L3'].totalLines, 3);
+  assert.equal(by['crlf.txt#L2-L3'].fileSha256, rawSha(Buffer.from(crlf)));
+  assert.equal(by['crlf.txt#L2-L3'].excerptSha256, rawSha(Buffer.from('b\r\nc\r', 'utf8')));
+  assert.equal(by['nonl.txt#L3-L3'].text, 'three');
+  assert.equal(by['nonl.txt#L3-L3'].totalLines, 3);
+  assert.equal(by['multi.txt#L1-L2'].text, 'α首行\nβ第二行😀');
+  assert.equal(by['multi.txt#L1-L2'].totalLines, 3, 'trailing newline creates no extra line');
+  for (const f of r.files) {
+    assert.equal(f.headBlobMatch, true, f.citation);
+    assert.equal(f.dirty, false, f.citation);
+    assert.equal(f.sha256, f.excerptSha256);
+  }
+  assert.deepEqual(r.rejected, [{ path: 'empty.txt', startLine: 1, endLine: 1, reason: 'range out of bounds', totalLines: 0 }]);
+
+  // Modified after the status snapshot: porcelain still says clean, the blob check catches it.
+  writeFileSync(path.join(cwd, 'nonl.txt'), 'one\ntwo\nTHREE');
+  const after = await readRequestedFiles({ cwd, context, requested: [range('nonl.txt', 3, 3)] });
+  assert.equal(context.codeIdentity.dirtyPaths.has('nonl.txt'), false);
+  assert.equal(after.files[0].headBlobMatch, false);
+  assert.equal(after.files[0].dirty, true);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC-03: SUPPORTED must cite the exact provided label (bare path / other range malformed); Stage-2 range rejection + critical UNVERIFIED => HUMAN', async () => {
+  const verifiedPaths = new Set(['src/big.js#L10-L20']);
+  const fc = (src) => adj({ factChecks: [{ claim: 'c', critical: true, status: 'SUPPORTED', evidenceSources: [src], reason: 'r' }] });
+  assert.equal(validateAdjudication(fc('src/big.js'), { verifiedPaths }).malformed, true, 'bare path when only an excerpt exists');
+  assert.equal(validateAdjudication(fc('src/big.js#L10-L15'), { verifiedPaths }).malformed, true, 'sub-range');
+  assert.equal(validateAdjudication(fc('src/big.js#L1-L20'), { verifiedPaths }).malformed, true, 'different range');
+  assert.equal(validateAdjudication(fc('src/big.js#L10-L20'), { verifiedPaths }).malformed, undefined);
+
+  const cwd = bigRepo();
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      supervisor: (n) => (n === 1
+        ? { needFactFiles: true, requestedFiles: [range('src/big.js', 990, 1200)], pendingClaims: ['tail invariant'] }
+        : adj({ factChecks: [{ claim: 'tail invariant', critical: true, status: 'UNVERIFIED', evidenceSources: [], reason: 'range rejected' }] })),
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'HUMAN_REQUIRED');
+  assert.equal(log.supervisor.length, 2);
+  assert.deepEqual(r.factVerification.stage2RejectedFiles, [{ path: 'src/big.js', startLine: 990, endLine: 1200, reason: 'range out of bounds', totalLines: BIG_LINES }]);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC-03/I4: a porcelain-dirty excerpt and a blob-mismatched (eol=crlf) excerpt backing critical SUPPORTED both => HUMAN via the citation label', async () => {
+  for (const variant of ['dirty', 'eol']) {
+    const cwd = bigRepo(variant === 'eol' ? { '.gitattributes': 'crlf.txt text eol=crlf\n', 'crlf.txt': 'a\nb\nc\n' } : {});
+    let rel = 'src/big.js';
+    if (variant === 'dirty') {
+      writeFileSync(path.join(cwd, 'src/big.js'), `${BIG_LINE(1)}\nEDITED\n`);
+    } else {
+      rel = 'crlf.txt';
+      rmSync(path.join(cwd, rel));
+      git(cwd, 'checkout', '--', rel);
+      assert.equal(readFileSync(path.join(cwd, rel), 'utf8'), 'a\r\nb\r\nc\r\n', 'checkout converted to CRLF');
+      assert.equal(git(cwd, 'status', '--porcelain').toString(), '', 'porcelain clean');
+    }
+    const label = `${rel}#L1-L2`;
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n) => (n === 1
+          ? { needFactFiles: true, requestedFiles: [range(rel, 1, 2)], pendingClaims: ['claim'] }
+          : adj({ factChecks: [{ claim: 'claim', critical: true, status: 'SUPPORTED', evidenceSources: [label], reason: 'ok' }] })),
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'HUMAN_REQUIRED', variant);
+    assert.match(r.reason, /uncommitted worktree modifications/, variant);
+    const cf = r.factVerification.checkedFiles[0];
+    assert.equal(cf.citation, label);
+    assert.equal(cf.dirty, true);
+    assert.equal(cf.headBlobMatch, false, `${variant}: fail-closed blob mismatch`);
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('AC-04: excerpts share the 10-item / 96 KiB caps; 401 lines and >24 KiB excerpts rejected; Stage 2 keeps its own budget', async () => {
+  const wide = `${Array.from({ length: 400 }, (_, i) => `${i} ${'w'.repeat(95)}`).join('\n')}\n`;
+  const cwd = bigRepo({ 'wide.txt': wide });
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const eleven = Array.from({ length: 11 }, (_, i) => range('src/big.js', i + 1, i + 1));
+  const r1 = await readRequestedFiles({ cwd, context, requested: eleven });
+  assert.equal(r1.files.length, 10);
+  assert.deepEqual(r1.rejected, [{ path: 'src/big.js', startLine: 11, endLine: 11, reason: 'file count cap reached' }]);
+
+  // ~23 KiB charged each, overlapping: the 5th exceeds 96 KiB.
+  const overlapping = Array.from({ length: 5 }, (_, i) => range('src/big.js', 1 + i, 360 + i));
+  const r2 = await readRequestedFiles({ cwd, context, requested: overlapping });
+  assert.equal(r2.files.length, 4);
+  assert.ok(r2.files.reduce((s, f) => s + f.bytes, 0) <= DESIGN_LIMITS.maxTotalFileBytes);
+  assert.deepEqual(r2.rejected.map((x) => x.reason), ['total size cap reached']);
+
+  const r3 = await readRequestedFiles({ cwd, context, requested: [range('src/big.js', 1, 401), range('wide.txt', 1, 300)] });
+  assert.deepEqual(r3.rejected.map((x) => x.reason), ['invalid range', 'excerpt too large']);
+
+  // Stage 2 (countExisting:false) still gets its own 10 items after 10 Stage 1 excerpts.
+  const r4 = await readRequestedFiles({
+    cwd, context, existingFiles: r1.files, countExisting: false, source: 'stage2-fetch',
+    requested: Array.from({ length: 10 }, (_, i) => range('src/big.js', 100 + i, 100 + i)),
+  });
+  assert.equal(r4.files.length, 10);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC-05: every bad excerpt item is reported in rejected with a reason and costs no extra model call; envelope violations still use the one retry', async () => {
+  const cwd = bigRepo({
+    'sub/a.js': 'a\n', 'dir-later': 'x\n', 'fifo-later': 'x\n', 'gone.txt': 'x\n', 'latin1.txt': 'x\n', 'weird.js#L1-L2': 'x\n', 'small.js': '1\n2\n3\n',
+  });
+  // Replace committed entries after the commit so the tracked set still lists them.
+  writeFileSync(path.join(cwd, 'latin1.txt'), Buffer.from([0x61, 0xff, 0x0a]));
+  rmSync(path.join(cwd, 'gone.txt'));
+  rmSync(path.join(cwd, 'dir-later')); mkdirSync(path.join(cwd, 'dir-later'));
+  rmSync(path.join(cwd, 'fifo-later')); execFileSync('mkfifo', [path.join(cwd, 'fifo-later')]);
+  const real = mkdtempSync(path.join(os.tmpdir(), 'rl-real-'));
+  writeFileSync(path.join(real, 'a.js'), 'OUTSIDE-REPO-MARKER\n');
+  rmSync(path.join(cwd, 'sub'), { recursive: true }); symlinkSync(real, path.join(cwd, 'sub'));
+  writeFileSync(path.join(cwd, 'scratch.txt'), 'untracked\n');
+  const bad = [
+    range('../x', 1, 1), range('.git/config', 1, 1), range('sub/a.js', 1, 1), range('scratch.txt', 1, 1), range('dir-later', 1, 1),
+    range('fifo-later', 1, 1), range('gone.txt', 1, 1), range('latin1.txt', 1, 1), range('small.js', 0, 1), range('small.js', 3, 2),
+    range('small.js', 2, 9), { path: 'small.js', startLine: 1.5, endLine: 2 }, { path: 'small.js', startLine: 1, endLine: 2, extra: 1 },
+    { path: 'small.js', startLine: 1 }, { startLine: 1, endLine: 2 }, range('weird.js#L1-L2', 1, 1), range('Prompt.md', 1, 1),
+  ];
+  const expected = [
+    'invalid path', 'invalid path', 'DESIGN_TARGET_SYMLINK', 'not a tracked file', 'DESIGN_TARGET_NOT_FILE',
+    'DESIGN_TARGET_NOT_FILE', 'DESIGN_TARGET_MISSING', 'DESIGN_TARGET_NOT_UTF8', 'invalid range', 'invalid range',
+    'range out of bounds', 'invalid range request', 'invalid range request', 'invalid range request', 'invalid range request', 'ambiguous path',
+  ];
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      supervisor: (n) => (n === 1
+        ? { needFactFiles: true, requestedFiles: bad, pendingClaims: ['c'] }
+        : adj({ factChecks: [{ claim: 'c', critical: false, status: 'UNVERIFIED', evidenceSources: [], reason: 'all rejected' }] })),
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  assert.equal(log.reviewer.length, 2, 'no reviewer retry');
+  assert.equal(log.supervisor.length, 2, 'fact fetch + final adjudication only: no corrective retry');
+  const reasons = r.factVerification.stage2RejectedFiles.map((x) => x.reason);
+  assert.deepEqual(reasons, expected);
+  assert.ok(!JSON.stringify(r.factVerification).includes('[object Object]'));
+  assert.ok(!log.supervisor.map((a) => a.prompt).join('\n').includes('OUTSIDE-REPO-MARKER'), 'symlinked parent never read');
+  assert.ok(!JSON.stringify(r.factVerification.stage2RejectedFiles).includes('Prompt.md'), 'design target silently dropped');
+
+  assert.equal(validateFactFileRequest({ needFactFiles: true, requestedFiles: [1], pendingClaims: ['c'] }).malformed, true);
+  for (const item of [null, ['a'], 3, true]) assert.equal(validateFileRequest({ requestedFiles: [item] }).malformed, true);
+  assert.equal(validateFileRequest({ requestedFiles: [{}] }).malformed, undefined, 'object item content is an item rule, not an envelope rule');
+  rmSync(cwd, { recursive: true, force: true });
+  rmSync(real, { recursive: true, force: true });
+});
+
+test('envelope violation in the fact fetch (number item) is malformed and uses exactly the existing single retry', async () => {
+  const cwd = bigRepo();
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      supervisor: (n) => (n === 1 ? { needFactFiles: true, requestedFiles: [7], pendingClaims: ['c'] } : adj()),
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  assert.equal(log.supervisor.length, 2);
+  assert.match(log.supervisor[1].prompt, /PREVIOUS REPLY WAS REJECTED: needFactFiles requires a non-empty requestedFiles array/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('version anchor: BOM kept in line 1 with fileSha256 over raw bytes; headBlobMatch reads the RECORDED headSha with Buffer output', async () => {
+  const bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('first\nsecond\n')]);
+  const cwd = bigRepo();
+  writeFileSync(path.join(cwd, 'bom.txt'), bom);
+  git(cwd, 'add', 'bom.txt'); git(cwd, 'commit', '-qm', 'bom');
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const recorded = context.codeIdentity.headSha;
+  // HEAD moves after the snapshot: the comparison must still use the recorded sha.
+  writeFileSync(path.join(cwd, 'bom.txt'), 'changed\n'); git(cwd, 'commit', '-qam', 'move head');
+  writeFileSync(path.join(cwd, 'bom.txt'), bom);
+  const calls = [];
+  const real = (await import('node:util')).promisify((await import('node:child_process')).execFile);
+  const execFileFn = (cmd, args, opts) => { calls.push({ args, opts }); return real(cmd, args, opts); };
+  const r = await readRequestedFiles({ cwd, context, requested: [range('bom.txt', 1, 1)], execFileFn });
+  const f = r.files[0];
+  assert.equal(f.text, '\uFEFFfirst');
+  assert.equal(f.fileSha256, rawSha(bom));
+  assert.equal(f.headBlobMatch, true, 'bytes equal the RECORDED head blob, not the moved HEAD');
+  const cat = calls.filter((c) => c.args[0] === 'cat-file');
+  assert.equal(cat.length, 1);
+  assert.deepEqual(cat[0].args, ['cat-file', 'blob', `${recorded}:./bom.txt`]);
+  assert.equal(cat[0].opts.encoding, 'buffer');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('EV-BUFFER (R2-P3-3): headBlobMatch is raw byte equality — invalid-UTF-8 blob vs U+FFFD worktree is false; a string result is never trusted', async () => {
+  const cwd = bigRepo();
+  writeFileSync(path.join(cwd, 'enc.txt'), Buffer.from([0x61, 0xff, 0x0a]));
+  git(cwd, 'add', 'enc.txt'); git(cwd, 'commit', '-qm', 'enc');
+  writeFileSync(path.join(cwd, 'enc.txt'), 'a\uFFFD\n');
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  // Decoded as strings both sides read "a\uFFFD\n"; as bytes they differ.
+  assert.equal(Buffer.from([0x61, 0xff, 0x0a]).toString('utf8'), readFileSync(path.join(cwd, 'enc.txt'), 'utf8'));
+  const r = await readRequestedFiles({ cwd, context, requested: [range('enc.txt', 1, 1)] });
+  assert.equal(r.files[0].headBlobMatch, false);
+  assert.equal(r.files[0].dirty, true);
+
+  // A git stand-in that returns a (decoded) string, even an identical one, is not a byte comparison: null => dirty.
+  const ctx2 = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  ctx2.codeIdentity.dirtyPaths = new Set();
+  writeFileSync(path.join(cwd, 'same.txt'), 'same\n');
+  git(cwd, 'add', 'same.txt'); git(cwd, 'commit', '-qm', 'same');
+  ctx2.tracked.add('same.txt');
+  const stringFn = async () => ({ stdout: 'same\n' });
+  const r2 = await readRequestedFiles({ cwd, context: ctx2, requested: [range('same.txt', 1, 1)], execFileFn: stringFn });
+  assert.equal(r2.files[0].headBlobMatch, null);
+  assert.equal(r2.files[0].dirty, true);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('EV-CACHE (R2-P3-4): within one batch a path is read once and every excerpt is cut from those bytes; its blob verdict describes exactly them', async () => {
+  const cwd = bigRepo();
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const real = (await import('node:util')).promisify((await import('node:child_process')).execFile);
+  let catCalls = 0;
+  const execFileFn = async (cmd, args, opts) => {
+    if (args[0] === 'cat-file') {
+      catCalls += 1;
+      // The file changes on disk right after the first read, before the second excerpt.
+      writeFileSync(path.join(cwd, 'src/big.js'), 'TAMPERED\n'.repeat(BIG_LINES));
+    }
+    return real(cmd, args, opts);
+  };
+  const original = readFileSync(path.join(cwd, 'src/big.js'));
+  const r = await readRequestedFiles({ cwd, context, requested: [range('src/big.js', 1, 2), range('src/big.js', 500, 501)], execFileFn });
+  assert.equal(catCalls, 1, 'one blob lookup per path per batch');
+  assert.equal(r.files.length, 2);
+  for (const f of r.files) {
+    assert.equal(f.fileSha256, rawSha(original), 'both excerpts come from the same bytes');
+    assert.ok(!f.text.includes('TAMPERED'));
+    assert.equal(f.headBlobMatch, true, 'the verdict is about the bytes actually shown');
+  }
+  assert.equal(r.files[1].text, `${BIG_LINE(500)}\n${BIG_LINE(501)}`);
+  // A new batch re-reads and sees the tampering as a blob mismatch.
+  const again = await readRequestedFiles({ cwd, context, requested: [range('src/big.js', 1, 2)] });
+  assert.equal(again.files[0].headBlobMatch, false);
+  assert.equal(again.files[0].dirty, true);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('carry-over: Stage 1 excerpt then Stage 2 another range + whole request of a large file; whole-then-excerpt is alreadyProvided, not a rejection', async () => {
+  const cwd = bigRepo({ 'small.js': 'one\ntwo\n' });
+  const { ctl, log } = makeCtl({
+    cwd,
+    fakes: {
+      reviewer: (a) => ({ value: a.stage === 'files' ? { requestedFiles: [range('src/big.js', 1, 10), 'small.js'] } : PROPOSALS, usage: OK_USAGE, model: 'm' }),
+      supervisor: (n) => (n === 1
+        ? { needFactFiles: true, requestedFiles: [range('src/big.js', 20, 30), 'src/big.js', range('small.js', 1, 1)], pendingClaims: ['a', 'b'] }
+        : adj({
+          factChecks: [
+            { claim: 'a', critical: true, status: 'SUPPORTED', evidenceSources: ['src/big.js#L1-L10', 'src/big.js#L20-L30'], reason: 'ok' },
+            { claim: 'b', critical: true, status: 'SUPPORTED', evidenceSources: ['small.js'], reason: 'ok' },
+          ],
+        })),
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.match(log.reviewer[1].prompt, /SOURCE EXCERPT src\/big\.js#L1-L10 \(lines 1-10 of 1000; NOT the whole file/);
+  assert.deepEqual(r.factVerification.checkedFiles.map((f) => f.citation), ['src/big.js#L1-L10', 'small.js', 'src/big.js#L20-L30']);
+  assert.deepEqual(r.factVerification.stage2RejectedFiles, [{ path: 'src/big.js', reason: 'DESIGN_TARGET_TOO_LARGE', totalLines: BIG_LINES }]);
+  assert.deepEqual(r.factVerification.alreadyProvided, [{ path: 'small.js', requested: 'small.js#L1-L1' }]);
+  assert.match(log.supervisor[1].prompt, /ALREADY PROVIDED AS WHOLE FILE: small\.js — cite "small\.js"/);
+  // A whole-file Stage 2 rejection exists, but no critical claim is UNVERIFIED: PASS.
+  assert.equal(r.status, 'PASS');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('tree markers are display-only: tree and tracked set unchanged; symlinked entries get no marker', async () => {
+  const cwd = bigRepo();
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const listed = git(cwd, 'ls-files', '-z').toString().split('\0').filter(Boolean);
+  assert.deepEqual([...context.tracked].sort(), listed.sort());
+  assert.deepEqual([...context.tree].sort(), listed.sort());
+  assert.ok(context.tree.includes('src/big.js'), 'raw path, no marker inside the tree array');
+  assert.ok(context.largeFiles.has('src/big.js'));
+  assert.equal(context.largeFiles.has('README.md'), false);
+  const p = buildFileRequestPrompt({ plan: PLAN, context, workerSummary: null });
+  assert.match(p, /src\/big\.js \[large: \d+ bytes — request line ranges\]/);
+  assert.match(p, /unavailable, not truncated/);
+  assert.match(p, /label is for CITING only and is never a request path/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('R2-P3-1/5/6/9: label strings as request paths, platform without O_NOFOLLOW, subdirectory cwd, readable rejected object path', async () => {
+  const cwd = bigRepo({ 'pkg/inner.js': 'inner-1\ninner-2\n' });
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const lbl = await readRequestedFiles({ cwd, context, requested: ['src/big.js#L1-L5'] });
+  assert.match(lbl.rejected[0].reason, /excerpt label is a citation, not a request path/);
+
+  await assert.rejects(
+    readRepoFileBytesBounded({ cwd, rel: 'README.md', maxBytes: 1024, fsConstants: { O_RDONLY: 0 } }),
+    (err) => err.code === 'DESIGN_TARGET_UNREADABLE',
+  );
+  const ok = await readRepoFileBytesBounded({ cwd, rel: 'README.md', maxBytes: 1024 });
+  assert.equal(ok.text, 'README-CONTENT');
+  await assert.rejects(readRepoFileBytesBounded({ cwd, rel: 'src/big.js', maxBytes: 1024 }), (err) => err.code === 'DESIGN_SOURCE_TOO_LARGE');
+  assert.deepEqual(splitSourceLines('a\n\nb\n'), ['a', '', 'b']);
+  assert.deepEqual(splitSourceLines('\n'), ['']);
+
+  const sub = path.join(cwd, 'pkg');
+  const subCtx = await collectDesignContext({ cwd: sub, reviewTarget: 'Prompt.md' });
+  assert.ok(subCtx.tracked.has('inner.js'));
+  const r = await readRequestedFiles({ cwd: sub, context: subCtx, requested: [range('inner.js', 2, 2)] });
+  assert.equal(r.files[0].text, 'inner-2');
+  assert.equal(r.files[0].headBlobMatch, true, 'cat-file <sha>:./path resolves relative to cwd');
+
+  const noPath = await readRequestedFiles({ cwd, context, requested: [{ startLine: 1, endLine: 2 }] });
+  assert.equal(noPath.rejected[0].path, '(range request without a path string)');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC-07 (synthetic, stub models): Supervisor fetches a range of a large tracked file, cites its label and the round PASSes; a wrong label is malformed and retried', async () => {
+  for (const variant of ['right', 'wrongThenRight']) {
+    const cwd = bigRepo();
+    const { ctl, log } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n) => {
+          if (n === 1) return { needFactFiles: true, requestedFiles: [range('src/big.js', 400, 420)], pendingClaims: ['line 410 exists'] };
+          const cite = variant === 'wrongThenRight' && n === 2 ? 'src/big.js' : 'src/big.js#L400-L420';
+          return adj({ factChecks: [{ claim: 'line 410 exists', critical: true, status: 'SUPPORTED', evidenceSources: [cite], reason: 'seen at 410|' }] });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'PASS', variant);
+    assert.equal(log.supervisor.length, variant === 'right' ? 2 : 3, variant);
+    if (variant === 'wrongThenRight') assert.match(log.supervisor[2].prompt, /cites file\(s\) not actually read by the controller/);
+    const cf = r.factVerification.checkedFiles[0];
+    assert.equal(cf.citation, 'src/big.js#L400-L420');
+    assert.equal(cf.startLine, 400);
+    assert.equal(cf.endLine, 420);
+    assert.equal(cf.totalLines, BIG_LINES);
+    assert.match(cf.fileSha256, /^[0-9a-f]{64}$/);
+    assert.equal(cf.excerptSha256, cf.sha256);
+    assert.equal(cf.headBlobMatch, true);
+    assert.equal(cf.dirty, false);
+    assert.equal(r.factVerification.factChecks[0].evidenceSources[0], 'src/big.js#L400-L420');
+    assert.ok(!log.supervisor[1].prompt.includes('// line 399 ') && !log.supervisor[1].prompt.includes('// line 421 '));
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

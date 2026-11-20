@@ -150,6 +150,18 @@ Per `reviewloop_review` round, after the Gate and drift-guarded file read:
    Call 1 optionally requests up to 10 tracked files; the controller reads them
    itself (symlink-safe, per-file and total byte caps, untracked/escaping paths
    refused). Call 2 returns 1-2 proposals with their costs.
+   **Line-range excerpts:** a request item may also be
+   `{path, startLine, endLine}`. A tracked file over the 24 KiB whole-file cap
+   (marked `[large: N bytes]` in the tree) is never sent whole or truncated;
+   the controller re-opens it with `O_NOFOLLOW|O_NONBLOCK`, checks the handle
+   against the symlink-free `lstat` walk, reads at most 1 MiB locally and
+   gives the model only lines a–b (≤ 400 lines, ≤ 24 KiB including line-number
+   prefixes, inside the same 10-item / 96 KiB counters), labelled
+   `path#La-Lb` with `fileSha256`, `excerptSha256` and `headBlobMatch` (raw-byte
+   equality with `git cat-file blob <recorded HEAD>:./path`; anything but an
+   exact match makes the excerpt dirty). A fact can be `SUPPORTED` only by
+   citing the exact label provided; a bad range item is reported back as
+   rejected, never retried.
 2. **Supervisor, adjudication** (supervisor pool). It sees the Plan, the
    proposals and the complete design file and returns two columns: the
    comparison (`ALIGNED` / `MINOR_DIFF` / `MAJOR_DIFF` / `NEEDS_HUMAN`, plus an
