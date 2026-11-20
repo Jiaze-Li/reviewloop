@@ -1,14 +1,15 @@
 // Two-stage Design review: Reviewer independent proposal + Supervisor adjudication.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
   buildFileRequestPrompt, validateAdjudication, validateProposals, validateFileRequest, decideDesignTransition, finalizePassComment,
-  collectDesignContext, readRequestedFiles, DESIGN_LIMITS, buildProposalPrompt, buildAdjudicationPrompt,
+  collectDesignContext, collectCodeIdentity, parseGitStatusDirtyPaths, validateFactFileRequest,
+  readRequestedFiles, DESIGN_LIMITS, buildProposalPrompt, buildAdjudicationPrompt,
 } from '../src/reviewloop/designTwoStage.js';
 import { designContentSha256 } from '../src/reviewloop/designTarget.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
@@ -23,6 +24,7 @@ const adj = (over = {}) => ({
   nonBlockingFindings: over.nonBlockingFindings ?? [],
   humanQuestions: over.humanQuestions ?? [],
   designPassComment: 'designPassComment' in over ? over.designPassComment : 'Builds the thing.',
+  ...('factChecks' in over ? { factChecks: over.factChecks } : {}),
 });
 const PROPOSALS = { proposals: [{ title: 'Reuse', summary: 'reuse engine', tradeoffs: 'rigid' }], confidenceNote: '' };
 
@@ -385,5 +387,435 @@ test('two malformed outputs in a row fail closed with the concrete reason and a 
   assert.match(text, /Reviewer proposals unusable \(proposal output is not a JSON object\)/);
   assert.match(text, /Sure, here is my answer/);
   assert.ok(!text.includes('x'.repeat(400)), 'excerpt is bounded');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+// ------------------------------------------------ independent fact verification
+
+test('parseGitStatusDirtyPaths handles renames/copies without shifting subsequent entries', () => {
+  const raw = 'R  new.js\0old.js\0 M src/a.js\0?? Prompt.md\0?? other.txt\0';
+  const dirty = parseGitStatusDirtyPaths(raw, 'Prompt.md');
+  assert.equal(dirty.has('new.js'), true);
+  assert.equal(dirty.has('old.js'), true);
+  assert.equal(dirty.has('src/a.js'), true);
+  assert.equal(dirty.has('other.txt'), true);
+  assert.equal(dirty.has('Prompt.md'), false);
+});
+
+test('collectCodeIdentity reports clean git-head, per-file dirty status, and no-git fallback', async () => {
+  const cwd = gitRepo();
+  const clean = await collectCodeIdentity({ cwd, reviewTarget: 'Prompt.md' });
+  assert.equal(clean.sourceMode, 'git-head');
+  assert.equal(clean.worktreeDirty, false);
+  assert.match(clean.headSha, /^[0-9a-f]{40}$/);
+  assert.ok(clean.branch);
+
+  writeFileSync(path.join(cwd, 'README.md'), 'MODIFIED');
+  writeFileSync(path.join(cwd, 'Prompt.md'), 'UNTRACKED-TARGET');
+  const dirty = await collectCodeIdentity({ cwd, reviewTarget: 'Prompt.md' });
+  assert.equal(dirty.sourceMode, 'worktree-dirty');
+  assert.equal(dirty.worktreeDirty, true);
+  assert.equal(dirty.dirtyPaths.has('README.md'), true);
+  assert.equal(dirty.dirtyPaths.has('package.json'), false);
+  assert.equal(dirty.dirtyPaths.has('Prompt.md'), false);
+
+  const noGit = mkdtempSync(path.join(os.tmpdir(), 'rl-nogit-'));
+  const ng = await collectCodeIdentity({ cwd: noGit, reviewTarget: 'Prompt.md' });
+  assert.equal(ng.sourceMode, 'no-git');
+  assert.equal(ng.headSha, null);
+
+  rmSync(cwd, { recursive: true, force: true });
+  rmSync(noGit, { recursive: true, force: true });
+});
+
+test('I2 anti-hallucination: validateAdjudication rejects SUPPORTED factCheck citing unread or rejected files', () => {
+  const verifiedPaths = new Set(['src/a.js']);
+  const noSources = validateAdjudication(
+    adj({ factChecks: [{ claim: 'c', critical: true, status: 'SUPPORTED', evidenceSources: [], reason: 'r' }] }),
+    { verifiedPaths },
+  );
+  assert.equal(noSources.malformed, true);
+
+  const unreadSource = validateAdjudication(
+    adj({ factChecks: [{ claim: 'c', critical: true, status: 'SUPPORTED', evidenceSources: ['src/unread.js'], reason: 'r' }] }),
+    { verifiedPaths },
+  );
+  assert.equal(unreadSource.malformed, true);
+
+  const valid = validateAdjudication(
+    adj({ factChecks: [{ claim: 'c', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'r' }] }),
+    { verifiedPaths },
+  );
+  assert.equal(valid.malformed, undefined);
+  assert.equal(valid.factChecks.length, 1);
+});
+
+test('AC02 (#59 living lock-holder TTL): true claim PASSes after Stage 2 fetch; false claim is CONTRADICTED -> REWORK', async () => {
+  const cwd = gitRepo();
+  mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  writeFileSync(path.join(cwd, 'src/lock.js'), 'export function canReclaim(lock, isPidAlive) {\n  if (isPidAlive(lock.pid)) return false;\n  return Date.now() > lock.expiresAt;\n}\n');
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add lock'], { cwd, stdio: 'pipe' });
+
+  // Positive: Design states living same-host lock holder is NOT reclaimed by TTL
+  {
+    const { ctl, log } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n, a) => {
+          if (n === 1) return { needFactFiles: true, requestedFiles: ['src/lock.js'], pendingClaims: ['living holder not reclaimed by TTL'] };
+          assert.match(a.prompt, /VERIFIED SOURCE FILE src\/lock\.js/);
+          assert.match(a.prompt, /if \(isPidAlive\(lock\.pid\)\) return false;/);
+          assert.match(a.prompt, /UNTRUSTED DATA/);
+          return adj({
+            factChecks: [{
+              claim: 'Living lock holder on same host is not reclaimed by TTL',
+              critical: true,
+              status: 'SUPPORTED',
+              evidenceSources: ['src/lock.js'],
+              reason: 'canReclaim returns false whenever isPidAlive(lock.pid) is true',
+            }],
+          });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd, '# Design\nRelies on src/lock.js: living holder is not reclaimed.\n\n## Options\n- A\n\n## Assumptions\nNone\n');
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'PASS');
+    assert.equal(log.supervisor.length, 2);
+    assert.equal(r.factVerification.extraModelCalls, 1);
+    assert.equal(r.factVerification.checkedFiles.length, 1);
+    assert.equal(r.factVerification.checkedFiles[0].path, 'src/lock.js');
+    assert.equal(r.factVerification.checkedFiles[0].source, 'stage2-fetch');
+  }
+
+  // Negative: Design falsely claims living lock holder IS reclaimed by TTL (even if Supervisor omits blockingFindings)
+  rmSync(path.join(cwd, 'Prompt.md'), { force: true });
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n) => {
+          if (n === 1) return { needFactFiles: true, requestedFiles: ['src/lock.js'], pendingClaims: ['TTL reclaims living holder'] };
+          return adj({
+            blockingFindings: [],
+            designPassComment: null,
+            factChecks: [{
+              claim: 'Living lock holder is automatically reclaimed by TTL',
+              critical: true,
+              status: 'CONTRADICTED',
+              evidenceSources: ['src/lock.js'],
+              reason: 'canReclaim explicitly returns false when isPidAlive(lock.pid) is true',
+            }],
+          });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd, '# Design\nAssumes TTL reclaims living lock holder.\n\n## Options\n- A\n\n## Assumptions\nNone\n');
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'REWORK');
+    assert.equal(r.designSha256, undefined);
+    assert.equal(r.blockingFindings.length, 1);
+    assert.equal(r.blockingFindings[0].severity, 'P1');
+  }
+
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC03 & AC05 (#59 global call cap): Supervisor fetches caller/config and blocks false task-local claim', async () => {
+  const cwd = gitRepo();
+  mkdirSync(path.join(cwd, 'src'), { recursive: true });
+  writeFileSync(path.join(cwd, 'src/config.js'), 'export const GLOBAL_CALL_CAP = 50;\n');
+  writeFileSync(path.join(cwd, 'src/runner.js'), 'import { GLOBAL_CALL_CAP } from "./config.js";\nexport function checkAllTasks(total) { return total < GLOBAL_CALL_CAP; }\n');
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add config and runner'], { cwd, stdio: 'pipe' });
+
+  const { ctl } = makeCtl({
+    cwd,
+    fakes: {
+      supervisor: (n, a) => {
+        if (n === 1) {
+          assert.match(a.prompt, /src\/runner\.js/);
+          return { needFactFiles: true, requestedFiles: ['src/config.js', 'src/runner.js'], pendingClaims: ['GLOBAL_CALL_CAP is task-local'] };
+        }
+        return adj({
+          blockingFindings: [],
+          designPassComment: null,
+          factChecks: [{
+            claim: 'Adjusting GLOBAL_CALL_CAP only affects the current task',
+            critical: true,
+            status: 'CONTRADICTED',
+            evidenceSources: ['src/config.js', 'src/runner.js'],
+            reason: 'runner.js applies GLOBAL_CALL_CAP across all tasks via checkAllTasks(total)',
+          }],
+        });
+      },
+    },
+  });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd, '# Design\nQuotes GLOBAL_CALL_CAP = 50 and claims it is per-task.\n\n## Options\n- A\n\n## Assumptions\nNone\n');
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'REWORK');
+  assert.equal(r.factVerification.checkedFiles.map((f) => f.path).sort().join(','), 'src/config.js,src/runner.js');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC06 & AC08: Stage 1 reads do not starve Stage 2 fact fetch; Stage 2 cap -> HUMAN_REQUIRED; non-critical UNVERIFIED can PASS', async () => {
+  const cwd = gitRepo();
+  for (let i = 0; i < 21; i += 1) {
+    writeFileSync(path.join(cwd, `f${i}.js`), `export const v${i} = ${i};\n`);
+  }
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add files'], { cwd, stdio: 'pipe' });
+
+  // Stage 1 reads 10 files (f0..f9); Stage 2 requests 11 new files (f10..f20) plus invalid path ->
+  // Stage 2 still gets its own 10 new files (f10..f19), f20 is rejected with cap reached -> critical UNVERIFIED => HUMAN_REQUIRED
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        reviewer: (a) => (a.stage === 'files'
+          ? { value: { requestedFiles: Array.from({ length: 10 }, (_, i) => `f${i}.js`) }, usage: OK_USAGE, model: 'm' }
+          : { value: PROPOSALS, usage: OK_USAGE, model: 'm' }),
+        supervisor: (n) => {
+          if (n === 1) {
+            return {
+              needFactFiles: true,
+              requestedFiles: [...Array.from({ length: 11 }, (_, i) => `f${10 + i}.js`), '../secret.txt'],
+              pendingClaims: ['check f20.js'],
+            };
+          }
+          return adj({
+            factChecks: [{
+              claim: 'f20.js invariant',
+              critical: true,
+              status: 'UNVERIFIED',
+              evidenceSources: [],
+              reason: 'f20.js was rejected due to file count cap',
+            }],
+          });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'HUMAN_REQUIRED');
+    assert.equal(r.designSha256, undefined);
+    assert.equal(r.factVerification.checkedFiles.length, 20);
+    assert.ok(r.factVerification.rejectedFiles.some((x) => x.path === 'f20.js' && x.reason === 'file count cap reached'));
+    assert.ok(r.factVerification.rejectedFiles.some((x) => x.reason === 'invalid path'));
+  }
+
+  // Non-critical UNVERIFIED does not block PASS; critical UNVERIFIED without boundary block => REWORK_DEFECTS
+  const nonBoundaryRework = decideDesignTransition({
+    adjudication: adj({
+      factChecks: [{ claim: 'Check lock caller', critical: true, status: 'UNVERIFIED', evidenceSources: [], reason: 'Missing file reference in design' }],
+    }),
+    exchangeCount: 0,
+    rejectedFiles: [],
+    codeIdentity: { sourceMode: 'git-head' },
+  });
+  assert.equal(nonBoundaryRework.kind, 'REWORK_DEFECTS');
+  assert.equal(nonBoundaryRework.synthesizedFindings.length, 1);
+
+  rmSync(path.join(cwd, 'Prompt.md'), { force: true });
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: () => adj({
+          factChecks: [{
+            claim: 'Optional README note',
+            critical: false,
+            status: 'UNVERIFIED',
+            evidenceSources: [],
+            reason: 'Not checked',
+          }],
+        }),
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'PASS');
+    assert.equal(r.factVerification.extraModelCalls, 0);
+  }
+
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('AC10 & AC11: ordinary designs without needFactFiles incur 0 extra calls and legacy adjudication without factChecks still works', async () => {
+  const cwd = gitRepo();
+  const { ctl, log } = makeCtl({ cwd });
+  const b = await begin(ctl, cwd);
+  writeDesign(cwd);
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  assert.equal(log.reviewer.length, 2);
+  assert.equal(log.supervisor.length, 1);
+  assert.equal(r.factVerification.extraModelCalls, 0);
+  assert.deepEqual(r.factVerification.factChecks, []);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('pendingClaims closure: dropping a pendingClaim from factChecks is rejected as malformed', () => {
+  const verifiedPaths = new Set(['src/a.js']);
+  const dropped = validateAdjudication(
+    adj({
+      factChecks: [{ claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' }],
+    }),
+    { verifiedPaths, requireFactChecks: true, pendingClaims: ['Lock check', 'Budget scope'] },
+  );
+  assert.equal(dropped.malformed, true);
+  assert.match(dropped.reason, /pendingClaims/);
+
+  const complete = validateAdjudication(
+    adj({
+      factChecks: [
+        { claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' },
+        { claim: 'Budget scope', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' },
+      ],
+    }),
+    { verifiedPaths, requireFactChecks: true, pendingClaims: ['Lock check', 'Budget scope'] },
+  );
+  assert.equal(complete.malformed, undefined);
+});
+
+test('collectCodeIdentity marks git status failure as status-unverified and blocks clean PASS', async () => {
+  const execFileFn = async (_cmd, args) => {
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { stdout: 'a'.repeat(40) + '\n' };
+    if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return { stdout: 'main\n' };
+    if (args[0] === 'status') throw new Error('git status failed');
+    return { stdout: '' };
+  };
+  const id = await collectCodeIdentity({ cwd: '/tmp', reviewTarget: 'Prompt.md', execFileFn });
+  assert.equal(id.sourceMode, 'status-unverified');
+  assert.equal(id.worktreeDirty, null);
+  assert.equal(id.statusVerified, false);
+
+  const transition = decideDesignTransition({
+    adjudication: adj({
+      factChecks: [{ claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' }],
+    }),
+    exchangeCount: 0,
+    rejectedFiles: [],
+    codeIdentity: id,
+  });
+  assert.equal(transition.kind, 'HUMAN');
+});
+
+test('readRequestedFiles records over-10 file requests in rejected instead of silently truncating', async () => {
+  const cwd = gitRepo();
+  const names = [];
+  for (let i = 0; i < 12; i += 1) {
+    const name = `extra-${i}.js`;
+    names.push(name);
+    writeFileSync(path.join(cwd, name), `export const n = ${i};\n`);
+  }
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add 12 files'], { cwd, stdio: 'pipe' });
+
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const req = validateFileRequest({ requestedFiles: names });
+  assert.equal(req.requestedFiles.length, 10);
+  assert.deepEqual(req.overflowFiles, ['extra-10.js', 'extra-11.js']);
+  const { files, rejected } = await readRequestedFiles({ cwd, requested: [...req.requestedFiles, ...(req.overflowFiles ?? [])], context });
+  assert.equal(files.length, 10);
+  assert.equal(rejected.length, 2);
+  assert.equal(rejected[0].path, 'extra-10.js');
+  assert.equal(rejected[0].reason, 'file count cap reached');
+  assert.equal(rejected[1].path, 'extra-11.js');
+  assert.equal(rejected[1].reason, 'file count cap reached');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('F002: decideDesignTransition blocks PASS when critical SUPPORTED factCheck cites a dirty worktree file', () => {
+  const transition = decideDesignTransition({
+    adjudication: adj({
+      factChecks: [{
+        claim: 'Lock check',
+        critical: true,
+        status: 'SUPPORTED',
+        evidenceSources: ['src/lock.js'],
+        reason: 'matches uncommitted local edit',
+      }],
+    }),
+    exchangeCount: 0,
+    rejectedFiles: [],
+    codeIdentity: { sourceMode: 'worktree-dirty' },
+    dirtyVerifiedPaths: new Set(['src/lock.js']),
+  });
+  assert.equal(transition.kind, 'HUMAN');
+  assert.match(transition.reason, /uncommitted worktree modifications/);
+});
+
+test('F003 & F004: Stage 1 overflow rejections do not force HUMAN_REQUIRED, and dirty file end-to-end blocks PASS', async () => {
+  const cwd = gitRepo();
+  for (let i = 0; i < 12; i += 1) {
+    writeFileSync(path.join(cwd, `s1-${i}.js`), `export const x = ${i};\n`);
+  }
+  writeFileSync(path.join(cwd, 'lock.js'), 'export const ttl = false;\n');
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add files'], { cwd, stdio: 'pipe' });
+
+  // F003: Stage 1 requests 12 files (2 rejected in Stage 1); Stage 2 has critical UNVERIFIED with 0 Stage 2 rejections => REWORK (not HUMAN_REQUIRED)
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        reviewer: (a) => (a.stage === 'files'
+          ? { value: { requestedFiles: Array.from({ length: 12 }, (_, i) => `s1-${i}.js`) }, usage: OK_USAGE, model: 'm' }
+          : { value: PROPOSALS, usage: OK_USAGE, model: 'm' }),
+        supervisor: () => adj({
+          factChecks: [{
+            claim: 'Clarify lock design',
+            critical: true,
+            status: 'UNVERIFIED',
+            evidenceSources: [],
+            reason: 'Design needs clearer lock reference',
+          }],
+        }),
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'REWORK');
+    assert.equal(r.factVerification.rejectedFiles.length, 2);
+    assert.equal(r.factVerification.stage2RejectedFiles.length, 0);
+  }
+
+  // F004: end-to-end controller blocks PASS when a verified file has uncommitted worktree modifications
+  rmSync(path.join(cwd, 'Prompt.md'), { force: true });
+  writeFileSync(path.join(cwd, 'lock.js'), 'export const ttl = true; // uncommitted edit\n');
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n) => {
+          if (n === 1) return { needFactFiles: true, requestedFiles: ['lock.js'], pendingClaims: ['lock ttl'] };
+          return adj({
+            factChecks: [{
+              claim: 'lock.js ttl',
+              critical: true,
+              status: 'SUPPORTED',
+              evidenceSources: ['lock.js'],
+              reason: 'matches dirty worktree file',
+            }],
+          });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'HUMAN_REQUIRED');
+    assert.equal(r.designSha256, undefined);
+    assert.equal(r.factVerification.checkedFiles[0].dirty, true);
+  }
+
   rmSync(cwd, { recursive: true, force: true });
 });

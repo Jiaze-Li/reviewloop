@@ -1335,10 +1335,22 @@ export function createReviewLoopController({
     }
 
     const adj = out.adjudication;
-    const decision = decideDesignTransition({ adjudication: adj, exchangeCount: ds.exchangeCount });
+    const dirtyVerifiedPaths = new Set(
+      (out.factVerification?.checkedFiles ?? []).filter((f) => f.dirty).map((f) => f.path),
+    );
+    const decision = decideDesignTransition({
+      adjudication: adj,
+      exchangeCount: ds.exchangeCount,
+      rejectedFiles: out.factVerification?.stage2RejectedFiles ?? [],
+      codeIdentity: out.codeIdentity ?? null,
+      dirtyVerifiedPaths,
+    });
     if (decision.kind === 'FAILED') return failClosed(decision.reason);
 
-    const blocking = adj.blockingFindings.map((f) => ({
+    const rawBlocking = adj.blockingFindings.length > 0
+      ? adj.blockingFindings
+      : (decision.synthesizedFindings ?? []);
+    const blocking = rawBlocking.map((f) => ({
       severity: f.severity, title: f.title, detail: f.detail, rule: f.rule, signature: designFindingSignature(f),
     }));
     const review = {
@@ -1347,6 +1359,7 @@ export function createReviewLoopController({
       nonBlockingFindings: adj.nonBlockingFindings.map((f) => ({ severity: 'P3', title: f.title, detail: f.detail })),
       nonBlockingOmitted: 0, findingSignatures: blocking.map((f) => f.signature).sort(), error: null,
       physicalCalls: out.physicalCalls,
+      ...(out.factVerification ? { factVerification: out.factVerification } : {}),
     };
     review.reviewedFingerprint = fp;
     loopState.lastReview = review;
@@ -1358,6 +1371,7 @@ export function createReviewLoopController({
     const designFields = {
       comparison: adj.comparison,
       ...(adj.comparison.planConcern ? { planConcern: adj.comparison.planConcern } : {}),
+      ...(out.factVerification ? { factVerification: out.factVerification } : {}),
     };
     const telemetry = await spend.telemetry();
 
