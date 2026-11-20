@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T04:12:15.658Z",
+  "updatedAt": "2026-11-20T04:22:33.269Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
     "current": "chore(plan): bootstrap HUMAN_REQUIRED diagnosis and recovery draft PR (empty tree)",
-    "next": "等你确认设计后，说“Code”开始实现异常报告、人工恢复命令和合同索引表头修复",
+    "next": "代码已通过本地独立审查，等你授权后提交并推送到 PR 59，再交给 PR 机器人审查",
     "history": [],
     "commits": [
       {
