@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:27:32.564Z",
+  "updatedAt": "2026-11-20T08:29:50.427Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
     "title": "plan/independent-design-code-fact-verification-20261120",
     "task": "Development branch: plan/independent-design-code-fact-verification-20261120",
     "started": "2026-11-20T15:31:24+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Isolate Stage 2 fact-fetch rejections from Stage 1 and add end-to-end dirty file test",
     "next": "等待 PR 62 最终复核与测试通过后确认合并",
     "history": [
@@ -62,13 +62,15 @@
     ],
     "pr": {
       "number": 62,
-      "state": "open",
+      "state": "closed",
       "title": "plan: independently verify critical code facts during design review",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/62",
-      "merged": false,
-      "updatedAt": "2026-11-20T08:27:08Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T08:29:39Z",
+      "closedAt": "2026-11-20T08:29:39Z",
+      "updatedAt": "2026-11-20T08:29:40Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T08:29:39Z",
+    "outcome": "Merged"
   }
 }
