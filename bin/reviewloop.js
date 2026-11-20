@@ -13,6 +13,7 @@
 //   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
 //   reviewloop uninstall    remove the global ReviewLoop integration
+//   reviewloop cli          status | repair [--apply]: diagnose / re-point the global command link
 //
 // The agent-facing surface is the MCP server (reviewloop_begin /
 // reviewloop_review) — not this CLI.
@@ -22,6 +23,7 @@ import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { runDoctor, checkLegacyManagedEnv } from '../scripts/doctor.js';
 import { installGlobal, uninstallGlobal, checkGlobalStatus } from './install-plugin.js';
+import { runCliCommand } from '../scripts/cliLink.js';
 import { Persistence } from '../src/orchestrator/persistence.js';
 import { acquireLoopFileLease, describeLoopLease } from '../src/reviewloop/loopLease.js';
 import { leaseRefusalMessage } from '../src/reviewloop/leaseGuidance.js';
@@ -605,6 +607,9 @@ async function main() {
       console.log(`  MCP server: ${res.mcpBin}`);
       break;
     }
+    case 'cli':
+      process.exit(runCliCommand(rest));
+      break;
     case 'uninstall':
       await uninstallGlobal();
       console.log('ReviewLoop global integration removed.');
@@ -612,7 +617,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|lock-status|contract|spec|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|lock-status|contract|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);
