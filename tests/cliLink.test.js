@@ -138,7 +138,9 @@ test('unknown prefix: reports and stops, plans nothing', () => {
   assert.equal(runCliCommand(['repair', '--apply'], { prefix: null, repoRoot: REPO, log: () => {} }), 1);
 });
 
-test('permission denied: reports, leaves the old link, gives a next step, never escalates', async () => {
+const SKIP_ROOT = typeof process.getuid === 'function' && process.getuid() === 0 ? 'directory permission bits do not apply to root' : false;
+
+test('permission denied: reports, leaves the old link, gives a next step, never escalates', { skip: SKIP_ROOT }, async () => {
   const { prefix, libPkg } = await prefixWith({ lib: 'dangling-owned' });
   const parent = path.dirname(libPkg);
   try {
