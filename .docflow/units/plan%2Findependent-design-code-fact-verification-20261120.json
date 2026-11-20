@@ -19,7 +19,14 @@
         "message": "chore(plan): bootstrap independent design code-fact verification (empty tree)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 62,
+      "state": "open",
+      "title": "plan: independently verify critical code facts during design review",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/62",
+      "merged": false,
+      "updatedAt": "2026-11-20T07:31:29Z"
+    },
     "completed": null,
     "outcome": null
   }
