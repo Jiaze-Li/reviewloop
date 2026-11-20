@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T13:12:50.245Z",
+  "updatedAt": "2026-11-20T13:15:47.368Z",
   "task": {
     "id": "workflow/controlled-review-exception-20261120",
     "branch": "workflow/controlled-review-exception-20261120",
     "title": "workflow/controlled-review-exception-20261120",
     "task": "Development branch: workflow/controlled-review-exception-20261120",
     "started": "2026-11-20T20:24:01+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Keep the Design exception archive text when its file cannot be written",
     "next": "等 PR bot 复审 F001 的修复结果",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 67,
-      "state": "open",
+      "state": "closed",
       "title": "plan: human-authorized Design exception and recoverable stage handoff",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/67",
-      "merged": false,
-      "updatedAt": "2026-11-20T13:12:14Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T13:15:36Z",
+      "closedAt": "2026-11-20T13:15:36Z",
+      "updatedAt": "2026-11-20T13:15:36Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T13:15:36Z",
+    "outcome": "Merged"
   }
 }
