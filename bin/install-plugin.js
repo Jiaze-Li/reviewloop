@@ -17,7 +17,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFileSync as nodeExecFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import crypto from 'node:crypto';
+import {
+  readFile, writeFile, mkdir, rm, lstat, stat, readlink, realpath, chmod, readdir, rmdir,
+} from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -83,8 +86,13 @@ export function hasLegacyManagedPolicy(text = '') {
   return String(text).includes(LEGACY_BEGIN);
 }
 
-async function upsertManagedPolicy(filePath, content) {
-  await mkdir(path.dirname(filePath), { recursive: true });
+async function mkdirTracked(dir, ctx) {
+  const first = await mkdir(dir, { recursive: true });
+  if (first && ctx) ctx.createdDirs.push(first);
+}
+
+async function upsertManagedPolicy(filePath, content, ctx) {
+  await mkdirTracked(path.dirname(filePath), ctx);
   const existing = existsSync(filePath) ? await readFile(filePath, 'utf8') : '';
   const unmanaged = stripManagedPolicy(existing).trimEnd();
   const next = `${unmanaged ? `${unmanaged}\n\n` : ''}${managedBlock(content)}\n`;
@@ -136,45 +144,155 @@ function removeCodexMcp(execFileSync) {
   return runCli(execFileSync, 'codex', ['mcp', 'remove', MCP_NAME], { allowFailure: true }) !== null;
 }
 
-function hasClaudeMcp(execFileSync) {
-  return runCli(execFileSync, 'claude', ['mcp', 'get', MCP_NAME], { allowFailure: true }) !== null;
+function hasClaudeMcp(execFileSync, name = MCP_NAME) {
+  return runCli(execFileSync, 'claude', ['mcp', 'get', name], { allowFailure: true }) !== null;
 }
 
-function hasCodexMcp(execFileSync) {
-  return runCli(execFileSync, 'codex', ['mcp', 'get', MCP_NAME], { allowFailure: true }) !== null;
+function hasCodexMcp(execFileSync, name = MCP_NAME) {
+  return runCli(execFileSync, 'codex', ['mcp', 'get', name], { allowFailure: true }) !== null;
 }
 
 function renderAgySkill(commonPolicy) {
   return `---\nname: reviewloop\ndescription: Shared ReviewLoop Worker contract.\n---\n\n${String(commonPolicy).trim()}\n`;
 }
 
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+// Type-aware snapshot. A path is one of:
+//   missing     - nothing there
+//   file        - regular file (bytes + mode)
+//   symlink     - link to a regular file (readlink string + resolved target bytes + mode)
+//   dangling    - link whose target does not exist (never written through)
+//   unsupported - directory / special file / non-directory parent (never written)
 async function snapshotFileState(filePath) {
+  let st;
   try {
-    return { existed: true, content: await readFile(filePath) };
+    st = await lstat(filePath);
   } catch (err) {
-    if (err?.code === 'ENOENT') return { existed: false, content: null };
+    if (err?.code === 'ENOENT') return { kind: 'missing' };
+    if (err?.code === 'ENOTDIR') return { kind: 'unsupported', reason: 'a parent of this path is not a directory' };
     throw err;
   }
+  if (st.isSymbolicLink()) {
+    const linkTarget = await readlink(filePath);
+    let resolved;
+    try {
+      resolved = await realpath(filePath);
+    } catch (err) {
+      if (err?.code === 'ENOENT' || err?.code === 'ELOOP' || err?.code === 'ENOTDIR') return { kind: 'dangling', linkTarget };
+      throw err;
+    }
+    const rst = await stat(resolved);
+    if (!rst.isFile()) return { kind: 'unsupported', linkTarget, reason: 'symlink does not point at a regular file' };
+    return { kind: 'symlink', linkTarget, resolved, bytes: await readFile(resolved), mode: rst.mode & 0o7777 };
+  }
+  if (!st.isFile()) return { kind: 'unsupported', reason: 'not a regular file' };
+  return { kind: 'file', bytes: await readFile(filePath), mode: st.mode & 0o7777 };
 }
 
-async function restoreFileState(filePath, snapshot) {
-  await rm(filePath, { recursive: true, force: true });
-  if (!snapshot?.existed) return;
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, snapshot.content);
+function describeSnapshot(snap) {
+  switch (snap.kind) {
+    case 'missing': return 'absent';
+    case 'file': return `regular file sha256=${sha256(snap.bytes).slice(0, 12)} mode=${snap.mode.toString(8)}`;
+    case 'symlink': return `symlink -> ${snap.linkTarget}, target sha256=${sha256(snap.bytes).slice(0, 12)} mode=${snap.mode.toString(8)}`;
+    case 'dangling': return `dangling symlink -> ${snap.linkTarget}`;
+    default: return `unsupported (${snap.reason})`;
+  }
 }
 
-async function restoreFileStates(snapshots) {
-  const errors = [];
-  for (const [filePath, snapshot] of snapshots) {
+// Refuse BEFORE any side effect when a path we are about to write is a
+// dangling link or not a regular file: writing through it would create files
+// in unexpected places, and rollback could not restore it faithfully.
+function assertWritable(filePath, snap) {
+  if (snap.kind === 'dangling') {
+    throw new Error(`Refusing to install: ${filePath} is a dangling symlink -> ${snap.linkTarget}. Nothing was changed. Fix or remove the broken link (or restore its target in your dotfiles repo), then re-run the install.`);
+  }
+  if (snap.kind === 'unsupported') {
+    throw new Error(`Refusing to install: ${filePath} is not a regular file or a symlink to one (${snap.reason}). Nothing was changed. Resolve it manually, then re-run the install.`);
+  }
+}
+
+// Current state of a path, in the same vocabulary as a snapshot, for verification.
+async function verifyAgainst(filePath, snap) {
+  const current = await snapshotFileState(filePath).catch((err) => ({ kind: 'unreadable', reason: err?.message || String(err) }));
+  if (current.kind !== snap.kind) return { ok: false, actual: describeSnapshot(current) };
+  if (snap.kind === 'missing') return { ok: true };
+  if (snap.kind === 'symlink' && current.linkTarget !== snap.linkTarget) return { ok: false, actual: describeSnapshot(current) };
+  if (snap.kind === 'file' || snap.kind === 'symlink') {
+    if (sha256(current.bytes) !== sha256(snap.bytes) || current.mode !== snap.mode) return { ok: false, actual: describeSnapshot(current) };
+  }
+  return { ok: true };
+}
+
+// Restore in place. Never rm a file or symlink that existed before the install.
+async function restoreFileState(filePath, snap) {
+  switch (snap.kind) {
+    case 'missing':
+      await rm(filePath, { force: true });
+      return;
+    case 'file':
+      await writeFile(filePath, snap.bytes);
+      await chmod(filePath, snap.mode);
+      return;
+    case 'symlink': {
+      // The link itself is never touched; only its target's bytes/mode are put back.
+      const current = await readFile(snap.resolved).catch(() => null);
+      if (!current || sha256(current) !== sha256(snap.bytes)) await writeFile(snap.resolved, snap.bytes);
+      await chmod(snap.resolved, snap.mode);
+      return;
+    }
+    default:
+      return; // dangling / unsupported are rejected before any write
+  }
+}
+
+async function pruneEmptyDirs(dir) {
+  let entries;
+  try { entries = await readdir(dir, { withFileTypes: true }); } catch { return false; }
+  for (const entry of entries) {
+    // eslint-disable-next-line no-await-in-loop
+    if (entry.isDirectory()) await pruneEmptyDirs(path.join(dir, entry.name));
+  }
+  try { await rmdir(dir); return true; } catch { return false; }
+}
+
+async function restoreFileStates(snapshots, ctx) {
+  const restored = [];
+  const residual = [];
+  for (const [filePath, snap] of snapshots) {
+    if (snap.kind === 'dangling' || snap.kind === 'unsupported') continue;
     try {
       // eslint-disable-next-line no-await-in-loop
-      await restoreFileState(filePath, snapshot);
+      if (!(await verifyAgainst(filePath, snap)).ok) await restoreFileState(filePath, snap);
     } catch (err) {
-      errors.push(`${filePath}: ${err?.message || err}`);
+      residual.push({
+        path: filePath,
+        what: 'file restore failed',
+        expected: describeSnapshot(snap),
+        actual: `restore error: ${err?.message || err}`,
+        next: `Inspect ${filePath} and restore it from your backup or dotfiles git history (git diff / git checkout -- <file>).`,
+      });
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    const check = await verifyAgainst(filePath, snap);
+    if (check.ok) restored.push(filePath);
+    else {
+      residual.push({
+        path: filePath,
+        what: 'state differs after rollback',
+        expected: describeSnapshot(snap),
+        actual: check.actual,
+        next: `Compare ${filePath} with your backup or dotfiles git history and restore it by hand.`,
+      });
     }
   }
-  return errors;
+  // Remove only directories THIS install created, and only while empty.
+  for (const dir of [...ctx.createdDirs].reverse()) {
+    // eslint-disable-next-line no-await-in-loop
+    await pruneEmptyDirs(dir);
+  }
+  return { restored, residual };
 }
 
 async function readAgyConfig(mcpConfigFile) {
@@ -191,6 +309,41 @@ async function readAgyConfig(mcpConfigFile) {
     config.mcpServers = {};
   }
   return config;
+}
+
+function reconcileMcp({ execFileSync, present, mcpBefore, residual }) {
+  const report = {};
+  for (const [frontend, has, remove] of [
+    ['claude', hasClaudeMcp, 'claude'],
+    ['codex', hasCodexMcp, 'codex'],
+  ]) {
+    if (!present[frontend]) continue;
+    const before = mcpBefore[frontend];
+    report[frontend] = {};
+    for (const name of [MCP_NAME, LEGACY_MCP_NAME]) {
+      let after = has(execFileSync, name);
+      let action = 'unchanged';
+      if (!before[name] && after) {
+        runCli(execFileSync, remove, frontend === 'claude' ? ['mcp', 'remove', name, '--scope', 'user'] : ['mcp', 'remove', name], { allowFailure: true });
+        after = has(execFileSync, name);
+        action = after ? 'remove-failed' : 'removed-new-registration';
+      }
+      if (before[name] && !after) action = 'lost';
+      report[frontend][name] = { before: before[name], after, action };
+      if (action === 'lost' || action === 'remove-failed') {
+        residual.push({
+          path: `${frontend} mcp ${name}`,
+          what: 'MCP registration',
+          expected: before[name] ? 'registered (as before the install)' : 'not registered',
+          actual: action === 'lost' ? 'not registered' : 'still registered',
+          next: action === 'lost'
+            ? `Re-register it: run \`${frontend} mcp add ${name} -- <node> <path to reviewloop-mcp.js>\` or re-run \`npm run install-global\` after fixing the cause.`
+            : `Remove it: run \`${frontend} mcp remove ${name}\`.`,
+        });
+      }
+    }
+  }
+  return report;
 }
 
 export async function installGlobal({
@@ -233,10 +386,30 @@ export async function installGlobal({
     snapshots.set(filePath, await snapshotFileState(filePath));
   }
 
+  const snapText = (filePath) => {
+    const snap = snapshots.get(filePath);
+    return snap && (snap.kind === 'file' || snap.kind === 'symlink') ? snap.bytes.toString('utf8') : null;
+  };
+
   for (const policyPath of [claudePolicyFile, codexPolicyFile, geminiPolicyFile]) {
-    const snap = snapshots.get(policyPath);
-    if (snap?.existed) stripManagedPolicy(snap.content.toString('utf8'));
+    const text = snapText(policyPath);
+    if (text !== null) stripManagedPolicy(text);
   }
+
+  // Fail closed before ANY side effect: never write through a dangling link or
+  // a non-regular-file target.
+  const agyWillWrite = present.agy || snapshots.get(mcpConfigFile).kind !== 'missing';
+  const willWrite = [];
+  if (present.claude) willWrite.push(claudePolicyFile, path.join(homeDir, '.claude.json'));
+  if (present.codex) willWrite.push(codexPolicyFile, path.join(homeDir, '.codex', 'config.toml'));
+  if (agyWillWrite) willWrite.push(mcpConfigFile, agyPolicyFile, geminiPolicyFile);
+  for (const filePath of willWrite) assertWritable(filePath, snapshots.get(filePath));
+
+  const ctx = { createdDirs: [] };
+  const mcpBefore = {
+    claude: present.claude ? { [MCP_NAME]: hasClaudeMcp(execFileSync), [LEGACY_MCP_NAME]: hasClaudeMcp(execFileSync, LEGACY_MCP_NAME) } : null,
+    codex: present.codex ? { [MCP_NAME]: hasCodexMcp(execFileSync), [LEGACY_MCP_NAME]: hasCodexMcp(execFileSync, LEGACY_MCP_NAME) } : null,
+  };
 
   const migrated = { legacyBlocks: [], legacyMcp: [], legacySkill: false };
 
@@ -244,14 +417,14 @@ export async function installGlobal({
     if (present.claude) registerClaudeMcp(execFileSync, nodeBin, mcpBin);
     if (present.codex) registerCodexMcp(execFileSync, nodeBin, mcpBin);
 
-    if (existsSync(mcpConfigFile) && agyConfig.mcpServers[LEGACY_MCP_NAME]) {
+    if (snapshots.get(mcpConfigFile).kind !== 'missing' && agyConfig.mcpServers[LEGACY_MCP_NAME]) {
       migrated.legacyMcp.push('agy');
     }
     delete agyConfig.mcpServers[LEGACY_MCP_NAME];
 
-    if (present.agy || existsSync(mcpConfigFile)) {
-      await mkdir(agyConfigDir, { recursive: true });
-      await mkdir(agySkillTargetDir, { recursive: true });
+    if (agyWillWrite) {
+      await mkdirTracked(agyConfigDir, ctx);
+      await mkdirTracked(agySkillTargetDir, ctx);
       agyConfig.mcpServers[MCP_NAME] = { command: nodeBin, args: [mcpBin] };
       await writeFile(mcpConfigFile, `${JSON.stringify(agyConfig, null, 2)}\n`, 'utf8');
       await writeFile(agyPolicyFile, renderAgySkill(commonPolicy), 'utf8');
@@ -260,22 +433,26 @@ export async function installGlobal({
     for (const [frontend, policyPath] of [
       ['claude', claudePolicyFile], ['codex', codexPolicyFile], ['agy', geminiPolicyFile],
     ]) {
-      const snap = snapshots.get(policyPath);
-      const legacy = snap?.existed && hasLegacyManagedPolicy(snap.content.toString('utf8'));
+      const text = snapText(policyPath);
+      const legacy = text !== null && hasLegacyManagedPolicy(text);
       if (legacy) migrated.legacyBlocks.push(frontend);
       if (present[frontend] || legacy) {
         // eslint-disable-next-line no-await-in-loop
-        await upsertManagedPolicy(policyPath, commonPolicy);
+        await upsertManagedPolicy(policyPath, commonPolicy, ctx);
       }
     }
   } catch (err) {
-    removeCodexMcp(execFileSync);
-    removeClaudeMcp(execFileSync);
-    const rollbackErrors = await restoreFileStates(snapshots);
-    if (rollbackErrors.length > 0) {
-      err.rollbackErrors = rollbackErrors;
-      err.message = `${err.message} (rollback incomplete: ${rollbackErrors.join('; ')})`;
-    }
+    // 1) put every snapshotted file back (this also restores MCP registrations,
+    //    which the claude/codex CLIs keep in ~/.claude.json / ~/.codex/config.toml)
+    const { restored, residual } = await restoreFileStates(snapshots, ctx);
+    // 2) reconcile registrations against the pre-install state: only remove ones
+    //    that did not exist before; report any we cannot prove restored.
+    const mcp = reconcileMcp({ execFileSync, present, mcpBefore, residual });
+    err.rollback = { restored, residual, mcp };
+    err.rollbackErrors = residual.map((r) => `${r.path}: ${r.actual}`);
+    err.message = `${err.message} (rollback: ${restored.length} file(s) verified restored${
+      residual.length ? `; ${residual.length} NOT fully restored: ${residual.map((r) => `${r.path} [expected ${r.expected}; found ${r.actual}] next: ${r.next}`).join(' | ')}` : '; no residual state'
+    })`;
     throw err;
   }
 
@@ -283,7 +460,7 @@ export async function installGlobal({
   // SuperGPT skill directory — it is not in `transactionalPaths` (a dir, not a
   // file) and cannot be snapshot-restored, so deferring its removal to here is
   // what guarantees a rolled-back install never loses the user's prior skill.
-  if ((present.agy || existsSync(mcpConfigFile)) && existsSync(legacyAgySkillDir)) {
+  if (agyWillWrite && existsSync(legacyAgySkillDir)) {
     await rm(legacyAgySkillDir, { recursive: true, force: true });
     migrated.legacySkill = true;
   }

@@ -17,6 +17,7 @@ import { extractManagedPolicy, resolveGlobalConfigDir, hasLegacyManagedPolicy } 
 import { REVIEWLOOP_RUNTIME_ROOT } from '../src/reviewloop/runtimeDir.js';
 import { DEFAULT_ROLE_POLICY, PRODUCTION_ROLE_CAPABILITIES, QuotaPoolRegistry } from '../src/orchestrator/roleRouting.js';
 import { createReviewLoopProviderPool } from '../src/reviewloop/providerWiring.js';
+import { checkCliLink } from './cliLink.js';
 import { applySettingsFile, MANAGED_SETTINGS_KEYS } from '../src/reviewloop/settingsFile.js';
 
 const DEFAULT_POLICY_FILE = fileURLToPath(new URL('../agent-policy/COMMON.md', import.meta.url));
@@ -259,7 +260,9 @@ export function checkLegacyManagedEnv(env = process.env) {
   };
 }
 
-export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv, engineeringCheck } = {}) {
+export function runDoctor({
+  execSync, log, env, legacyEnv: precheckedLegacyEnv, engineeringCheck, cliLinkCheck,
+} = {}) {
   const exec = execSync || nodeExecSync;
   const write = log || console.log;
   const environment = env || process.env;
@@ -325,6 +328,14 @@ export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv, 
     write('  info  mcp_binding issues are non-fatal, but ReviewLoop tools will run the OLD checkout until you run `npm run install-global`');
   }
 
+  // Global `reviewloop` command: diagnostic only, read-only, never a core failure.
+  const cliLink = (cliLinkCheck ?? checkCliLink)();
+  if (cliLink.ok) write('  ok    cli_link: global reviewloop / reviewloop-mcp commands resolve and run');
+  else {
+    for (const i of cliLink.issues) write(`  warn  cli_link: ${i}`);
+    write('  info  cli_link issues are non-fatal — preview the fix with `node bin/reviewloop.js cli repair` (works even when `reviewloop` itself is broken)');
+  }
+
   const quota = new QuotaPoolRegistry();
   for (const pool of quota.summary()) write(`  info  quota ${pool.poolId}: ${pool.status}`);
 
@@ -334,7 +345,7 @@ export function runDoctor({ execSync, log, env, legacyEnv: precheckedLegacyEnv, 
   return {
     ok,
     status: ok ? 'pass' : 'fail',
-    results: Object.fromEntries([...core, pools, transports, policy, mcpBinding, legacyEnv].map((r) => [r.name, r])),
+    results: Object.fromEntries([...core, pools, transports, policy, mcpBinding, cliLink, legacyEnv].map((r) => [r.name, r])),
   };
 }
 
