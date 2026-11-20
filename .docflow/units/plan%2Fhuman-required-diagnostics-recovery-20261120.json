@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T04:30:13.113Z",
+  "updatedAt": "2026-11-20T04:30:16.695Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
     "current": "Fix review findings: recheck state before confirming a token stop, keep old header support",
-    "next": "等 PR 机器人审查 PR 59，你验收后决定是否标记为可合并",
+    "next": "等 PR 机器人复核修复结果，你验收后决定是否合并",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
