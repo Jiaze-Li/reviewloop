@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T06:14:13.438Z",
+  "updatedAt": "2026-11-20T06:18:40.335Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
     "current": "Treat sent-but-unsettled calls as live blockers in the stop report, matching the spend authority",
-    "next": "新设计的代码已本地审查通过，等你授权提交并推送到 PR 59，之后由机器人重新审查",
+    "next": "等机器人对最新提交的审查结果，有意见再修复；你决定何时标记可合并",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
