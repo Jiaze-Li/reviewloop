@@ -653,3 +653,74 @@ test('AC10 & AC11: ordinary designs without needFactFiles incur 0 extra calls an
   assert.deepEqual(r.factVerification.factChecks, []);
   rmSync(cwd, { recursive: true, force: true });
 });
+
+test('pendingClaims closure: dropping a pendingClaim from factChecks is rejected as malformed', () => {
+  const verifiedPaths = new Set(['src/a.js']);
+  const dropped = validateAdjudication(
+    adj({
+      factChecks: [{ claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' }],
+    }),
+    { verifiedPaths, requireFactChecks: true, pendingClaims: ['Lock check', 'Budget scope'] },
+  );
+  assert.equal(dropped.malformed, true);
+  assert.match(dropped.reason, /pendingClaims/);
+
+  const complete = validateAdjudication(
+    adj({
+      factChecks: [
+        { claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' },
+        { claim: 'Budget scope', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' },
+      ],
+    }),
+    { verifiedPaths, requireFactChecks: true, pendingClaims: ['Lock check', 'Budget scope'] },
+  );
+  assert.equal(complete.malformed, undefined);
+});
+
+test('collectCodeIdentity marks git status failure as status-unverified and blocks clean PASS', async () => {
+  const execFileFn = async (_cmd, args) => {
+    if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { stdout: 'a'.repeat(40) + '\n' };
+    if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return { stdout: 'main\n' };
+    if (args[0] === 'status') throw new Error('git status failed');
+    return { stdout: '' };
+  };
+  const id = await collectCodeIdentity({ cwd: '/tmp', reviewTarget: 'Prompt.md', execFileFn });
+  assert.equal(id.sourceMode, 'status-unverified');
+  assert.equal(id.worktreeDirty, null);
+  assert.equal(id.statusVerified, false);
+
+  const transition = decideDesignTransition({
+    adjudication: adj({
+      factChecks: [{ claim: 'Lock check', critical: true, status: 'SUPPORTED', evidenceSources: ['src/a.js'], reason: 'ok' }],
+    }),
+    exchangeCount: 0,
+    rejectedFiles: [],
+    codeIdentity: id,
+  });
+  assert.equal(transition.kind, 'HUMAN');
+});
+
+test('readRequestedFiles records over-10 file requests in rejected instead of silently truncating', async () => {
+  const cwd = gitRepo();
+  const names = [];
+  for (let i = 0; i < 12; i += 1) {
+    const name = `extra-${i}.js`;
+    names.push(name);
+    writeFileSync(path.join(cwd, name), `export const n = ${i};\n`);
+  }
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add 12 files'], { cwd, stdio: 'pipe' });
+
+  const context = await collectDesignContext({ cwd, reviewTarget: 'Prompt.md' });
+  const req = validateFileRequest({ requestedFiles: names });
+  assert.equal(req.requestedFiles.length, 10);
+  assert.deepEqual(req.overflowFiles, ['extra-10.js', 'extra-11.js']);
+  const { files, rejected } = await readRequestedFiles({ cwd, requested: [...req.requestedFiles, ...(req.overflowFiles ?? [])], context });
+  assert.equal(files.length, 10);
+  assert.equal(rejected.length, 2);
+  assert.equal(rejected[0].path, 'extra-10.js');
+  assert.equal(rejected[0].reason, 'file count cap reached');
+  assert.equal(rejected[1].path, 'extra-11.js');
+  assert.equal(rejected[1].reason, 'file count cap reached');
+  rmSync(cwd, { recursive: true, force: true });
+});

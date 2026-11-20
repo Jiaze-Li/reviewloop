@@ -67,13 +67,26 @@ export async function collectCodeIdentity({ cwd, reviewTarget, execFileFn = exec
   try {
     const { stdout: headOut } = await execFileFn('git', ['rev-parse', 'HEAD'], { cwd });
     const headSha = String(headOut).trim() || null;
-    if (!headSha) return { headSha: null, branch: null, detached: false, worktreeDirty: false, dirtyPaths: new Set(), sourceMode: 'no-git' };
+    if (!headSha) return { headSha: null, branch: null, detached: false, worktreeDirty: false, statusVerified: false, dirtyPaths: new Set(), sourceMode: 'no-git' };
     const { stdout: branchOut } = await execFileFn('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd })
       .catch(() => ({ stdout: '' }));
     const branch = String(branchOut).trim() || null;
     const detached = branch === 'HEAD';
-    const { stdout: statusOut } = await execFileFn('git', ['status', '--porcelain=v1', '-z'], { cwd, maxBuffer: 16 * 1024 * 1024 })
-      .catch(() => ({ stdout: '' }));
+    let statusOut;
+    try {
+      const res = await execFileFn('git', ['status', '--porcelain=v1', '-z'], { cwd, maxBuffer: 16 * 1024 * 1024 });
+      statusOut = res.stdout;
+    } catch {
+      return {
+        headSha,
+        branch,
+        detached,
+        worktreeDirty: null,
+        statusVerified: false,
+        dirtyPaths: new Set(),
+        sourceMode: 'status-unverified',
+      };
+    }
     const dirtyPaths = parseGitStatusDirtyPaths(statusOut, reviewTarget);
     const worktreeDirty = dirtyPaths.size > 0;
     return {
@@ -81,21 +94,23 @@ export async function collectCodeIdentity({ cwd, reviewTarget, execFileFn = exec
       branch,
       detached,
       worktreeDirty,
+      statusVerified: true,
       dirtyPaths,
       sourceMode: worktreeDirty ? 'worktree-dirty' : 'git-head',
     };
   } catch {
-    return { headSha: null, branch: null, detached: false, worktreeDirty: false, dirtyPaths: new Set(), sourceMode: 'no-git' };
+    return { headSha: null, branch: null, detached: false, worktreeDirty: false, statusVerified: false, dirtyPaths: new Set(), sourceMode: 'no-git' };
   }
 }
 
 export function publicCodeIdentity(codeIdentity) {
-  if (!codeIdentity) return { headSha: null, branch: null, detached: false, worktreeDirty: false, sourceMode: 'no-git' };
+  if (!codeIdentity) return { headSha: null, branch: null, detached: false, worktreeDirty: false, statusVerified: false, sourceMode: 'no-git' };
   return {
     headSha: codeIdentity.headSha ?? null,
     branch: codeIdentity.branch ?? null,
     detached: Boolean(codeIdentity.detached),
-    worktreeDirty: Boolean(codeIdentity.worktreeDirty),
+    worktreeDirty: codeIdentity.worktreeDirty === null ? null : Boolean(codeIdentity.worktreeDirty),
+    statusVerified: codeIdentity.statusVerified !== false && codeIdentity.sourceMode !== 'no-git' && codeIdentity.sourceMode !== 'status-unverified',
     sourceMode: codeIdentity.sourceMode ?? 'no-git',
   };
 }
@@ -138,7 +153,7 @@ export async function readRequestedFiles({ cwd, requested, context, existingFile
   const seen = new Set(existingFiles.map((f) => f.path));
   let total = existingFiles.reduce((sum, f) => sum + (f.bytes ?? Buffer.byteLength(String(f.text ?? ''), 'utf8')), 0);
   const dirtyPaths = context.codeIdentity?.dirtyPaths ?? new Set();
-  for (const raw of requested.slice(0, DESIGN_LIMITS.maxRequestedFiles)) {
+  for (const raw of requested) {
     let rel;
     try { rel = normalizeReviewTargetPath(raw); } catch { rejected.push({ path: String(raw), reason: 'invalid path' }); continue; }
     // Silently dropped: never echo the design path back into any Reviewer prompt.
@@ -218,7 +233,7 @@ export function buildProposalPrompt({ plan, context, files, rejected, workerSumm
 
 export function buildAdjudicationPrompt({
   plan, proposals, designText, history, exchangeCount,
-  context = null, files = [], rejected = [], factFetchUsed = false,
+  context = null, files = [], rejected = [], factFetchUsed = false, pendingClaims = [],
 }) {
   const identity = context?.codeIdentity ? publicCodeIdentity(context.codeIdentity) : null;
   return [
@@ -235,7 +250,7 @@ export function buildAdjudicationPrompt({
     `EXCHANGES USED SO FAR: ${exchangeCount} of ${DESIGN_LIMITS.maxExchanges}.`,
     !factFetchUsed
       ? `FACT VERIFICATION STEP: If the design relies on critical existing-code claims (locks, concurrency, transactions, authority, state transitions, permissions, budgets, recovery) NOT yet covered by VERIFIED SOURCE FILE above, you MAY request up to ${DESIGN_LIMITS.maxRequestedFiles} tracked files (including callers/consumers) by returning ONLY: {"needFactFiles":true,"requestedFiles":["path/a.js"],"pendingClaims":["short claim"]}. If no critical existing-code claims exist or the provided files already suffice, return the final adjudication JSON directly.`
-      : 'FINAL FACT ADJUDICATION: Additional file fetching is complete. Do NOT return needFactFiles; return the final adjudication JSON now with a non-empty factChecks array.',
+      : `FINAL FACT ADJUDICATION: Additional file fetching is complete. Do NOT return needFactFiles; return the final adjudication JSON now with factChecks covering EVERY pending claim${pendingClaims.length ? `: ${JSON.stringify(pendingClaims)}` : ' (non-empty)'}.`,
     'Column 1 — comparison.verdict: ALIGNED (same approach), MINOR_DIFF (differences do not matter for the Plan), MAJOR_DIFF (materially different approach or cost), NEEDS_HUMAN (a product/scope decision or missing information only the user can supply; list it in humanQuestions).',
     'Column 2 — blockingFindings (severity P1/P2 with title, detail, rule): violates the Plan or a non-goal; omits an acceptance criterion; internally inconsistent or contradicts stated repository facts or verified source code; missing "Options" or "Assumptions" section; a mechanism relying on an unstated premise; over-engineering where a simpler listed route satisfies the Plan. Speculative concerns are nonBlockingFindings.',
     'Column 3 — factChecks: array (empty [] if no critical existing-code claims) of {claim, critical (boolean), status ("SUPPORTED"|"CONTRADICTED"|"UNVERIFIED"), evidenceSources (array of verified file paths from VERIFIED SOURCE FILE above), reason}. Never mark SUPPORTED without citing an actually provided VERIFIED SOURCE FILE whose semantics & callers support the claim. If codeIdentity mismatches a claimed commit/branch, sourceMode is "no-git", a verified file is dirty when clean HEAD is assumed, or a file was rejected/missing, mark UNVERIFIED (or CONTRADICTED if disproved).',
@@ -258,7 +273,12 @@ export function validateFileRequest(value) {
   if (!Array.isArray(value.requestedFiles) || value.requestedFiles.some((p) => typeof p !== 'string')) {
     return malformed('requestedFiles must be an array of strings');
   }
-  return { requestedFiles: value.requestedFiles.slice(0, DESIGN_LIMITS.maxRequestedFiles) };
+  const requestedFiles = value.requestedFiles.slice(0, DESIGN_LIMITS.maxRequestedFiles);
+  const overflowFiles = value.requestedFiles.slice(DESIGN_LIMITS.maxRequestedFiles, DESIGN_LIMITS.maxRequestedFiles * 3);
+  return {
+    requestedFiles,
+    ...(overflowFiles.length > 0 ? { overflowFiles } : {}),
+  };
 }
 
 export function validateProposals(value) {
@@ -286,14 +306,20 @@ export function validateFactFileRequest(value) {
   const pendingClaims = Array.isArray(value.pendingClaims)
     ? value.pendingClaims.map((c) => str(c)).filter(Boolean).slice(0, DESIGN_LIMITS.maxFactChecks)
     : [];
+  if (pendingClaims.length === 0) {
+    return malformed('needFactFiles requires a non-empty array of pendingClaims');
+  }
+  const requestedFiles = value.requestedFiles.slice(0, DESIGN_LIMITS.maxRequestedFiles);
+  const overflowFiles = value.requestedFiles.slice(DESIGN_LIMITS.maxRequestedFiles, DESIGN_LIMITS.maxRequestedFiles * 3);
   return {
     needFactFiles: true,
-    requestedFiles: value.requestedFiles.slice(0, DESIGN_LIMITS.maxRequestedFiles),
+    requestedFiles,
+    ...(overflowFiles.length > 0 ? { overflowFiles } : {}),
     pendingClaims,
   };
 }
 
-export function validateAdjudication(value, { verifiedPaths = null, requireFactChecks = false } = {}) {
+export function validateAdjudication(value, { verifiedPaths = null, requireFactChecks = false, pendingClaims = [] } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.malformed) {
     return malformed('adjudication is not a JSON object');
   }
@@ -359,6 +385,9 @@ export function validateAdjudication(value, { verifiedPaths = null, requireFactC
       });
     }
   }
+  if (pendingClaims.length > 0 && factChecks.length < pendingClaims.length) {
+    return malformed(`factChecks must account for all ${pendingClaims.length} pendingClaims (got ${factChecks.length})`);
+  }
   const humanQuestions = (Array.isArray(value.humanQuestions) ? value.humanQuestions : [])
     .map((q) => str(q)).filter(Boolean).slice(0, 8);
   if (verdict === 'NEEDS_HUMAN' && humanQuestions.length === 0) return malformed('NEEDS_HUMAN requires humanQuestions');
@@ -403,7 +432,9 @@ export function decideDesignTransition({ adjudication, exchangeCount, rejectedFi
   if (blockingFindings.length > 0) return { kind: 'REWORK_DEFECTS' };
   const criticalUnverified = factChecks.filter((f) => f.critical && f.status === 'UNVERIFIED');
   if (criticalUnverified.length > 0) {
-    const boundaryBlocked = rejectedFiles.length > 0 || codeIdentity?.sourceMode === 'no-git';
+    const boundaryBlocked = rejectedFiles.length > 0
+      || codeIdentity?.sourceMode === 'no-git'
+      || codeIdentity?.sourceMode === 'status-unverified';
     if (boundaryBlocked) {
       const questions = criticalUnverified
         .map((f) => `Unverified critical code fact: ${f.claim} — ${f.reason}`)
@@ -421,6 +452,13 @@ export function decideDesignTransition({ adjudication, exchangeCount, rejectedFi
       rule: 'Critical design code fact must be independently verified or clarified by the Worker',
     }));
     return { kind: 'REWORK_DEFECTS', synthesizedFindings };
+  }
+  if (codeIdentity?.sourceMode === 'status-unverified' && factChecks.some((f) => f.critical && f.status === 'SUPPORTED')) {
+    return {
+      kind: 'HUMAN',
+      reason: 'worktree status could not be verified (git status failed), so critical code facts cannot PASS as clean',
+      humanQuestions: ['git status failed while verifying repository state; confirm clean worktree or retry'],
+    };
   }
   if (comparison.verdict === 'MAJOR_DIFF') {
     if (exchangeCount < DESIGN_LIMITS.maxExchanges) return { kind: 'EXCHANGE', exchangeCount: exchangeCount + 1 };
@@ -529,7 +567,7 @@ export function createDesignTwoStageRunner({
     }
 
     const stage1Read = fileReq.requestedFiles.length
-      ? await readRequestedFiles({ cwd, requested: fileReq.requestedFiles, context, source: 'stage1-cache' })
+      ? await readRequestedFiles({ cwd, requested: [...fileReq.requestedFiles, ...(fileReq.overflowFiles ?? [])], context, source: 'stage1-cache' })
       : { files: [], rejected: [] };
     let proposed;
     {
@@ -581,7 +619,7 @@ export function createDesignTwoStageRunner({
         extraModelCalls = 1;
         const stage2Read = await readRequestedFiles({
           cwd,
-          requested: r1.value.requestedFiles,
+          requested: [...r1.value.requestedFiles, ...(r1.value.overflowFiles ?? [])],
           context,
           existingFiles: allFiles,
           source: 'stage2-fetch',
@@ -602,8 +640,13 @@ export function createDesignTwoStageRunner({
             files: allFiles,
             rejected: allRejected,
             factFetchUsed: true,
+            pendingClaims: r1.value.pendingClaims,
           }),
-          validate: (raw) => validateAdjudication(raw, { verifiedPaths, requireFactChecks: true }),
+          validate: (raw) => validateAdjudication(raw, {
+            verifiedPaths,
+            requireFactChecks: true,
+            pendingClaims: r1.value.pendingClaims,
+          }),
           label: 'Supervisor fact adjudication',
           counter: 'supervisorCalls',
         });
