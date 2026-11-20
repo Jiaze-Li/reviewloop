@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:41:30.151Z",
+  "updatedAt": "2026-11-20T08:00:36.681Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
@@ -8,15 +8,26 @@
     "task": "Development branch: plan/independent-design-code-fact-verification-20261120",
     "started": "2026-11-20T15:31:24+08:00",
     "status": "In progress",
-    "current": "chore(plan): bootstrap independent design code-fact verification (empty tree)",
+    "current": "Add independent code-fact verification to two-stage design review",
     "next": "等待第 61 号拉取请求的自动复审与持续集成结果，确认就绪后再决定是否合并",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-20T16:00:25+08:00",
+        "text": "chore(plan): bootstrap independent design code-fact verification (empty tree)"
+      }
+    ],
     "commits": [
       {
         "sha": "3c1076f9fc6220d02fd19800b5494db755bf56e8",
         "branch": "plan/independent-design-code-fact-verification-20261120",
         "timestamp": "2026-11-20T15:31:24+08:00",
         "message": "chore(plan): bootstrap independent design code-fact verification (empty tree)"
+      },
+      {
+        "sha": "bc63abd2d14cbe2cdac2d87789e0a5207bbae5ff",
+        "branch": "plan/independent-design-code-fact-verification-20261120",
+        "timestamp": "2026-11-20T16:00:25+08:00",
+        "message": "Add independent code-fact verification to two-stage design review"
       }
     ],
     "pr": {
