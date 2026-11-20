@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:43:05.190Z",
+  "updatedAt": "2026-11-20T08:44:39.487Z",
   "task": {
     "id": "plan/minimum-sufficient-human-communication-20261120",
     "branch": "plan/minimum-sufficient-human-communication-20261120",
     "title": "plan/minimum-sufficient-human-communication-20261120",
     "task": "Development branch: plan/minimum-sufficient-human-communication-20261120",
     "started": "2026-11-20T16:03:09+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Merge origin/main and resolve designTwoStage prompt conflict",
     "next": "等待 PR 63 的自动审查与检查结果，确认后决定是否合并",
     "history": [
@@ -42,13 +42,15 @@
     ],
     "pr": {
       "number": 63,
-      "state": "open",
+      "state": "closed",
       "title": "plan: simplify ReviewLoop human communication around necessary decisions",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/63",
-      "merged": false,
-      "updatedAt": "2026-11-20T08:42:54Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T08:44:28Z",
+      "closedAt": "2026-11-20T08:44:28Z",
+      "updatedAt": "2026-11-20T08:44:28Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T08:44:28Z",
+    "outcome": "Merged"
   }
 }
