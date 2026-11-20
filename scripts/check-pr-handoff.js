@@ -94,7 +94,7 @@ export async function runExtendedChecks(argv, ghRead = defaultGh, deps = {}) {
     const type = flagValue(args, '--type') || 'design';
     const expectedDesignSha256 = flagValue(args, '--design-sha');
     if (!taskId) {
-      return { code: 2, out: '用法: --check-contract 需配合 --task-id <id> [--type plan|design] [--design-sha <sha>]' };
+      return { code: 2, out: '用法: --check-contract 需配合 --task-id <id> [--type plan|design|exception] [--design-sha <sha>]' };
     }
     try {
       const recovered = await recoverPrContract({

@@ -1,4 +1,4 @@
-# ChatGPT Project 设置与启动语 — v1.3.0
+# ChatGPT Project 设置与启动语 — v1.3.1
 
 只在配置 ChatGPT 或开新对话时读，不是阶段必读。
 

@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import {
   normalizeReviewTargetPath, readRepoFile, readRepoFileBytesBounded, splitSourceLines, lstatNoSymlinks, DesignTargetError,
 } from './designTarget.js';
+import { DESIGN_SOURCE_LIMIT_REASON } from './designExceptionState.js';
 
 const execFileAsync = promisify(execFile);
 const sha256 = (v) => createHash('sha256').update(v).digest('hex');
@@ -651,7 +652,7 @@ export function decideDesignTransition({
         .slice(0, 8);
       return {
         kind: 'HUMAN',
-        reason: 'critical code facts could not be independently verified within repository/read boundaries',
+        reason: DESIGN_SOURCE_LIMIT_REASON,
         humanQuestions: questions,
       };
     }

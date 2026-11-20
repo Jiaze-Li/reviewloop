@@ -1,4 +1,4 @@
-# 任务合同归档与恢复（PR 评论模式）— v1.3.0
+# 任务合同归档与恢复（PR 评论模式）— v1.3.1
 
 **唯一详细规范；Lead 与 Architect 只引用本文件。** 目的：任务级 Plan/Design 全文只存在于该任务的 PR，main 只收正式项目资产。
 
@@ -28,6 +28,7 @@
 - **Design：** 先按第 2 节核对 Plan；`begin(design)` 以恢复出的 Plan 全文为合同；在仓库根目录创建尚不存在的未跟踪设计文件，审查至 PASS；不提交、不加忽略规则。
 - **PASS 后：** 发设计归档评论和 ReviewLoop 返回的五句评论（逐字）；重新取回归档评论，哈希 = `designSha256` 才算归档成功，随后登记索引并**才**删除未跟踪的工作文件；校验失败则保留文件并停下。删除发生在 Code 开始前。
 - **Code：** 按第 2 节恢复设计全文 → `begin(code, 全文, designSha256)`（由 ReviewLoop 再核对）。
+- **人工授权例外（审查工具自身故障时）：** 新式 Design loop 因审查工具无法完成（如关键源码超出读取上限）停在 `HUMAN_REQUIRED` 时，只有**用户本人**可运行 `reviewloop accept-design-exception`，把一份精确的设计内容、冻结 Plan 与结构化外部独立审查报告绑定成一条人工裁决记录；原 loop 状态、预算与账本不变，**不产生 Design PASS**。归档时设计评论用 `contract format --exception`（尾行写明“非 ReviewLoop PASS”，不得用 PASS 同款 `designSha256:` 尾行），裁决记录以类型 `exception`、同一版本号归档并登记索引；`verify-archive` 在找不到 PASS 时才接受有效例外，并核对 Plan、例外归档、PR/任务/版本绑定，输出标明 `HUMAN_EXCEPTION`。外部报告有未关闭的 P1/P2 即拒绝；未核实风险须用户另行用 `--accept-risk` 明确承担。
 
 **4. 什么进 PR，什么进 main**
 - 有长期依据价值且有维护人的才进 main，并须在 Work Contract 的“正式资产清单”逐条列出（路径、为何长期、谁维护）；只服务本次审查的（Plan/Design 全文、引导提交、过程记录）留在 PR。

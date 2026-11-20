@@ -1,4 +1,4 @@
-# AI Engineering Workflow v1.3.0
+# AI Engineering Workflow v1.3.1
 
 方法的唯一权威（Worker 规则归 `agent-policy/COMMON.md`，授权规则归 `authorization.md`，工具接口归 MCP schema；边界见 [docs/BOUNDARY.md](../docs/BOUNDARY.md)）。
 
