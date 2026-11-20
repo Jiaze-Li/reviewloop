@@ -44,3 +44,17 @@ test('no progress is sent when the client supplied no progressToken', async () =
 test('a result without statusLine keeps the single JSON block', () => {
   assert.equal(toolResultContent({ status: 'X' }).length, 1);
 });
+
+test('MCP schema descriptions avoid forcing verbatim echo of tool-surfaced statusLine/reviewRecord', () => {
+  const server = createReviewLoopMcpServer({
+    controller: { begin: async () => ({}), review: async () => ({}) },
+  });
+  const tools = server._registeredTools ?? server.registeredTools ?? {};
+  const beginShape = tools.reviewloop_begin.inputSchema?.shape ?? tools.reviewloop_begin.inputSchema;
+  const beginDesc = beginShape.taskType.description;
+  assert.doesNotMatch(beginDesc, /never rewrite it or replace it with a pointer/);
+  const reviewOut = tools.reviewloop_review.outputSchema?.shape ?? tools.reviewloop_review.outputSchema;
+  assert.match(reviewOut.statusLine.description, /do not echo in routine replies/i);
+  assert.match(reviewOut.reviewRecord.description, /omit from routine replies/i);
+  assert.match(reviewOut.reportText.description, /all blockers, cause, and actions/i);
+});

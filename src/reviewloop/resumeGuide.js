@@ -91,8 +91,8 @@ export function buildResumePrompt(loop) {
   lines.push(
     '',
     'First inspect the repository (git status / git diff) to see what is already done. Then continue the current phase,',
-    'run its verification commands yourself, `git add` any new files (staging only; do not commit unless authorized),',
-    `and call reviewloop_review with loopId ${loop.loopId}. Report each result as: status, nextDiffScope, usageVolume.`,
+    'run its verification commands yourself, `git add` any new files (follow engineering/authorization.md stage scope; do not commit outside authorized scope),',
+    `and call reviewloop_review with loopId ${loop.loopId}. Report only minimum sufficient status and next action per engineering/handoff.md.`,
   );
   return lines.join('\n');
 }

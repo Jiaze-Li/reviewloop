@@ -321,6 +321,8 @@ test('prompts state field rules and carry a concrete example JSON', () => {
   assert.match(a, /MUST be non-empty when verdict is NEEDS_HUMAN/);
   assert.match(a, /severity exactly "P1" or "P2"/);
   assert.match(a, /non-empty strings/);
+  assert.match(a, /omit routine technical premises/);
+  assert.doesNotMatch(a, /the Assumptions to confirm/);
 });
 
 test('one malformed Reviewer proposal output is retried once with the concrete error, then the round succeeds', async () => {
