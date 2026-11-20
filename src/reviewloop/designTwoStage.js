@@ -147,11 +147,16 @@ export async function collectDesignContext({ cwd, reviewTarget, execFileFn }) {
 
 // Controller-side proxy read of Reviewer/Supervisor-requested files. Rejections
 // are reported back (never thrown) so one bad path cannot waste a paid round.
-export async function readRequestedFiles({ cwd, requested, context, existingFiles = [], source = 'stage1-cache' }) {
+export async function readRequestedFiles({
+  cwd, requested, context, existingFiles = [], countExisting = true, source = 'stage1-cache',
+}) {
   const files = [];
   const rejected = [];
   const seen = new Set(existingFiles.map((f) => f.path));
-  let total = existingFiles.reduce((sum, f) => sum + (f.bytes ?? Buffer.byteLength(String(f.text ?? ''), 'utf8')), 0);
+  const baseCount = countExisting ? existingFiles.length : 0;
+  let total = countExisting
+    ? existingFiles.reduce((sum, f) => sum + (f.bytes ?? Buffer.byteLength(String(f.text ?? ''), 'utf8')), 0)
+    : 0;
   const dirtyPaths = context.codeIdentity?.dirtyPaths ?? new Set();
   for (const raw of requested) {
     let rel;
@@ -159,7 +164,7 @@ export async function readRequestedFiles({ cwd, requested, context, existingFile
     // Silently dropped: never echo the design path back into any Reviewer prompt.
     if (rel === context.reviewTarget) continue;
     if (seen.has(rel)) continue;
-    if (existingFiles.length + files.length >= DESIGN_LIMITS.maxRequestedFiles) {
+    if (baseCount + files.length >= DESIGN_LIMITS.maxRequestedFiles) {
       rejected.push({ path: rel, reason: 'file count cap reached' });
       continue;
     }
@@ -414,7 +419,9 @@ export function finalizePassComment(comment, designSha256) {
 
 // Pure decision over a validated adjudication. Never PASS without a comment,
 // and never PASS when any critical factCheck is CONTRADICTED or UNVERIFIED.
-export function decideDesignTransition({ adjudication, exchangeCount, rejectedFiles = [], codeIdentity = null }) {
+export function decideDesignTransition({
+  adjudication, exchangeCount, rejectedFiles = [], codeIdentity = null, dirtyVerifiedPaths = null,
+}) {
   const { comparison, blockingFindings, humanQuestions, factChecks = [] } = adjudication;
   if (comparison.verdict === 'NEEDS_HUMAN') return { kind: 'HUMAN', reason: 'the adjudicator needs a decision or information only the user can give', humanQuestions };
   const criticalContradicted = factChecks.filter((f) => f.critical && f.status === 'CONTRADICTED');
@@ -459,6 +466,20 @@ export function decideDesignTransition({ adjudication, exchangeCount, rejectedFi
       reason: 'worktree status could not be verified (git status failed), so critical code facts cannot PASS as clean',
       humanQuestions: ['git status failed while verifying repository state; confirm clean worktree or retry'],
     };
+  }
+  if (dirtyVerifiedPaths && dirtyVerifiedPaths.size > 0) {
+    const dirtySupported = factChecks.filter(
+      (f) => f.critical && f.status === 'SUPPORTED' && f.evidenceSources.some((p) => dirtyVerifiedPaths.has(p)),
+    );
+    if (dirtySupported.length > 0) {
+      return {
+        kind: 'HUMAN',
+        reason: 'critical code facts cite source file(s) with uncommitted worktree modifications and cannot PASS as clean HEAD',
+        humanQuestions: dirtySupported
+          .map((f) => `Critical claim cites dirty file(s) (${f.evidenceSources.filter((p) => dirtyVerifiedPaths.has(p)).join(', ')}): ${f.claim}`)
+          .slice(0, 8),
+      };
+    }
   }
   if (comparison.verdict === 'MAJOR_DIFF') {
     if (exchangeCount < DESIGN_LIMITS.maxExchanges) return { kind: 'EXCHANGE', exchangeCount: exchangeCount + 1 };
@@ -622,6 +643,7 @@ export function createDesignTwoStageRunner({
           requested: [...r1.value.requestedFiles, ...(r1.value.overflowFiles ?? [])],
           context,
           existingFiles: allFiles,
+          countExisting: false,
           source: 'stage2-fetch',
         });
         allFiles = [...allFiles, ...stage2Read.files];

@@ -1335,11 +1335,15 @@ export function createReviewLoopController({
     }
 
     const adj = out.adjudication;
+    const dirtyVerifiedPaths = new Set(
+      (out.factVerification?.checkedFiles ?? []).filter((f) => f.dirty).map((f) => f.path),
+    );
     const decision = decideDesignTransition({
       adjudication: adj,
       exchangeCount: ds.exchangeCount,
       rejectedFiles: out.factVerification?.rejectedFiles ?? [],
       codeIdentity: out.codeIdentity ?? null,
+      dirtyVerifiedPaths,
     });
     if (decision.kind === 'FAILED') return failClosed(decision.reason);
 

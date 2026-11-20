@@ -562,31 +562,38 @@ test('AC03 & AC05 (#59 global call cap): Supervisor fetches caller/config and bl
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('AC06 & AC08: critical UNVERIFIED (rejected/cap/missing) -> HUMAN_REQUIRED; non-critical UNVERIFIED can PASS', async () => {
+test('AC06 & AC08: Stage 1 reads do not starve Stage 2 fact fetch; Stage 2 cap -> HUMAN_REQUIRED; non-critical UNVERIFIED can PASS', async () => {
   const cwd = gitRepo();
-  for (let i = 0; i < 11; i += 1) {
+  for (let i = 0; i < 21; i += 1) {
     writeFileSync(path.join(cwd, `f${i}.js`), `export const v${i} = ${i};\n`);
   }
   execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
   execFileSync('git', ['commit', '-qm', 'add files'], { cwd, stdio: 'pipe' });
 
-  // Stage 1 reads 9 files; Stage 2 requests 3 more => only 1 read, 2 rejected with cap reached => critical UNVERIFIED => HUMAN_REQUIRED
+  // Stage 1 reads 10 files (f0..f9); Stage 2 requests 11 new files (f10..f20) plus invalid path ->
+  // Stage 2 still gets its own 10 new files (f10..f19), f20 is rejected with cap reached -> critical UNVERIFIED => HUMAN_REQUIRED
   {
     const { ctl } = makeCtl({
       cwd,
       fakes: {
         reviewer: (a) => (a.stage === 'files'
-          ? { value: { requestedFiles: Array.from({ length: 9 }, (_, i) => `f${i}.js`) }, usage: OK_USAGE, model: 'm' }
+          ? { value: { requestedFiles: Array.from({ length: 10 }, (_, i) => `f${i}.js`) }, usage: OK_USAGE, model: 'm' }
           : { value: PROPOSALS, usage: OK_USAGE, model: 'm' }),
         supervisor: (n) => {
-          if (n === 1) return { needFactFiles: true, requestedFiles: ['f9.js', 'f10.js', '../secret.txt'], pendingClaims: ['check f10.js'] };
+          if (n === 1) {
+            return {
+              needFactFiles: true,
+              requestedFiles: [...Array.from({ length: 11 }, (_, i) => `f${10 + i}.js`), '../secret.txt'],
+              pendingClaims: ['check f20.js'],
+            };
+          }
           return adj({
             factChecks: [{
-              claim: 'f10.js invariant',
+              claim: 'f20.js invariant',
               critical: true,
               status: 'UNVERIFIED',
               evidenceSources: [],
-              reason: 'f10.js was rejected due to file count cap',
+              reason: 'f20.js was rejected due to file count cap',
             }],
           });
         },
@@ -597,8 +604,8 @@ test('AC06 & AC08: critical UNVERIFIED (rejected/cap/missing) -> HUMAN_REQUIRED;
     const r = await ctl.review({ loopId: b.loopId });
     assert.equal(r.status, 'HUMAN_REQUIRED');
     assert.equal(r.designSha256, undefined);
-    assert.equal(r.factVerification.checkedFiles.length, 10);
-    assert.ok(r.factVerification.rejectedFiles.some((x) => x.path === 'f10.js' && x.reason === 'file count cap reached'));
+    assert.equal(r.factVerification.checkedFiles.length, 20);
+    assert.ok(r.factVerification.rejectedFiles.some((x) => x.path === 'f20.js' && x.reason === 'file count cap reached'));
     assert.ok(r.factVerification.rejectedFiles.some((x) => x.reason === 'invalid path'));
   }
 
@@ -723,4 +730,24 @@ test('readRequestedFiles records over-10 file requests in rejected instead of si
   assert.equal(rejected[1].path, 'extra-11.js');
   assert.equal(rejected[1].reason, 'file count cap reached');
   rmSync(cwd, { recursive: true, force: true });
+});
+
+test('F002: decideDesignTransition blocks PASS when critical SUPPORTED factCheck cites a dirty worktree file', () => {
+  const transition = decideDesignTransition({
+    adjudication: adj({
+      factChecks: [{
+        claim: 'Lock check',
+        critical: true,
+        status: 'SUPPORTED',
+        evidenceSources: ['src/lock.js'],
+        reason: 'matches uncommitted local edit',
+      }],
+    }),
+    exchangeCount: 0,
+    rejectedFiles: [],
+    codeIdentity: { sourceMode: 'worktree-dirty' },
+    dirtyVerifiedPaths: new Set(['src/lock.js']),
+  });
+  assert.equal(transition.kind, 'HUMAN');
+  assert.match(transition.reason, /uncommitted worktree modifications/);
 });
