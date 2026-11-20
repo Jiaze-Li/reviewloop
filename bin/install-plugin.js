@@ -156,6 +156,21 @@ function removeCodexMcp(execFileSync) {
   return runCli(execFileSync, 'codex', ['mcp', 'remove', MCP_NAME], { allowFailure: true }) !== null;
 }
 
+// Tri-state registration query: 'present' | 'absent' | 'unknown'. Only a failure
+// whose output clearly says "not found / not configured" counts as absent; any
+// other failure (timeout, crash, auth, unexpected output) is 'unknown' and is
+// never treated as permission to remove or to declare success.
+const NOT_REGISTERED_RE = /not\s+found|no\s+mcp\s+server|not\s+configured|no\s+such|does\s+not\s+exist|unknown\s+server/i;
+function mcpState(execFileSync, command, name) {
+  try {
+    execFileSync(command, ['mcp', 'get', name], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return 'present';
+  } catch (err) {
+    const text = `${err?.stderr ?? ''} ${err?.stdout ?? ''} ${err?.message ?? ''}`;
+    return NOT_REGISTERED_RE.test(text) ? 'absent' : 'unknown';
+  }
+}
+
 function hasClaudeMcp(execFileSync, name = MCP_NAME) {
   return runCli(execFileSync, 'claude', ['mcp', 'get', name], { allowFailure: true }) !== null;
 }
@@ -344,32 +359,36 @@ async function readAgyConfig(mcpConfigFile) {
 
 function reconcileMcp({ execFileSync, present, mcpBefore, residual }) {
   const report = {};
-  for (const [frontend, has, remove] of [
-    ['claude', hasClaudeMcp, 'claude'],
-    ['codex', hasCodexMcp, 'codex'],
-  ]) {
+  for (const frontend of ['claude', 'codex']) {
     if (!present[frontend]) continue;
     const before = mcpBefore[frontend];
     report[frontend] = {};
     for (const name of [MCP_NAME, LEGACY_MCP_NAME]) {
-      let after = has(execFileSync, name);
+      let after = mcpState(execFileSync, frontend, name);
       let action = 'unchanged';
-      if (!before[name] && after) {
-        runCli(execFileSync, remove, frontend === 'claude' ? ['mcp', 'remove', name, '--scope', 'user'] : ['mcp', 'remove', name], { allowFailure: true });
-        after = has(execFileSync, name);
-        action = after ? 'remove-failed' : 'removed-new-registration';
+      // Remove ONLY a registration proven absent before and proven present now.
+      if (before[name] === 'absent' && after === 'present') {
+        runCli(execFileSync, frontend, frontend === 'claude' ? ['mcp', 'remove', name, '--scope', 'user'] : ['mcp', 'remove', name], { allowFailure: true });
+        after = mcpState(execFileSync, frontend, name);
+        action = after === 'absent' ? 'removed-new-registration' : 'remove-failed';
+      } else if (before[name] === 'present' && after === 'absent') {
+        action = 'lost';
+      } else if (before[name] === 'unknown' || after === 'unknown') {
+        action = before[name] === 'absent' && after === 'absent' ? 'unchanged' : 'unverified';
       }
-      if (before[name] && !after) action = 'lost';
       report[frontend][name] = { before: before[name], after, action };
-      if (action === 'lost' || action === 'remove-failed') {
+      if (action === 'lost' || action === 'remove-failed' || action === 'unverified') {
+        const cmd = `${frontend} mcp ${name}`;
         residual.push({
-          path: `${frontend} mcp ${name}`,
+          path: cmd,
           what: 'MCP registration',
-          expected: before[name] ? 'registered (as before the install)' : 'not registered',
-          actual: action === 'lost' ? 'not registered' : 'still registered',
+          expected: before[name] === 'present' ? 'registered (as before the install)' : before[name] === 'absent' ? 'not registered' : 'unknown (the pre-install query failed)',
+          actual: action === 'lost' ? 'not registered' : action === 'remove-failed' ? 'still registered' : `could not verify (now: ${after}); left exactly as found, nothing removed`,
           next: action === 'lost'
             ? `Re-register it: run \`${frontend} mcp add ${name} -- <node> <path to reviewloop-mcp.js>\` or re-run \`npm run install-global\` after fixing the cause.`
-            : `Remove it: run \`${frontend} mcp remove ${name}\`.`,
+            : action === 'remove-failed'
+              ? `Remove it: run \`${frontend} mcp remove ${name}\`.`
+              : `Check it yourself: run \`${frontend} mcp get ${name}\`; keep it if you had it registered, otherwise \`${frontend} mcp remove ${name}\`.`,
         });
       }
     }
@@ -440,8 +459,8 @@ export async function installGlobal({
   const claudeJsonFile = path.join(homeDir, '.claude.json');
   const codexConfigFile = path.join(homeDir, '.codex', 'config.toml');
   const mcpBefore = {
-    claude: present.claude ? { [MCP_NAME]: hasClaudeMcp(execFileSync), [LEGACY_MCP_NAME]: hasClaudeMcp(execFileSync, LEGACY_MCP_NAME) } : null,
-    codex: present.codex ? { [MCP_NAME]: hasCodexMcp(execFileSync), [LEGACY_MCP_NAME]: hasCodexMcp(execFileSync, LEGACY_MCP_NAME) } : null,
+    claude: present.claude ? { [MCP_NAME]: mcpState(execFileSync, 'claude', MCP_NAME), [LEGACY_MCP_NAME]: mcpState(execFileSync, 'claude', LEGACY_MCP_NAME) } : null,
+    codex: present.codex ? { [MCP_NAME]: mcpState(execFileSync, 'codex', MCP_NAME), [LEGACY_MCP_NAME]: mcpState(execFileSync, 'codex', LEGACY_MCP_NAME) } : null,
   };
 
   const migrated = { legacyBlocks: [], legacyMcp: [], legacySkill: false };

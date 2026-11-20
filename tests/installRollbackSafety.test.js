@@ -209,7 +209,7 @@ test('G1: an unverifiable pre-existing registration is listed as residual, not h
       const [, action, name] = args;
       if (action === 'add') { if (command === 'claude') throw new Error('boom claude add'); mcp[command][name] = true; return ''; }
       if (action === 'remove') { if (!mcp[command][name]) throw new Error('nc'); delete mcp[command][name]; return ''; }
-      if (action === 'get') { if (!mcp[command][name]) throw new Error('nc'); return 'ok'; }
+      if (action === 'get') { if (!mcp[command][name]) throw new Error('not configured'); return 'ok'; }
       throw new Error('unexpected');
     };
     const err = await installGlobal(baseOpts(sb, { execFileSync })).then(() => null, (e) => e);
@@ -299,5 +299,54 @@ test('G2-adjacent: an AGY mcp_config edited while the install runs keeps the edi
     const after = JSON.parse(await readFile(cfg, 'utf8'));
     assert.ok(after.mcpServers.added_meanwhile, 'edit made during install must be kept');
     assert.ok(after.mcpServers.reviewloop && after.mcpServers.a);
+  } finally { await rm(sb.tmp, { recursive: true, force: true }); }
+});
+
+test('R001: a FAILED pre-install registration query is "unknown", never "absent": an existing registration is not removed', async () => {
+  const sb = await sandbox();
+  try {
+    const mcp = { claude: { reviewloop: true }, codex: {} };
+    let transient = true; // the very first claude "get reviewloop" fails for an unrelated reason
+    const removeCalls = [];
+    const execFileSync = (command, args = []) => {
+      if (args[0] === '--version') { if (command === 'agy') throw new Error('nf'); return 'v\n'; }
+      const [, action, name] = args;
+      if (action === 'get') {
+        if (command === 'claude' && name === 'reviewloop' && transient) { transient = false; throw new Error('request timed out'); }
+        if (!mcp[command][name]) throw new Error(`No MCP server found with name: ${name}`);
+        return 'ok';
+      }
+      if (action === 'remove') { removeCalls.push([command, name]); if (!mcp[command][name]) throw new Error('nc'); delete mcp[command][name]; return ''; }
+      if (action === 'add') { if (command === 'codex') throw new Error('boom codex add'); mcp[command][name] = true; return ''; }
+      throw new Error('unexpected');
+    };
+    const err = await installGlobal(baseOpts(sb, { execFileSync })).then(() => null, (e) => e);
+    assert.ok(err);
+    // install itself replaces the entry (remove+add) — what matters: the rollback pass must not remove it
+    const rollbackRemoves = removeCalls.slice(2); // first two are the installer's own remove of supergpt/reviewloop
+    assert.equal(rollbackRemoves.some(([c, n]) => c === 'claude' && n === 'reviewloop'), false, 'rollback must not remove an unverified registration');
+    assert.equal(mcp.claude.reviewloop, true);
+    const entry = err.rollback.residual.find((r) => r.path === 'claude mcp reviewloop');
+    assert.ok(entry && /unknown|could not verify/.test(entry.expected + entry.actual), 'unverified state is reported');
+    assert.equal(err.rollback.mcp.claude.reviewloop.before, 'unknown');
+  } finally { await rm(sb.tmp, { recursive: true, force: true }); }
+});
+
+test('R001: a clear "not found" answer still counts as absent, so a new registration IS cleaned up', async () => {
+  const sb = await sandbox();
+  try {
+    const mcp = { claude: {}, codex: {} };
+    const execFileSync = (command, args = []) => {
+      if (args[0] === '--version') { if (command === 'agy') throw new Error('nf'); return 'v\n'; }
+      const [, action, name] = args;
+      if (action === 'get') { if (!mcp[command][name]) throw new Error(`No MCP server found with name: ${name}`); return 'ok'; }
+      if (action === 'remove') { if (!mcp[command][name]) throw new Error('nc'); delete mcp[command][name]; return ''; }
+      if (action === 'add') { if (command === 'codex') throw new Error('boom codex add'); mcp[command][name] = true; return ''; }
+      throw new Error('unexpected');
+    };
+    const err = await installGlobal(baseOpts(sb, { execFileSync })).then(() => null, (e) => e);
+    assert.ok(err);
+    assert.equal(mcp.claude.reviewloop, undefined);
+    assert.equal(err.rollback.mcp.claude.reviewloop.action, 'removed-new-registration');
   } finally { await rm(sb.tmp, { recursive: true, force: true }); }
 });
