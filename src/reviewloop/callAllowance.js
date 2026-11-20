@@ -16,7 +16,7 @@ import { resolveReviewLoopLimits } from './reviewSpend.js';
 import { reviewGateCount } from './phaseState.js';
 import {
   CALL_ALLOWANCE_KEY, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
-  assertUnchanged, callCeilingsFromState, fingerprint, nextCallAllowance, parseCallCount, readLoopWorkflow, usedCalls,
+  callCeilingsFromState, commitGuardedUpdate, fingerprint, nextCallAllowance, parseCallCount, readLoopWorkflow, usedCalls,
 } from './humanActionGuard.js';
 
 // The ceilings the spend authority enforces for this loop right now.
@@ -60,8 +60,13 @@ export async function extendCalls({
     workflow, currentLimits, reviewerCalls: reviewerN, supervisorCalls: supervisorN,
     mode: 'extend', tier: 'EXTEND', reason, at, source: 'extend-calls',
   });
-  await assertUnchanged({ persistence, loopId, before, action: 'extending the call allowance' });
-  await persistence.updateWorkflowState(loopId, { [CALL_ALLOWANCE_KEY]: next });
+  await commitGuardedUpdate({
+    persistence,
+    loopId,
+    before,
+    action: 'extending the call allowance',
+    buildPatch: () => ({ [CALL_ALLOWANCE_KEY]: next }),
+  });
   return {
     loopId,
     loopState: loop.state,

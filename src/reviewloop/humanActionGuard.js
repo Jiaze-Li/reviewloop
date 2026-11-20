@@ -72,6 +72,38 @@ export async function assertUnchanged({ persistence, loopId, before, action }) {
   }
 }
 
+const persistenceLoopLocks = new WeakMap();
+
+async function withLoopLock(persistence, loopId, fn) {
+  let byLoop = persistenceLoopLocks.get(persistence);
+  if (!byLoop) {
+    byLoop = new Map();
+    persistenceLoopLocks.set(persistence, byLoop);
+  }
+  const prev = byLoop.get(loopId) ?? Promise.resolve();
+  let release;
+  const mine = new Promise((resolve) => { release = resolve; });
+  const tail = prev.then(() => mine, () => mine);
+  byLoop.set(loopId, tail);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (byLoop.get(loopId) === tail) byLoop.delete(loopId);
+  }
+}
+
+// Serialize the pre-write re-read + single write per (persistence, loopId) so
+// two in-process actors cannot both pass assertUnchanged before either writes.
+export async function commitGuardedUpdate({ persistence, loopId, before, action, buildPatch }) {
+  return withLoopLock(persistence, loopId, async () => {
+    await assertUnchanged({ persistence, loopId, before, action });
+    const patch = typeof buildPatch === 'function' ? await buildPatch() : buildPatch;
+    await persistence.updateWorkflowState(loopId, patch);
+  });
+}
+
 // Build the next `reviewLoopCallAllowance` value. `mode`:
 //   'tighten' - the extended confirmation: ceiling = min(current, used + N),
 //               so it can only keep or lower the effective ceiling;

@@ -8,6 +8,7 @@ import {
   ackIdForRecord,
   TOKEN_ACK_STANDARD_LIMIT,
 } from '../src/reviewloop/tokenAnomalyAck.js';
+import { extendCalls } from '../src/reviewloop/callAllowance.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 let seq = 0;
@@ -243,4 +244,48 @@ test('an unreadable acknowledgement list fails closed (never "no acknowledgement
   };
   const s = createReviewLoopSpend({ loopId: 'L', persistence, env: {} });
   await assert.rejects(() => meter(s, SMALL), (e) => /STATE_UNAVAILABLE|could not read the human acknowledgements/i.test(`${e.code} ${e.message}`));
+});
+
+function withWriteDelay(persistence, delayMs = 20) {
+  const realUpdate = persistence.updateWorkflowState.bind(persistence);
+  persistence.updateWorkflowState = async (id, patch) => {
+    await new Promise((r) => setTimeout(r, delayMs));
+    return realUpdate(id, patch);
+  };
+}
+
+test('two real concurrent acknowledgements against one persistence: exactly one wins, no lost update (F003)', async () => {
+  const { persistence, latchAt } = await trippedLoop();
+  withWriteDelay(persistence);
+  const results = await Promise.allSettled([
+    ack(persistence, latchAt, { reason: 'actor-A' }),
+    ack(persistence, latchAt, { reason: 'actor-B' }),
+  ]);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  const err = results.filter((r) => r.status === 'rejected');
+  assert.equal(ok.length, 1);
+  assert.equal(err.length, 1);
+  assert.match(err[0].reason.message, /concurrent modification/);
+  const wf = await persistence.readWorkflowState('L');
+  assert.equal(wf.reviewLoopTokenAnomaly.tripped, false);
+  assert.equal(wf.reviewLoopTokenAnomalyAcks.length, 1);
+  assert.equal(wf.reviewLoopTokenAnomalyAcks[0].reason, 'actor-A');
+});
+
+test('acknowledge and extend-calls racing on one persistence: exactly one wins, loser writes nothing (F003)', async () => {
+  const { persistence, latchAt } = await trippedLoop();
+  withWriteDelay(persistence);
+  const results = await Promise.allSettled([
+    ack(persistence, latchAt, { reason: 'actor-ack' }),
+    extendCalls({ persistence, loopId: 'L', reviewerCalls: 2, reason: 'actor-extend', env: { REVIEWLOOP_MAX_REVIEWER_CALLS: '2' } }),
+  ]);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  const err = results.filter((r) => r.status === 'rejected');
+  assert.equal(ok.length, 1);
+  assert.equal(err.length, 1);
+  assert.match(err[0].reason.message, /concurrent modification/);
+  const wf = await persistence.readWorkflowState('L');
+  assert.equal(wf.reviewLoopTokenAnomaly.tripped, false);
+  assert.equal(wf.reviewLoopTokenAnomalyAcks.length, 1);
+  assert.equal(wf.reviewLoopCallAllowance, undefined, 'losing extend-calls wrote nothing');
 });

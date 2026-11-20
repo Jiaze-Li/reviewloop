@@ -15,7 +15,7 @@
 import { REVIEW_LOOP_STATES } from './state.js';
 import {
   CALL_ALLOWANCE_KEY, TOKEN_ACK_STANDARD_LIMIT, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
-  assertUnchanged, fingerprint, nextCallAllowance, parseCallCount,
+  commitGuardedUpdate, fingerprint, nextCallAllowance, parseCallCount,
 } from './humanActionGuard.js';
 
 export const TOKEN_ANOMALY_KEY = 'reviewLoopTokenAnomaly';
@@ -101,13 +101,18 @@ export async function acknowledgeTokenAnomaly({
     acknowledgedSpendIds: records.map(ackIdForRecord),
   };
   // Defence in depth on top of the CLI's loop lease (bin/reviewloop.js takes it
-  // before calling this): re-read right before the write and refuse if anything
-  // this decision was based on has moved, so a stale snapshot is never written.
-  await assertUnchanged({ persistence, loopId, before, action: 'acknowledging the token anomaly' });
-  await persistence.updateWorkflowState(loopId, {
-    [TOKEN_ANOMALY_KEY]: { ...latch, tripped: false, clearedAt: at, clearedReason: entry.reason },
-    [TOKEN_ANOMALY_ACKS_KEY]: [...acks, entry],
-    ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
+  // before calling this): serialize re-read + single write and refuse if
+  // anything this decision was based on has moved, so a stale snapshot is never written.
+  await commitGuardedUpdate({
+    persistence,
+    loopId,
+    before,
+    action: 'acknowledging the token anomaly',
+    buildPatch: () => ({
+      [TOKEN_ANOMALY_KEY]: { ...latch, tripped: false, clearedAt: at, clearedReason: entry.reason },
+      [TOKEN_ANOMALY_ACKS_KEY]: [...acks, entry],
+      ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
+    }),
   });
   return { loopId, tier: entry.tier, allowance: entry.allowance ?? null, acknowledgements: acks.length + 1, latchAt: latch.at, trigger: entry.trigger, loopState: loop.state, acknowledgedRecords: records.length };
 }

@@ -11,7 +11,7 @@
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
 import {
   CALL_ALLOWANCE_KEY, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
-  assertUnchanged, fingerprint, nextCallAllowance, parseCallCount,
+  commitGuardedUpdate, fingerprint, nextCallAllowance, parseCallCount,
 } from './humanActionGuard.js';
 
 const STATE_KEY = 'reviewLoop';
@@ -51,33 +51,40 @@ export async function reopenExhaustedGate({
       tier: extended ? 'EXTENDED' : 'STANDARD', reason, at, source: 'reopen-gate',
     })
     : null;
-  // Re-read before mutating anything: refuse if what this decision was based on moved.
-  await assertUnchanged({ persistence, loopId, before, action: 'reopening the gate' });
-  // HUMAN_REQUIRED -> REVIEWING -> REWORK is the only legal path back.
-  recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human reopen: ${reason}`);
-  recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human reopen: ${reason}`);
-  Object.assign(loop, {
-    budgetExhausted: false,
-    gateRound: 0,
-    gateRepairCount: 0,
-    convergenceEpoch: 0,
-    epochReviewRound: 0,
-    supervisorEscalationCount: 0,
-    supervisorInvoked: false,
-    findingSignatureHistory: [],
-    pendingReviewerReconsideration: null,
-    lastSupervisorGuidance: null,
-    lastSupervisorRecommendation: null,
-    chunkReviewCheckpoint: null,
-    humanReopens: [...reopens, {
-      at, reason: String(reason), round: loop.round, phaseIndex: loop.currentPhaseIndex ?? null,
-      tier: extended ? 'EXTENDED' : 'STANDARD',
-      ...(nextAllowance ? { allowance: nextAllowance.history.slice(priorAllowanceEntries) } : {}),
-    }],
-  });
-  await persistence.updateWorkflowState(loopId, {
-    [STATE_KEY]: loop,
-    ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
+  // Re-read + single write serialized per loop: refuse if what this decision was based on moved.
+  await commitGuardedUpdate({
+    persistence,
+    loopId,
+    before,
+    action: 'reopening the gate',
+    buildPatch: () => {
+      // HUMAN_REQUIRED -> REVIEWING -> REWORK is the only legal path back.
+      recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human reopen: ${reason}`);
+      recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human reopen: ${reason}`);
+      Object.assign(loop, {
+        budgetExhausted: false,
+        gateRound: 0,
+        gateRepairCount: 0,
+        convergenceEpoch: 0,
+        epochReviewRound: 0,
+        supervisorEscalationCount: 0,
+        supervisorInvoked: false,
+        findingSignatureHistory: [],
+        pendingReviewerReconsideration: null,
+        lastSupervisorGuidance: null,
+        lastSupervisorRecommendation: null,
+        chunkReviewCheckpoint: null,
+        humanReopens: [...reopens, {
+          at, reason: String(reason), round: loop.round, phaseIndex: loop.currentPhaseIndex ?? null,
+          tier: extended ? 'EXTENDED' : 'STANDARD',
+          ...(nextAllowance ? { allowance: nextAllowance.history.slice(priorAllowanceEntries) } : {}),
+        }],
+      });
+      return {
+        [STATE_KEY]: loop,
+        ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
+      };
+    },
   });
   return {
     loopId, reopens: loop.humanReopens.length, phaseIndex: loop.currentPhaseIndex ?? null,

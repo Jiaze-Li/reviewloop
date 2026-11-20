@@ -224,3 +224,28 @@ test('an unreadable state record: stop-loop and extend-calls refuse with a point
   await assert.rejects(() => stopLoop({ persistence, loopId: 'L', reason: 'r' }), /cannot be read \(SyntaxError\).*reviewloop report --loop L/s);
   await assert.rejects(() => extendCalls({ persistence, loopId: 'L', reviewerCalls: 2, reason: 'r' }), /cannot be read \(SyntaxError\).*reviewloop report --loop L/s);
 });
+
+test('two real concurrent recovery exits (extend-calls and stop-loop) against one persistence: exactly one wins (F003)', async () => {
+  const persistence = new MemoryPersistence();
+  await persistence.updateWorkflowState('A', { reviewLoop: loopRecord('A') });
+  const s = createReviewLoopSpend({ loopId: 'A', persistence, env: ENV2 });
+  await meter(s); await meter(s);
+  const realUpdate = persistence.updateWorkflowState.bind(persistence);
+  persistence.updateWorkflowState = async (id, patch) => {
+    await new Promise((r) => setTimeout(r, 20));
+    return realUpdate(id, patch);
+  };
+
+  const results = await Promise.allSettled([
+    extendCalls({ persistence, loopId: 'A', reviewerCalls: 2, reason: 'grant more calls', env: ENV2 }),
+    stopLoop({ persistence, loopId: 'A', reason: 'stop instead' }),
+  ]);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  const err = results.filter((r) => r.status === 'rejected');
+  assert.equal(ok.length, 1);
+  assert.equal(err.length, 1);
+  assert.match(err[0].reason.message, /concurrent modification/);
+  const wf = await persistence.readWorkflowState('A');
+  assert.equal(wf.reviewLoop.state, 'HUMAN_REQUIRED', 'losing stop-loop wrote nothing');
+  assert.ok(wf.reviewLoopCallAllowance.maxReviewerCalls > 2, 'winning extend-calls persisted');
+});

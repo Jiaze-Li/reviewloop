@@ -9,7 +9,7 @@
 // evidence, the frozen contract, baseline or phases.
 
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
-import { assertUnchanged, fingerprint, readLoopWorkflow } from './humanActionGuard.js';
+import { commitGuardedUpdate, fingerprint, readLoopWorkflow } from './humanActionGuard.js';
 
 export async function stopLoop({ persistence, loopId, reason, now = () => new Date() }) {
   if (!loopId) throw new Error('stop-loop requires a loopId');
@@ -28,17 +28,24 @@ export async function stopLoop({ persistence, loopId, reason, now = () => new Da
     throw new Error(`loop is already ${loop.state}; a finished loop is kept as it is`);
   }
   const before = fingerprint(workflow);
-  await assertUnchanged({ persistence, loopId, before, action: 'stopping the loop' });
   const at = now().toISOString();
   const priorState = loop.state;
   const text = String(reason).trim();
-  // HUMAN_REQUIRED only leads back to REVIEWING, so a stop from there passes
-  // through it; the hop is bookkeeping, not a review (humanStop is authoritative).
-  if (priorState === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
-    recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human stop (bookkeeping hop, no review): ${text}`);
-  }
-  recordTransition(loop, REVIEW_LOOP_STATES.STOPPED, `human stop: ${text}`);
-  loop.humanStop = { at, reason: text, priorState, round: loop.round ?? 0, budgetExhausted: loop.budgetExhausted === true };
-  await persistence.updateWorkflowState(loopId, { reviewLoop: loop });
+  await commitGuardedUpdate({
+    persistence,
+    loopId,
+    before,
+    action: 'stopping the loop',
+    buildPatch: () => {
+      // HUMAN_REQUIRED only leads back to REVIEWING, so a stop from there passes
+      // through it; the hop is bookkeeping, not a review (humanStop is authoritative).
+      if (priorState === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+        recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human stop (bookkeeping hop, no review): ${text}`);
+      }
+      recordTransition(loop, REVIEW_LOOP_STATES.STOPPED, `human stop: ${text}`);
+      loop.humanStop = { at, reason: text, priorState, round: loop.round ?? 0, budgetExhausted: loop.budgetExhausted === true };
+      return { reviewLoop: loop };
+    },
+  });
   return { loopId, alreadyStopped: false, priorState, stoppedAt: at, round: loop.round ?? 0 };
 }
