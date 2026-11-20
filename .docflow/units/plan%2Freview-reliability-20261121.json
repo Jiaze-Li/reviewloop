@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T16:07:20.863Z",
+  "task": {
+    "id": "plan/review-reliability-20261121",
+    "branch": "plan/review-reliability-20261121",
+    "title": "plan/review-reliability-20261121",
+    "task": "Development branch: plan/review-reliability-20261121",
+    "started": "2026-11-21T00:07:08+08:00",
+    "status": "In progress",
+    "current": "plan: bootstrap review reliability foundations (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "d248ed42cfa63e61e2031094a7503d5718eb8f18",
+        "branch": "plan/review-reliability-20261121",
+        "timestamp": "2026-11-21T00:07:08+08:00",
+        "message": "plan: bootstrap review reliability foundations (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
