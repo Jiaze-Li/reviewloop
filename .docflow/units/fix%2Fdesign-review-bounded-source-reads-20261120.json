@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T11:35:39.223Z",
+  "updatedAt": "2026-11-20T11:38:09.796Z",
   "task": {
     "id": "fix/design-review-bounded-source-reads-20261120",
     "branch": "fix/design-review-bounded-source-reads-20261120",
@@ -19,7 +19,14 @@
         "message": "chore: bootstrap bounded design source verification planning PR (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 66,
+      "state": "open",
+      "title": "plan: bounded large-source evidence for independent Design review",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/66",
+      "merged": false,
+      "updatedAt": "2026-11-20T11:37:58Z"
+    },
     "completed": null,
     "outcome": null
   }
