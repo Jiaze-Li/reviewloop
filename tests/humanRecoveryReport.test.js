@@ -169,7 +169,7 @@ test('an unsettled call that a human already registered no longer blocks; one st
   const stop = loopWith({ reason: 'model spend blocked: MODEL_SPEND_USAGE_UNRESOLVED (x)' });
   const open = report(stop, { modelSpendReservations: { a: { status: 'UNRESOLVED', role: 'reviewer' } } });
   assert.equal(open.category, 'UNACCOUNTED_SPEND');
-  const done = report(stop, { modelSpendReservations: { a: { status: 'UNRESOLVED', role: 'reviewer', humanAcknowledgement: { accepted: true, acknowledgedAt: T1 } } } });
+  const done = report(stop, { modelSpendReservations: { a: { status: 'UNRESOLVED', role: 'reviewer', humanAcknowledgement: { accepted: true, accountingRecorded: true, acknowledgedAt: T1 } } } });
   assert.equal(done.category, 'RESUME_PENDING');
   assert.match(done.reportText, /已由人工登记为用量未知/);
 });
@@ -279,4 +279,51 @@ test('CLI report: corrupt record -> preserve-evidence report with the real path;
     assert.equal(noloop.status, 0, noloop.stderr);
     assert.match(noloop.stdout, /任务状态记录无法读取/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// ---- a call that crossed the dispatch boundary is still a live stop -----------
+
+test('DISPATCHING reservation (sent, never settled) is a live blocker: the report must not say "nothing blocks" (AC06/AC17)', () => {
+  const acked = {
+    reviewLoopTokenAnomaly: latch({ tripped: false }),
+    reviewLoopTokenAnomalyAcks: [{ at: T1, latchAt: latch().at }],
+  };
+  const stop = loopWith({ reason: 'MODEL_SPEND_TOKEN_ANOMALY_BLOCKED' });
+  const r = report(stop, { ...acked, modelSpendReservations: { d1: { reservationId: 'd1', status: 'DISPATCHING', role: 'reviewer' } } });
+  assert.equal(r.category, 'UNACCOUNTED_SPEND');
+  assert.notEqual(r.category, 'RESUME_PENDING');
+  assert.match(r.humanDecision.command, /^reviewloop acknowledge-spend /);
+
+  // same for a spend-recovery stop where a human acknowledged one call but another is still DISPATCHING
+  const spendStop = loopWith({ reason: 'model spend blocked: MODEL_SPEND_USAGE_UNRESOLVED (x)' });
+  const both = report(spendStop, {
+    modelSpendReservations: {
+      a: { status: 'UNRESOLVED', role: 'reviewer', humanAcknowledgement: { accepted: true, accountingRecorded: true, acknowledgedAt: T1 } },
+      d1: { status: 'DISPATCHING', role: 'reviewer' },
+    },
+  });
+  assert.equal(both.category, 'UNACCOUNTED_SPEND');
+});
+
+test('the report agrees with the spend authority on what blocks: acknowledged-and-recorded UNRESOLVED does not, DISPATCHING always does', async () => {
+  const { isBlockingReservationStatus, isHumanAcknowledgedUnresolved } = await import('../src/orchestrator/modelSpendReservation.js');
+  const cases = [
+    [{ status: 'UNRESOLVED' }, true],
+    [{ status: 'UNRESOLVED', humanAcknowledgement: { accepted: true, accountingRecorded: true } }, false],
+    [{ status: 'UNRESOLVED', humanAcknowledgement: { accepted: true } }, true],
+    [{ status: 'DISPATCHING', humanAcknowledgement: { accepted: true, accountingRecorded: true } }, true],
+    [{ status: 'RESERVED' }, false],
+    [{ status: 'SETTLED_KNOWN' }, false],
+    [{ status: 'CANCELLED_PRE_DISPATCH' }, false],
+  ];
+  const acked = {
+    reviewLoopTokenAnomaly: latch({ tripped: false }),
+    reviewLoopTokenAnomalyAcks: [{ at: T1, latchAt: latch().at }],
+  };
+  for (const [rv, blocks] of cases) {
+    assert.equal(isBlockingReservationStatus(rv.status) && !isHumanAcknowledgedUnresolved(rv), blocks, JSON.stringify(rv));
+    const r = report(loopWith({ reason: 'MODEL_SPEND_TOKEN_ANOMALY_BLOCKED' }), { ...acked, modelSpendReservations: { x: { ...rv, role: 'reviewer' } } });
+    assert.equal(r.category === 'UNACCOUNTED_SPEND', blocks, `report vs authority for ${JSON.stringify(rv)}`);
+    assert.equal(r.category === 'RESUME_PENDING', !blocks, JSON.stringify(rv));
+  }
 });

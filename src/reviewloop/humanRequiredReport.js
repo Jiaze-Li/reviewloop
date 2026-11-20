@@ -14,6 +14,7 @@ import { buildTokenProfile } from './tokenProfile.js';
 import { TOKEN_ANOMALY_KEY, TOKEN_ANOMALY_ACKS_KEY } from './tokenAnomalyAck.js';
 import { effectiveCallLimits } from './callAllowance.js';
 import { STANDARD_HUMAN_REOPENS } from './gateReopen.js';
+import { isBlockingReservationStatus, isHumanAcknowledgedUnresolved } from '../orchestrator/modelSpendReservation.js';
 import {
   CALL_ALLOWANCE_KEY, TOKEN_ACK_STANDARD_LIMIT, usedCalls,
 } from './humanActionGuard.js';
@@ -102,7 +103,10 @@ export function activeBlockers({ loop, workflow, fromSupervisor, env = process.e
   if (workflow?.[TOKEN_ANOMALY_KEY]?.tripped === true) list.push('TOKEN_SENTINEL');
   const reservations = workflow?.modelSpendReservations && typeof workflow.modelSpendReservations === 'object'
     ? Object.values(workflow.modelSpendReservations) : [];
-  if (reservations.some((rv) => rv?.status === 'UNRESOLVED' && rv?.humanAcknowledgement?.accepted !== true)) list.push('UNACCOUNTED_SPEND');
+  // Exactly the spend authority's rule: a call that crossed the dispatch boundary
+  // (DISPATCHING) or is UNRESOLVED blocks all further spend, unless a human
+  // acknowledged AND recorded an UNRESOLVED one. Never a narrower reading.
+  if (reservations.some((rv) => isBlockingReservationStatus(rv?.status) && !isHumanAcknowledgedUnresolved(rv))) list.push('UNACCOUNTED_SPEND');
   try {
     const limits = effectiveCallLimits({ workflow, env });
     const used = usedCalls(workflow);
