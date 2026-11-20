@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:40:47.682Z",
+  "updatedAt": "2026-11-20T06:00:17.590Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "In progress",
     "current": "Fix review findings: recheck state before confirming a token stop, keep old header support",
-    "next": "你确认修订后的新设计后说“Code”，按新设计增量实现",
+    "next": "新设计的代码已本地审查通过，等你授权提交并推送到 PR 59，之后由机器人重新审查",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
