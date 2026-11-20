@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T12:24:26.902Z",
+  "task": {
+    "id": "workflow/controlled-review-exception-20261120",
+    "branch": "workflow/controlled-review-exception-20261120",
+    "title": "workflow/controlled-review-exception-20261120",
+    "task": "Development branch: workflow/controlled-review-exception-20261120",
+    "started": "2026-11-20T20:24:01+08:00",
+    "status": "In progress",
+    "current": "chore: bootstrap controlled review exception planning PR (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "9b6051230539db9d51502e2a4280fb4616c850d0",
+        "branch": "workflow/controlled-review-exception-20261120",
+        "timestamp": "2026-11-20T20:24:01+08:00",
+        "message": "chore: bootstrap controlled review exception planning PR (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
