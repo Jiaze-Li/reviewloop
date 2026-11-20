@@ -22,6 +22,7 @@ import {
 import { DEFAULT_TRUSTED_BOT_LOGINS } from './objective.js';
 import { parseTrustedBotSession } from './botSession.js';
 import { resolveReviewLoopRuntimeRoot } from './runtimeDir.js';
+import { evaluateDesignException } from './designExceptionState.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,7 +32,12 @@ export const PR_CONTRACT_PLAN_MAX_BYTES = 1024 * 1024; // 1 MiB safety cap
 export const PR_CONTRACT_MCP_MAX_BYTES = 64 * 1024; // 65,536 bytes MCP contractText cap
 export const PR_CONTRACT_MAX_PARTS = 25;
 
-const CONTRACT_TYPES = new Set(['plan', 'design']);
+// `exception` = the archived human-authorized Design-review exception record
+// (human decision + external review report). It is NOT a review result.
+const CONTRACT_TYPES = new Set(['plan', 'design', 'exception']);
+const TYPE_LABELS = { plan: 'Plan', design: 'Design', exception: 'Exception' };
+const TYPE_HEADINGS = { plan: '完整需求', design: '完整设计', exception: '人工授权例外记录（非 ReviewLoop PASS）' };
+export const HUMAN_EXCEPTION_NOTICE = '审查来源：人工授权例外（非 ReviewLoop PASS）';
 const INDEX_STATUSES = new Set(['current', 'superseded']);
 const TASK_CONTRACT_FILE_RE = /(?:^|\/)(?:Plan|Design)(?:\.[^/]+)?\.md$/i;
 const GH_TIMEOUT_MS = 15_000;
@@ -54,7 +60,7 @@ function fail(code, message, details) {
 function normalizeType(type) {
   const normalized = String(type ?? '').trim().toLowerCase();
   if (!CONTRACT_TYPES.has(normalized)) {
-    fail('PR_CONTRACT_INVALID_TYPE', `contract type must be "plan" or "design", got ${JSON.stringify(type)}`);
+    fail('PR_CONTRACT_INVALID_TYPE', `contract type must be "plan", "design" or "exception", got ${JSON.stringify(type)}`);
   }
   return normalized;
 }
@@ -126,6 +132,7 @@ export function formatContractComments({
   summaryPrefix,
   maxCharsPerPart = PR_CONTRACT_COMMENT_MAX_CHARS,
   designSha256 = null,
+  humanException = false,
 }) {
   const id = requireNonEmpty(taskId, 'taskId');
   const kind = normalizeType(type);
@@ -139,6 +146,9 @@ export function formatContractComments({
   const trimmed = content.trim();
   checkByteBudget(trimmed, kind);
   const sha256 = contractContentSha256(trimmed);
+  if (humanException && kind !== 'design') {
+    fail('PR_CONTRACT_INVALID_ARG', 'humanException labelling only applies to a design contract');
+  }
   if (kind === 'design' && designSha256 && sha256 !== String(designSha256).toLowerCase()) {
     fail(
       'PR_CONTRACT_DESIGN_ANCHOR_MISMATCH',
@@ -148,7 +158,7 @@ export function formatContractComments({
 
   const chunks = splitContractText(trimmed, maxCharsPerPart);
   const total = chunks.length;
-  const label = kind === 'plan' ? 'Plan' : 'Design';
+  const label = TYPE_LABELS[kind];
   const comments = chunks.map((chunk, idx) => {
     const part = idx + 1;
     const partTag = total > 1 ? `:part=${part}/${total}` : '';
@@ -159,8 +169,9 @@ export function formatContractComments({
     const beginMarker = `<!-- reviewloop-${kind}:${id}:${ver}${partTag}:begin -->`;
     const endMarker = `<!-- reviewloop-${kind}:${id}:${ver}${partTag}:end -->`;
     const lines = [
-      `**${id} · ${label} ${ver}${partLabel} · 完整${kind === 'plan' ? '需求' : '设计'}**`,
+      `**${id} · ${label} ${ver}${partLabel} · ${TYPE_HEADINGS[kind]}**`,
       '',
+      ...(humanException ? [`> ${HUMAN_EXCEPTION_NOTICE}`, ''] : []),
       beginMarker,
       '<details>',
       `<summary>${summaryText}</summary>`,
@@ -170,7 +181,11 @@ export function formatContractComments({
       '</details>',
       endMarker,
     ];
-    if (kind === 'design' && designSha256 && part === total) {
+    // The bare `designSha256:` trailer is reserved for a ReviewLoop Design PASS.
+    // A human-authorized exception never carries it.
+    if (kind === 'design' && humanException && part === total) {
+      lines.push('', `designSha256 (human exception, not ReviewLoop PASS): ${sha256}`);
+    } else if (kind === 'design' && designSha256 && part === total) {
       lines.push('', `designSha256: ${sha256}`);
     }
     return { part, total, body: lines.join('\n') };
@@ -192,7 +207,7 @@ export function extractContractCommentPart(
   if (typeof body !== 'string' || !body.trim()) {
     fail('PR_CONTRACT_FORMAT_INVALID', 'comment body is empty');
   }
-  const beginRe = /<!--\s*reviewloop-(plan|design):([^:\s]+):([^:\s]+?)(?::part=(\d+)\/(\d+))?:begin\s*-->/;
+  const beginRe = /<!--\s*reviewloop-(plan|design|exception):([^:\s]+):([^:\s]+?)(?::part=(\d+)\/(\d+))?:begin\s*-->/;
   const beginMatch = beginRe.exec(body);
   if (!beginMatch) {
     fail('PR_CONTRACT_FORMAT_INVALID', 'missing reviewloop begin marker in comment');
@@ -424,7 +439,7 @@ export function upsertContractIndex(prBody, entry, { repoUrl = null, prNumber = 
     '',
     '| 任务 | 类型 | 版本 | 评论 ID | SHA-256 | 分段 | 状态 |',
     '|---|---|---|---|---|---|---|',
-    ...updated.map((r) => `| ${r.taskId} | ${r.type === 'plan' ? 'Plan' : 'Design'} | ${r.version} | ${formatIds(r.commentIds)} | \`${r.sha256}\` | ${r.totalParts}/${r.totalParts} | ${r.status} |`),
+    ...updated.map((r) => `| ${r.taskId} | ${TYPE_LABELS[r.type]} | ${r.version} | ${formatIds(r.commentIds)} | \`${r.sha256}\` | ${r.totalParts}/${r.totalParts} | ${r.status} |`),
   ];
 
   const body = typeof prBody === 'string' ? prBody : '';
@@ -649,6 +664,8 @@ export async function recoverPrContract({
 
   const trustNote = kind === 'plan'
     ? 'Plan 仅校验「PR 描述索引 ↔ 评论」一致性（无 PR 外部独立锚点，高风险请由所有者确认）。'
+    : kind === 'exception'
+      ? '人工授权例外记录仅校验「PR 描述索引 ↔ 评论」一致性；它是人工裁决，不是 ReviewLoop 审查结果。'
     : expectedDesignSha256
       ? 'Design 已核对「PR 描述索引 ↔ 评论 ↔ 独立 designSha256 锚点」三方一致。'
       : '警告：本次未提供 PR 外部 designSha256 独立锚点，仅校验了 PR 内部索引与评论一致。';
@@ -721,6 +738,50 @@ export async function findLocalDesignPassAnchor({
   return null;
 }
 
+/**
+ * Finds a VALID human-authorized Design-review exception (never a PASS) in the
+ * local ReviewLoop store whose bound design content equals `designSha256`.
+ * Validity is the shared pure rule (`evaluateDesignException`): the original
+ * Design loop must still be the HUMAN_REQUIRED stop it was granted on (or a
+ * human-STOPPED copy of it). Read-only.
+ */
+export async function findLocalDesignExceptionAnchor({
+  loopId = null,
+  designSha256,
+  runtimeDir = resolveReviewLoopRuntimeRoot(),
+} = {}) {
+  const targetSha = String(designSha256 ?? '').trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(targetSha)) return null;
+  const candidates = [];
+  if (loopId) {
+    candidates.push(loopId);
+  } else {
+    let entries = [];
+    try {
+      entries = await fsp.readdir(runtimeDir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const ent of entries) {
+      if (ent.isDirectory() && ent.name.startsWith('rl-')) candidates.push(ent.name);
+    }
+    candidates.sort().reverse();
+  }
+  for (const id of candidates) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const parsed = JSON.parse(await fsp.readFile(path.join(runtimeDir, id, 'workflow.json'), 'utf8'));
+      const verdict = evaluateDesignException(parsed);
+      if (!verdict.valid || verdict.active.loopId !== id) continue;
+      if (verdict.active.designSha256 !== targetSha) continue;
+      return { ...verdict.active };
+    } catch {
+      // Ignore unreadable or non-JSON entries while scanning.
+    }
+  }
+  return null;
+}
+
 async function defaultRunGit(cwd, args) {
   const { stdout } = await execFileAsync('git', args, {
     cwd,
@@ -768,19 +829,53 @@ export async function verifyDesignArchiveAndCleanupReady({
     runGh,
   });
 
-  // 3. Independent local Design PASS anchor matching recovered.sha256
-  const anchor = await findLocalDesignPassAnchor({
+  // 3. Independent local Design PASS anchor matching recovered.sha256.
+  // The PASS lookup is unchanged and always tried first.
+  let anchor = await findLocalDesignPassAnchor({
     loopId,
     designSha256: recovered.sha256,
     runtimeDir,
   });
+  let authority = 'REVIEWLOOP_PASS';
+  let exception = null;
   if (!anchor) {
-    fail(
-      'PR_CONTRACT_NO_DESIGN_PASS',
-      loopId
-        ? `no Design PASS record found in ReviewLoop store for loopId=${loopId} matching sha256=${recovered.sha256}`
-        : `no Design PASS record found in local ReviewLoop store matching sha256=${recovered.sha256}`,
-    );
+    // 3b. Otherwise only a valid, exactly bound human-authorized exception.
+    const exc = await findLocalDesignExceptionAnchor({ loopId, designSha256: recovered.sha256, runtimeDir });
+    if (!exc) {
+      fail(
+        'PR_CONTRACT_NO_DESIGN_PASS',
+        loopId
+          ? `no Design PASS record (and no valid human-authorized Design exception) found in ReviewLoop store for loopId=${loopId} matching sha256=${recovered.sha256}`
+          : `no Design PASS record (and no valid human-authorized Design exception) found in local ReviewLoop store matching sha256=${recovered.sha256}`,
+      );
+    }
+    const sameRepo = String(exc.repo).toLowerCase() === String(repo).trim().toLowerCase();
+    if (!sameRepo || exc.prNumber !== Number(prNumber) || exc.taskId !== String(taskId).trim() || exc.designVersion !== recovered.version) {
+      fail(
+        'PR_CONTRACT_EXCEPTION_SCOPE_MISMATCH',
+        `human Design exception ${exc.id} is bound to ${exc.repo}#${exc.prNumber} ${exc.taskId} ${exc.designVersion}, `
+        + `not ${repo}#${prNumber} ${taskId} ${recovered.version}`,
+      );
+    }
+    const plan = await recoverPrContract({ repo, prNumber, taskId, type: 'plan', allowedAuthors, runGh });
+    if (plan.sha256 !== exc.planSha256) {
+      fail(
+        'PR_CONTRACT_EXCEPTION_PLAN_MISMATCH',
+        `PR Plan SHA-256 (${plan.sha256}) differs from the Plan the human exception was granted for (${exc.planSha256})`,
+      );
+    }
+    const archived = await recoverPrContract({
+      repo, prNumber, taskId, type: 'exception', version: recovered.version, allowedAuthors, runGh,
+    });
+    if (archived.sha256 !== exc.archiveSha256) {
+      fail(
+        'PR_CONTRACT_EXCEPTION_ARCHIVE_MISMATCH',
+        `archived exception record SHA-256 (${archived.sha256}) differs from the local human decision (${exc.archiveSha256})`,
+      );
+    }
+    anchor = { loopId: exc.loopId, reviewTarget: exc.reviewTarget, designSha256: exc.designSha256 };
+    authority = 'HUMAN_EXCEPTION';
+    exception = { id: exc.id, at: exc.at, archiveCommentIds: archived.commentIds };
   }
 
   // 4. Verify local untracked working file exists (walking every path component
@@ -843,6 +938,8 @@ export async function verifyDesignArchiveAndCleanupReady({
     reviewTarget: relPath,
     loopId: anchor.loopId,
     designSha256: anchor.designSha256,
+    authority,
+    ...(exception ? { exceptionId: exception.id, exceptionAt: exception.at, exceptionCommentIds: exception.archiveCommentIds } : {}),
     commentIds: recovered.commentIds,
     version: recovered.version,
     warnings: recovered.warnings,

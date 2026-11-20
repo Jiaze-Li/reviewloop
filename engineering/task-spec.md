@@ -1,4 +1,4 @@
-# Engineering Task Spec — v1.3.0
+# Engineering Task Spec — v1.3.1
 
 本规范继承原 v11.5 的单任务规格、阶段、验收与证据义务；项目统筹、设计、独立审查由相邻 Skill 承担。已冻结任务仍按其原合同审查，不追改验收边界。
 

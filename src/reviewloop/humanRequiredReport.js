@@ -18,6 +18,7 @@ import { isBlockingReservationStatus, isHumanAcknowledgedUnresolved } from '../o
 import {
   CALL_ALLOWANCE_KEY, TOKEN_ACK_STANDARD_LIMIT, usedCalls,
 } from './humanActionGuard.js';
+import { DESIGN_SOURCE_LIMIT_REASON, evaluateDesignException } from './designExceptionState.js';
 
 export const REPORT_VERSION = 1;
 export const HEADLINE_MAX = 120;
@@ -26,7 +27,7 @@ const TEXT_MAX = 200;
 export const CATEGORIES = Object.freeze([
   'TOKEN_SENTINEL', 'UNACCOUNTED_SPEND', 'SPEND_CEILING', 'CALL_CEILING', 'CONVERGENCE_EXHAUSTED',
   'NO_NEW_INFORMATION', 'ATTRIBUTION_INCOMPLETE', 'REVIEW_FAILED', 'TASK_DEFINITION', 'SUPERVISOR_ESCALATION',
-  'CANCELLED', 'DESIGN_ROUNDS', 'RESUME_PENDING', 'STATE_UNREADABLE', 'OTHER',
+  'CANCELLED', 'DESIGN_ROUNDS', 'RESUME_PENDING', 'STATE_UNREADABLE', 'DESIGN_SOURCE_LIMIT', 'OTHER',
 ]);
 
 const LABEL = {
@@ -44,6 +45,7 @@ const LABEL = {
   DESIGN_ROUNDS: '设计审查轮数用尽',
   RESUME_PENDING: '已由人工确认，待继续审查',
   STATE_UNREADABLE: '任务状态记录无法读取',
+  DESIGN_SOURCE_LIMIT: '设计审查工具读不到关键源码',
   OTHER: '需要人工处理',
 };
 
@@ -163,6 +165,9 @@ export function classify({ loop, workflow, reason, result = null, env = process.
     }
     if (textCat !== 'TOKEN_ACKED') return { category: textCat, checked, ctx };
   }
+  // Exact match only: the two-stage Design review's tool-boundary stop (a review
+  // TOOL limit, not a design defect). Never a fuzzy pattern.
+  if (reason === DESIGN_SOURCE_LIMIT_REASON) return { category: 'DESIGN_SOURCE_LIMIT', checked, ctx };
   if (/design review round budget/i.test(reason)) return { category: 'DESIGN_ROUNDS', checked, ctx };
   if (/New Information|NO_NEW_INFORMATION/i.test(reason)) return { category: 'NO_NEW_INFORMATION', checked, ctx };
   checked.push(`收敛预算：${loop?.budgetExhausted === true ? '已用尽' : '未用尽'}；停止来自监督者：${fromSupervisor ? '是' : '否'}`);
@@ -306,7 +311,21 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
   const reopenExtra = reopensDone >= STANDARD_HUMAN_REOPENS ? ' --max-reviewer-calls <本次最多允许的审查调用数>' : '';
   const extendedNote = (done) => (done >= TOKEN_ACK_STANDARD_LIMIT
     ? [`已超过常规 ${TOKEN_ACK_STANDARD_LIMIT} 次：仍可继续，但需要写明本次尝试最多再用几次审查调用，系统会按这个数字强制执行（文字理由只用于记录）`] : []);
+  const isNewDesignLoop = loop?.objective?.taskType === 'design' && Boolean(loop?.objective?.reviewTarget);
+  const exceptionCommand = `reviewloop accept-design-exception --loop ${loopId} --repo <owner/name> --pr <PR号> --task-id <任务ID> --design-version <设计版本> --design-sha <设计内容SHA-256> --review-report <外部独立审查报告.json> --reason "<为什么采用替代独立审查>"`;
+  const exceptionChoice = '采用另一个独立上下文的替代审查，并由你本人授权这份设计进入 Code（记录为人工授权例外，不是 ReviewLoop 审查通过）';
   const plans = {
+    DESIGN_SOURCE_LIMIT: {
+      paused: ['设计审查已暂停：审查工具读不到设计所依赖的关键源码，无法独立核实这些事实（这是审查工具的限制，本轮没有发现设计缺陷不等于审查通过）'],
+      fixOptions: [
+        '让另一个独立上下文按设计全文与相关源码做替代审查，产出结构化报告（结论、已核实的源码行段、未核实的风险）',
+        '或先修好审查工具的读取能力，再由你明确下达重新审查这份设计的指令',
+        '如果设计确实依赖读不到的内容且不愿承担风险，可以终止该任务',
+      ],
+      recommended: '如果替代审查报告没有阻断问题，由你本人运行下方命令授权进入 Code；原审查记录保持“未通过”，不会被改写',
+      choices: [exceptionChoice, '先修复审查工具后重新审查（需要你明确指令）', '终止该任务'],
+      command: exceptionCommand,
+    },
     TOKEN_SENTINEL: {
       paused: ['该任务后续所有模型审查调用已被暂停'],
       fixOptions: ['缩小或拆分送审内容，降低单次发送量', '确认传输方式没有附带多余上下文', '核对上方 Prompt 组成，看是否有重复大段内容'],
@@ -369,8 +388,9 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
       paused: ['本轮独立审查没有完成，没有得出任何通过结论'],
       fixOptions: ['查看下方原因，如是临时的提供商/网络问题，稍后重试', '如是输出格式问题，检查送审内容是否过大'],
       recommended: retry,
-      choices: ['稍后重试审查', '终止该任务'],
+      choices: isNewDesignLoop ? ['稍后重试审查', exceptionChoice, '终止该任务'] : ['稍后重试审查', '终止该任务'],
       command: null,
+      extraFix: isNewDesignLoop ? [`如果审查工具持续无法完成，可改用替代独立审查，由你本人授权（人工授权例外，不是审查通过）：${exceptionCommand}`] : [],
     },
     TASK_DEFINITION: {
       paused: ['审查已暂停，因为冻结的任务合同没有通过完整性检查'],
@@ -490,6 +510,15 @@ export function buildHumanRequiredReport({ loopId, loop, workflow, result = null
     impact.preserved.push(`此前已有 ${acks.length} 次人工确认记录（常规 ${TOKEN_ACK_STANDARD_LIMIT} 次，超过后仍可确认，但需写明本次最多允许的审查调用数）`);
   }
 
+  if (category !== 'STATE_UNREADABLE') {
+    const exc = evaluateDesignException(workflow);
+    if (exc.valid) {
+      confirmed.push(`已由人工授权例外：设计 ${exc.active.designSha256.slice(0, 12)}… 可以进入 Code（来源：人工裁决记录 ${exc.active.id}）；这不是 ReviewLoop 审查通过，原审查仍未通过`);
+      impact.preserved.push('人工授权例外记录（单独保存，没有改动原审查状态）');
+    } else if (exc.status === 'INVALID') {
+      gaps.push(`存在人工授权例外记录，但已失效：${clip(exc.reason, 120)}`);
+    }
+  }
   const fixOptions = [...plan.fixOptions, ...(plan.extraFix ?? [])];
   // Every category ends with the same real exit: end the task, keep every record.
   // (Not offered when the record cannot be read: nothing can be written to it.)

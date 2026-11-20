@@ -1,4 +1,4 @@
-# Engineering Workflow — 动态评测 v1.3.0
+# Engineering Workflow — 动态评测 v1.3.1
 
 目标：验证 Plan → Design → Code 流程**正确放行且正确停止**。测试是可重放的模拟，不改真实仓库；只有附实际输出/证据的运行才可记 PASS。每次更新 Skill 后用固定 `policy_sha` 运行全部用例。实际工程闭环另记，不把模拟当真实 ReviewLoop 或 PR 结果。
 
