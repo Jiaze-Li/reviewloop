@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:30:56.393Z",
+  "updatedAt": "2026-11-20T07:31:04.564Z",
   "task": {
     "id": "plan/centralize-engineering-authorization-20261120",
     "branch": "plan/centralize-engineering-authorization-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T15:08:36+08:00",
     "status": "In progress",
     "current": "Centralize engineering authorization policy into engineering/authorization.md",
-    "next": "",
+    "next": "等待第 61 号拉取请求的自动审查与持续集成结果，确认无误后决定是否合并",
     "history": [
       {
         "at": "2026-11-20T15:30:44+08:00",
