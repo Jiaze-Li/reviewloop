@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:41:04.268Z",
+  "updatedAt": "2026-11-20T08:43:01.081Z",
   "task": {
     "id": "plan/minimum-sufficient-human-communication-20261120",
     "branch": "plan/minimum-sufficient-human-communication-20261120",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/minimum-sufficient-human-communication-20261120",
     "started": "2026-11-20T16:03:09+08:00",
     "status": "In progress",
-    "current": "Apply minimum sufficient human communication policy across docs, MCP, and prompts",
+    "current": "Merge origin/main and resolve designTwoStage prompt conflict",
     "next": "等待 PR 63 的自动审查与检查结果，确认后决定是否合并",
     "history": [
       {
         "at": "2026-11-20T16:40:36+08:00",
         "text": "chore: bootstrap human communication policy planning PR (no file changes)"
+      },
+      {
+        "at": "2026-11-20T16:42:51+08:00",
+        "text": "Apply minimum sufficient human communication policy across docs, MCP, and prompts"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/minimum-sufficient-human-communication-20261120",
         "timestamp": "2026-11-20T16:40:36+08:00",
         "message": "Apply minimum sufficient human communication policy across docs, MCP, and prompts"
+      },
+      {
+        "sha": "1998c6042fa703e1438639a28fb2488528285542",
+        "branch": "plan/minimum-sufficient-human-communication-20261120",
+        "timestamp": "2026-11-20T16:42:51+08:00",
+        "message": "Merge origin/main and resolve designTwoStage prompt conflict"
       }
     ],
     "pr": {
