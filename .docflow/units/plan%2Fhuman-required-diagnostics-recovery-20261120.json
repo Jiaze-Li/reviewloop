@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T03:54:31.028Z",
+  "task": {
+    "id": "plan/human-required-diagnostics-recovery-20261120",
+    "branch": "plan/human-required-diagnostics-recovery-20261120",
+    "title": "plan/human-required-diagnostics-recovery-20261120",
+    "task": "Development branch: plan/human-required-diagnostics-recovery-20261120",
+    "started": "2026-11-20T11:54:16+08:00",
+    "status": "In progress",
+    "current": "chore(plan): bootstrap HUMAN_REQUIRED diagnosis and recovery draft PR (empty tree)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "2131c3f0f4a3b2c49327be9e4f71f4584707fb51",
+        "branch": "plan/human-required-diagnostics-recovery-20261120",
+        "timestamp": "2026-11-20T11:54:16+08:00",
+        "message": "chore(plan): bootstrap HUMAN_REQUIRED diagnosis and recovery draft PR (empty tree)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
