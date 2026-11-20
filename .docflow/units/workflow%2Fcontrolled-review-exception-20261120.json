@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T13:12:23.540Z",
+  "updatedAt": "2026-11-20T13:12:50.245Z",
   "task": {
     "id": "workflow/controlled-review-exception-20261120",
     "branch": "workflow/controlled-review-exception-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T20:24:01+08:00",
     "status": "In progress",
     "current": "Keep the Design exception archive text when its file cannot be written",
-    "next": "由你把 PR 67 切换为待审，交给 PR bot 与 CI 做正式代码审查",
+    "next": "等 PR bot 复审 F001 的修复结果",
     "history": [
       {
         "at": "2026-11-20T21:04:04+08:00",
