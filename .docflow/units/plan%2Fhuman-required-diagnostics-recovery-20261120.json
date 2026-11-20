@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T07:26:28.489Z",
+  "updatedAt": "2026-11-20T07:26:47.603Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T11:54:16+08:00",
     "status": "Completed",
     "current": "Share controller loop lock and full-snapshot guard across all human recovery actions",
-    "next": "等待 PR 59 自动复审与测试检查通过后决定是否合并",
+    "next": "",
     "history": [
       {
         "at": "2026-11-20T12:24:10+08:00",
