@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T04:42:39.096Z",
+  "updatedAt": "2026-11-20T05:27:23.585Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
@@ -8,15 +8,26 @@
     "task": "Development branch: plan/installer-rollback-cli-recovery-20261120",
     "started": "2026-11-20T12:26:52+08:00",
     "status": "In progress",
-    "current": "chore: initialize installer safety and CLI recovery planning PR (no file changes)",
+    "current": "Keep symlinks and MCP registrations safe on install rollback; add global command repair",
     "next": "按新增的“无死胡同”原则重做设计：你说“Design”后开始，再由你授权重新实现",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-20T13:27:13+08:00",
+        "text": "chore: initialize installer safety and CLI recovery planning PR (no file changes)"
+      }
+    ],
     "commits": [
       {
         "sha": "e8417effb6bd8b53d82e0255587682ec618c1b84",
         "branch": "plan/installer-rollback-cli-recovery-20261120",
         "timestamp": "2026-11-20T12:26:52+08:00",
         "message": "chore: initialize installer safety and CLI recovery planning PR (no file changes)"
+      },
+      {
+        "sha": "d0f5d6e501d48d706e0e3e9e2d3b279548b623fe",
+        "branch": "plan/installer-rollback-cli-recovery-20261120",
+        "timestamp": "2026-11-20T13:27:13+08:00",
+        "message": "Keep symlinks and MCP registrations safe on install rollback; add global command repair"
       }
     ],
     "pr": {
