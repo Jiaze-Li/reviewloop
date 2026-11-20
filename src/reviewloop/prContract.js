@@ -293,13 +293,13 @@ function parsePartsCell(cell) {
   fail('PR_CONTRACT_INDEX_INVALID', `unrecognized parts cell ${JSON.stringify(cleaned)}`);
 }
 
-// A header row is only recognised by its first two cells: "任务" / "任务 ID" /
-// "任务ID" (any internal whitespace, any case) followed by "类型". Data rows are
-// never skipped by this test, so their validation stays strict.
+// A header row is recognised by its first cell alone: "任务" (as before) or
+// "任务 ID" / "任务ID" (any internal whitespace, any case). Keeping the test on
+// the first cell preserves the old behaviour for every previously accepted
+// table, whatever the other column titles say; data rows keep strict validation.
 function isIndexHeaderRow(cells) {
-  const squash = (s) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
-  const first = squash(cells[0]);
-  return (first === '任务' || first === '任务id') && squash(cells[1]) === '类型';
+  const first = String(cells[0] ?? '').replace(/\s+/g, '').toLowerCase();
+  return first === '任务' || first === '任务id';
 }
 
 /**

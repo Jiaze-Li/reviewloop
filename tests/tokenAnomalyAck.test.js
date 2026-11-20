@@ -93,6 +93,24 @@ test('refusals leave the workflow byte-identical (AC07)', async () => {
   }
 });
 
+test('a concurrent change between validation and write is refused and nothing is written (PR bot F001)', async () => {
+  const { persistence, latchAt } = await trippedLoop();
+  const original = persistence.readWorkflowState.bind(persistence);
+  let reads = 0;
+  persistence.readWorkflowState = async (id) => {
+    reads += 1;
+    const s = await original(id);
+    // the second read is the pre-write re-read: simulate another writer racing in
+    if (reads === 2 && s) s.reviewLoopTokenAnomalyAcks = [{ acknowledgedSpendIds: [] }];
+    return s;
+  };
+  await assert.rejects(() => ack(persistence, latchAt), /concurrent modification/);
+  persistence.readWorkflowState = original;
+  const wf = await persistence.readWorkflowState('L');
+  assert.equal(wf.reviewLoopTokenAnomaly.tripped, true);
+  assert.equal(wf.reviewLoopTokenAnomalyAcks, undefined);
+});
+
 test('second acknowledgement of the same event is refused — no double acknowledgement', async () => {
   const { persistence, latchAt } = await trippedLoop();
   await ack(persistence, latchAt);

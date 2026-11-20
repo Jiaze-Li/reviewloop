@@ -50,9 +50,14 @@ test('data-row validation is unchanged for every header spelling', () => {
   }
 });
 
-test('a DATA row whose first cell is 任务 is not mistaken for a header', () => {
-  const body = table(HEADERS[0], ['| 任务 | Bogus | v1 | 1 | `' + SHA + '` | 1/1 | current |']);
-  assert.throws(() => parseContractIndex(body), (e) => e.code === 'PR_CONTRACT_INVALID_TYPE');
+test('headers with other column titles or fewer columns stay accepted, as before this change', () => {
+  for (const header of ['| 任务 | 种类 | 版本 | 评论 | SHA | 分段 | 状态 |', '| 任务 ID | 类型 |', '| 任务 |']) {
+    assert.equal(parseContractIndex(table(header, [row()])).length, 1, header);
+  }
+});
+
+test('a data row with an invalid type is still rejected when its first cell is an ordinary task id', () => {
+  assert.throws(() => parseContractIndex(table(HEADERS[0], [row('类型')])), (e) => e.code === 'PR_CONTRACT_INVALID_TYPE');
 });
 
 test('recoverPrContract works against a PR description using the "任务 ID" header (PR #59 shape)', async () => {

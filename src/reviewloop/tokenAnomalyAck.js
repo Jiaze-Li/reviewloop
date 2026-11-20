@@ -75,6 +75,19 @@ export async function acknowledgeTokenAnomaly({ persistence, loopId, latchAt, re
     spendRecordCount: records.length,
     acknowledgedSpendIds: records.map(ackIdForRecord),
   };
+  // Defence in depth on top of the CLI's loop lease (bin/reviewloop.js takes it
+  // before calling this): re-read right before the write and refuse if anything
+  // this decision was based on has moved, so a stale snapshot is never written.
+  const fresh = await persistence.readWorkflowState(loopId);
+  const freshAcks = Array.isArray(fresh?.[TOKEN_ANOMALY_ACKS_KEY]) ? fresh[TOKEN_ANOMALY_ACKS_KEY] : [];
+  const freshRecords = Array.isArray(fresh?.[SPEND_KEY]?.records) ? fresh[SPEND_KEY].records : [];
+  if (fresh?.[TOKEN_ANOMALY_KEY]?.tripped !== true
+    || String(fresh[TOKEN_ANOMALY_KEY].at) !== String(latch.at)
+    || freshAcks.length !== acks.length
+    || freshRecords.length !== records.length
+    || fresh?.[STATE_KEY]?.updatedAt !== loop.updatedAt) {
+    throw new Error(`concurrent modification detected in loop ${loopId} while acknowledging the token anomaly; nothing was written, re-read the report and retry`);
+  }
   await persistence.updateWorkflowState(loopId, {
     [TOKEN_ANOMALY_KEY]: { ...latch, tripped: false, clearedAt: at, clearedReason: entry.reason },
     [TOKEN_ANOMALY_ACKS_KEY]: [...acks, entry],
