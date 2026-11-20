@@ -4,6 +4,8 @@
 //   reviewloop doctor       zero-token prerequisite + repo-invariant check
 //   reviewloop status       list local ReviewLoop sessions and their state
 //   reviewloop profile      read-only per-loop physical-call/token breakdown
+//   reviewloop report       read-only HUMAN_REQUIRED report rebuilt from the durable loop state
+//   reviewloop acknowledge-token-anomaly  human confirmation of a tripped Token Sentinel stop
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
 //   reviewloop resume       print a prompt that lets a fresh Worker continue an unfinished loop
 //   reviewloop install      install/refresh the global ReviewLoop policy + MCP
@@ -22,6 +24,8 @@ import { acquireLoopFileLease } from '../src/reviewloop/loopLease.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
+import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
+import { buildHumanRequiredReport } from '../src/reviewloop/humanRequiredReport.js';
 import { buildTokenProfile, formatTokenProfile } from '../src/reviewloop/tokenProfile.js';
 import { inspectSpend, formatSpendInspection } from '../src/reviewloop/spendInspect.js';
 import { unfinishedLoopsFor, buildResumePrompt, isResumable, needsReopen } from '../src/reviewloop/resumeGuide.js';
@@ -125,6 +129,45 @@ async function reopenGate(rest) {
     console.log('  kept: objective, baseline, completed phases, model spend, call ceilings');
     console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; raise MAX_REVIEWER_CALLS / MAX_SUPERVISOR_CALLS in reviewloop.settings.json if they are the limit');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function report(rest) {
+  const loopId = flagValue(rest, '--loop');
+  if (!loopId) throw new Error('usage: reviewloop report --loop <loopId> [--json]');
+  const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+  const workflow = await persistence.readWorkflowState(loopId);
+  const loop = workflow?.reviewLoop;
+  if (!loop) throw new Error(`unknown loopId ${loopId}`);
+  if (loop.state !== 'HUMAN_REQUIRED') {
+    throw new Error(`loop is ${loop.state}; a HUMAN_REQUIRED report only exists for a loop waiting for a human`);
+  }
+  const built = buildHumanRequiredReport({ loopId, loop, workflow });
+  console.log(rest.includes('--json') ? JSON.stringify(built, null, 2) : built.reportText);
+}
+
+async function acknowledgeAnomaly(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const latchAt = flagValue(rest, '--latch');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !latchAt || !reason) {
+    throw new Error('usage: reviewloop acknowledge-token-anomaly --loop <loopId> --latch <latch timestamp shown in the report> --reason "<why continuing is safe>"');
+  }
+  const lease = await acquireLoopFileLease({ runtimeRoot: REVIEWLOOP_RUNTIME_ROOT, loopId });
+  if (!lease.ok) {
+    throw new Error(`cannot acknowledge while the loop is active: ${lease.heldBy?.reason ?? 'another process holds the loop lease'}`);
+  }
+  try {
+    const result = await acknowledgeTokenAnomaly({ persistence: new Persistence(REVIEWLOOP_RUNTIME_ROOT), loopId, latchAt, reason });
+    console.log('Token Sentinel stop acknowledged by a human.');
+    console.log(`  loop: ${result.loopId}  (acknowledgement ${result.acknowledgements})`);
+    console.log(`  event: ${result.trigger ?? '?'} latched at ${result.latchAt}; ${result.acknowledgedRecords} existing spend record(s) will not re-latch`);
+    console.log('  kept: spend ledger, anomaly record, objective, baseline, phases, evidence, other safety stops');
+    console.log('  note: a NEW over-threshold call latches again; budgets, call ceilings and the independent Reviewer still apply');
+    console.log('  note: identical evidence is never re-sent (no-new-information rule); the Worker must change the code/evidence materially before the next review');
+    console.log('Next: tell the Worker to fix what the report pointed at, then call reviewloop_review again with the same loopId.');
   } finally {
     await lease.release();
   }
@@ -437,6 +480,12 @@ async function main() {
     case 'reopen-gate':
       await reopenGate(rest);
       break;
+    case 'report':
+      await report(rest);
+      break;
+    case 'acknowledge-token-anomaly':
+      await acknowledgeAnomaly(rest);
+      break;
     case 'override-budget':
       await overrideBudget(rest);
       break;
@@ -462,7 +511,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|inspect-spend|resume|acknowledge-spend|reopen-gate|override-budget|contract|spec|install|uninstall>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|contract|spec|install|uninstall>');
       break;
     default:
       console.error(`unknown command: ${command}`);

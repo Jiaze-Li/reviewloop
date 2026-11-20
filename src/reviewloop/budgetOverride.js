@@ -48,7 +48,7 @@ export async function overrideLoopBudget({
   const expectedUpdatedAt = loop.updatedAt;
 
   if (workflow?.[ANOMALY_KEY]?.tripped) {
-    throw new Error('the Token Sentinel tripped for this loop; that safety stop needs its own review and cannot be overridden by budget expansion');
+    throw new Error('the Token Sentinel tripped for this loop; that safety stop cannot be overridden by budget expansion; a human confirms it with `reviewloop acknowledge-token-anomaly` (see `reviewloop report --loop <id>`)');
   }
 
   // Calculate accumulated usage from durable spend records

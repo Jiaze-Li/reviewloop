@@ -36,6 +36,10 @@ export function toolResultContent(result) {
   if (typeof result.reviewRecord === 'string' && result.reviewRecord) {
     blocks.push({ type: 'text', text: result.reviewRecord });
   }
+  // HUMAN_REQUIRED: the full standard report is its own visible block.
+  if (typeof result.reportText === 'string' && result.reportText) {
+    blocks.push({ type: 'text', text: result.reportText });
+  }
   return blocks;
 }
 
@@ -255,6 +259,8 @@ export function createReviewLoopMcpServer({
         designSha256: z.string().optional().describe('Design PASS only: SHA-256 of the whitespace-trimmed UTF-8 content of the design file the Reviewer actually reviewed; publish it with the design-pass comment and pass it to the Code reviewloop_begin'),
         designPassComment: z.string().optional().describe('Design PASS only: the Supervisor-written, formatted user comment (already ends with the designSha256 line); post it to the PR VERBATIM and relay it to the user, do not summarize or rewrite it'),
         planConcern: z.string().optional().describe('the Supervisor thinks following the Plan itself may be wrong; tell the user, it does not block'),
+        humanRequiredReport: z.record(z.string(), z.any()).optional().describe('HUMAN_REQUIRED only: the structured standard report (cause, evidence, impact, fixes, recommendation, decision)'),
+        reportText: z.string().optional().describe('HUMAN_REQUIRED only: the report as plain text; show it to the user in full, verbatim'),
         humanQuestions: z.array(z.string()).optional().describe('HUMAN_REQUIRED: questions the user must answer'),
         reviewerProposals: z.array(z.record(z.string(), z.any())).optional().describe('REWORK exchange / HUMAN_REQUIRED: the independent Reviewer approaches to weigh against your design'),
         exchangeCount: z.number().optional(),

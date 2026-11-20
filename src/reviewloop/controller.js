@@ -7,6 +7,7 @@ import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
 import { buildReviewRecord } from './reviewRecord.js';
+import { safeBuildHumanRequiredReport } from './humanRequiredReport.js';
 import {
   createDesignTwoStageRunner, decideDesignTransition, finalizePassComment, initialDesignTwoStageState, DESIGN_LIMITS,
 } from './designTwoStage.js';
@@ -474,17 +475,29 @@ export function createReviewLoopController({
     if (!result || typeof result !== 'object') return result;
     let taskType = 'code';
     let reviewRecord;
+    let loadedLoop = null;
     try {
-      const loaded = await loadLoop(loopId);
-      taskType = loaded.objective?.taskType ?? 'code';
-      reviewRecord = buildReviewRecord(loaded, result);
+      loadedLoop = await loadLoop(loopId);
+      taskType = loadedLoop.objective?.taskType ?? 'code';
+      reviewRecord = buildReviewRecord(loadedLoop, result);
     } catch {
       reviewRecord = buildReviewRecord(null, { ...result, loopId });
     }
+    // HUMAN_REQUIRED always carries the standard report (read-only, zero model
+    // calls, never throws): the cause must be visible in the first status line.
+    let humanRequired = null;
+    if (result.status === 'HUMAN_REQUIRED') {
+      let workflow = null;
+      try { workflow = await persistence.readWorkflowState(loopId); } catch { /* degrade inside the builder */ }
+      humanRequired = safeBuildHumanRequiredReport({ loopId, loop: loadedLoop ?? workflow?.reviewLoop ?? null, workflow, result });
+    }
     return {
       ...result,
-      statusLine: reviewStatusLine({ taskType, loopId, round: result.round, status: result.status }),
+      statusLine: reviewStatusLine({
+        taskType, loopId, round: result.round, status: result.status, headline: humanRequired?.headline,
+      }),
       reviewRecord,
+      ...(humanRequired ? { humanRequiredReport: humanRequired, reportText: humanRequired.reportText } : {}),
     };
   }
 

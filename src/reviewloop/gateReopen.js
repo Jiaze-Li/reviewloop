@@ -24,7 +24,7 @@ export async function reopenExhaustedGate({ persistence, loopId, reason, now = (
     throw new Error(`loop is ${loop.state}${loop.budgetExhausted ? '' : ' (budget not exhausted)'}; only a HUMAN_REQUIRED loop with a spent convergence budget can be reopened`);
   }
   if (workflow?.[TOKEN_ANOMALY_KEY]?.tripped) {
-    throw new Error('the Token Sentinel tripped for this loop; that safety stop needs its own review and cannot be reopened here');
+    throw new Error('the Token Sentinel tripped for this loop; that safety stop cannot be reopened here; a human confirms it with `reviewloop acknowledge-token-anomaly` (see `reviewloop report --loop <id>`)');
   }
   const reopens = loop.humanReopens ?? [];
   if (reopens.length >= MAX_HUMAN_REOPENS) {

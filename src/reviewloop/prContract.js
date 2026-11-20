@@ -293,6 +293,15 @@ function parsePartsCell(cell) {
   fail('PR_CONTRACT_INDEX_INVALID', `unrecognized parts cell ${JSON.stringify(cleaned)}`);
 }
 
+// A header row is only recognised by its first two cells: "任务" / "任务 ID" /
+// "任务ID" (any internal whitespace, any case) followed by "类型". Data rows are
+// never skipped by this test, so their validation stays strict.
+function isIndexHeaderRow(cells) {
+  const squash = (s) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+  const first = squash(cells[0]);
+  return (first === '任务' || first === '任务id') && squash(cells[1]) === '类型';
+}
+
 /**
  * Parses the `### 合同索引` Markdown table from a PR description.
  * Rejects multiple `current` entries for the same `(taskId, type)`.
@@ -319,12 +328,13 @@ export function parseContractIndex(prBody) {
     }
     inTable = true;
     // Skip header and separator rows.
-    if (/^\|\s*任务\s*\|/.test(trimmed) || /^\|\s*[-:|\s]+\|$/.test(trimmed)) continue;
+    if (/^\|\s*[-:|\s]+\|$/.test(trimmed)) continue;
 
     const cells = trimmed
       .slice(1, trimmed.endsWith('|') ? -1 : undefined)
       .split('|')
       .map((c) => c.trim());
+    if (isIndexHeaderRow(cells)) continue;
     if (cells.length < 7) {
       fail('PR_CONTRACT_INDEX_INVALID', `contract index row must have 7 columns: ${trimmed}`);
     }

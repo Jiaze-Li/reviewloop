@@ -26,6 +26,7 @@ import { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageV
 export { accountingClassOf, usageAccountingOf, usagePresentButUnresolved, usageVolumeOf, accountingProvenanceOf, usageBreakdownOf, payloadMetaOf, effectiveContextInputTokens, contextOverheadTokens } from './usageAccounting.js';
 import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../orchestrator/modelSpendReservation.js';
 import { AuthorizationError, AUTHORIZATION_ERROR_CODES, isAuthorizationFailure } from '../orchestrator/errors.js';
+import { ackIdForRecord, acknowledgedIds, TOKEN_ANOMALY_ACKS_KEY } from './tokenAnomalyAck.js';
 import { parsePositiveNumber, parsePositiveInt, parseBoundedNumber } from './settingsFile.js';
 import {
   NewInformationLedger,
@@ -252,6 +253,14 @@ export class ReviewLoopTokenAnomalyStore {
     return raw && raw.tripped === true ? raw : null;
   }
 
+  // Append-only human acknowledgements of earlier latches (see tokenAnomalyAck.js).
+  async loadAcks(loopId) {
+    if (!loopId || !this._persistence || typeof this._persistence.readWorkflowState !== 'function') return [];
+    const state = await this._persistence.readWorkflowState(loopId);
+    const raw = state?.[TOKEN_ANOMALY_ACKS_KEY];
+    return Array.isArray(raw) ? raw : [];
+  }
+
   // Returns { persisted } — `persisted:true` ONLY when the latch is durably on
   // record (freshly written, or already present). `persisted:false` means no
   // durable store is backing this call: a bare in-memory surface (fine — the
@@ -429,7 +438,22 @@ export function createReviewLoopSpend({
         { loopId },
       );
     }
-    for (const r of records) {
+    // Spend records a human already acknowledged (acknowledge-token-anomaly)
+    // must not re-latch on restart. An unreadable acknowledgement list is
+    // UNKNOWN, never "none": fail closed like an unreadable latch.
+    let acknowledged;
+    try {
+      acknowledged = acknowledgedIds(await anomalyStore.loadAcks(loopId));
+    } catch (error) {
+      throw new AuthorizationError(
+        AUTHORIZATION_ERROR_CODES.MODEL_SPEND_TOKEN_ANOMALY_STATE_UNAVAILABLE,
+        `token anomaly re-inference could not read the human acknowledgements for ${JSON.stringify(loopId)} `
+          + `(${error?.message ?? error}); further internal model spend is blocked until this can be established`,
+        { loopId },
+      );
+    }
+    for (const [recordIndex, r] of records.entries()) {
+      if (acknowledged.has(ackIdForRecord(r, recordIndex))) continue;
       const uv = Number.isFinite(r.usageVolume) ? r.usageVolume : null;
       const co = Number.isFinite(r.contextOverheadTokens) ? r.contextOverheadTokens : null;
       // Only a record whose volume settled reliably can trip on usage.
