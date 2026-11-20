@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T08:00:36.681Z",
+  "updatedAt": "2026-11-20T08:00:42.115Z",
   "task": {
     "id": "plan/independent-design-code-fact-verification-20261120",
     "branch": "plan/independent-design-code-fact-verification-20261120",
@@ -9,7 +9,7 @@
     "started": "2026-11-20T15:31:24+08:00",
     "status": "In progress",
     "current": "Add independent code-fact verification to two-stage design review",
-    "next": "等待第 61 号拉取请求的自动复审与持续集成结果，确认就绪后再决定是否合并",
+    "next": "等待 PR 62 自动审查与测试通过后确认合并",
     "history": [
       {
         "at": "2026-11-20T16:00:25+08:00",
