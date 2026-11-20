@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-20T04:27:06.240Z",
+  "task": {
+    "id": "plan/installer-rollback-cli-recovery-20261120",
+    "branch": "plan/installer-rollback-cli-recovery-20261120",
+    "title": "plan/installer-rollback-cli-recovery-20261120",
+    "task": "Development branch: plan/installer-rollback-cli-recovery-20261120",
+    "started": "2026-11-20T12:26:52+08:00",
+    "status": "In progress",
+    "current": "chore: initialize installer safety and CLI recovery planning PR (no file changes)",
+    "next": "",
+    "history": [],
+    "commits": [
+      {
+        "sha": "e8417effb6bd8b53d82e0255587682ec618c1b84",
+        "branch": "plan/installer-rollback-cli-recovery-20261120",
+        "timestamp": "2026-11-20T12:26:52+08:00",
+        "message": "chore: initialize installer safety and CLI recovery planning PR (no file changes)"
+      }
+    ],
+    "pr": null,
+    "completed": null,
+    "outcome": null
+  }
+}
