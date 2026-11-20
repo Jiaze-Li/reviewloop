@@ -751,3 +751,71 @@ test('F002: decideDesignTransition blocks PASS when critical SUPPORTED factCheck
   assert.equal(transition.kind, 'HUMAN');
   assert.match(transition.reason, /uncommitted worktree modifications/);
 });
+
+test('F003 & F004: Stage 1 overflow rejections do not force HUMAN_REQUIRED, and dirty file end-to-end blocks PASS', async () => {
+  const cwd = gitRepo();
+  for (let i = 0; i < 12; i += 1) {
+    writeFileSync(path.join(cwd, `s1-${i}.js`), `export const x = ${i};\n`);
+  }
+  writeFileSync(path.join(cwd, 'lock.js'), 'export const ttl = false;\n');
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'add files'], { cwd, stdio: 'pipe' });
+
+  // F003: Stage 1 requests 12 files (2 rejected in Stage 1); Stage 2 has critical UNVERIFIED with 0 Stage 2 rejections => REWORK (not HUMAN_REQUIRED)
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        reviewer: (a) => (a.stage === 'files'
+          ? { value: { requestedFiles: Array.from({ length: 12 }, (_, i) => `s1-${i}.js`) }, usage: OK_USAGE, model: 'm' }
+          : { value: PROPOSALS, usage: OK_USAGE, model: 'm' }),
+        supervisor: () => adj({
+          factChecks: [{
+            claim: 'Clarify lock design',
+            critical: true,
+            status: 'UNVERIFIED',
+            evidenceSources: [],
+            reason: 'Design needs clearer lock reference',
+          }],
+        }),
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'REWORK');
+    assert.equal(r.factVerification.rejectedFiles.length, 2);
+    assert.equal(r.factVerification.stage2RejectedFiles.length, 0);
+  }
+
+  // F004: end-to-end controller blocks PASS when a verified file has uncommitted worktree modifications
+  rmSync(path.join(cwd, 'Prompt.md'), { force: true });
+  writeFileSync(path.join(cwd, 'lock.js'), 'export const ttl = true; // uncommitted edit\n');
+  {
+    const { ctl } = makeCtl({
+      cwd,
+      fakes: {
+        supervisor: (n) => {
+          if (n === 1) return { needFactFiles: true, requestedFiles: ['lock.js'], pendingClaims: ['lock ttl'] };
+          return adj({
+            factChecks: [{
+              claim: 'lock.js ttl',
+              critical: true,
+              status: 'SUPPORTED',
+              evidenceSources: ['lock.js'],
+              reason: 'matches dirty worktree file',
+            }],
+          });
+        },
+      },
+    });
+    const b = await begin(ctl, cwd);
+    writeDesign(cwd);
+    const r = await ctl.review({ loopId: b.loopId });
+    assert.equal(r.status, 'HUMAN_REQUIRED');
+    assert.equal(r.designSha256, undefined);
+    assert.equal(r.factVerification.checkedFiles[0].dirty, true);
+  }
+
+  rmSync(cwd, { recursive: true, force: true });
+});

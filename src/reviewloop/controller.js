@@ -1341,7 +1341,7 @@ export function createReviewLoopController({
     const decision = decideDesignTransition({
       adjudication: adj,
       exchangeCount: ds.exchangeCount,
-      rejectedFiles: out.factVerification?.rejectedFiles ?? [],
+      rejectedFiles: out.factVerification?.stage2RejectedFiles ?? [],
       codeIdentity: out.codeIdentity ?? null,
       dirtyVerifiedPaths,
     });

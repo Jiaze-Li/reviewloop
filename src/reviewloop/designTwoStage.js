@@ -604,6 +604,7 @@ export function createDesignTwoStageRunner({
     await beat('supervisor_adjudicating');
     let allFiles = stage1Read.files;
     let allRejected = stage1Read.rejected;
+    let stage2Rejected = [];
     let extraModelCalls = 0;
     let adjudication;
     {
@@ -647,7 +648,8 @@ export function createDesignTwoStageRunner({
           source: 'stage2-fetch',
         });
         allFiles = [...allFiles, ...stage2Read.files];
-        allRejected = [...allRejected, ...stage2Read.rejected];
+        stage2Rejected = stage2Read.rejected;
+        allRejected = [...allRejected, ...stage2Rejected];
         const verifiedPaths = new Set(allFiles.map((f) => f.path));
         const r2 = await runStage({
           op: `design-adjudicate-facts:${stage}`, stageName: 'adjudicate', role: 'supervisor', routeFn: routeSupervisorFn, defaultFamily: 'agy:gemini-supervisor',
@@ -684,6 +686,7 @@ export function createDesignTwoStageRunner({
         path: p, sha256: digest, bytes, dirty: Boolean(dirty), source,
       })),
       rejectedFiles: allRejected,
+      stage2RejectedFiles: stage2Rejected,
       factChecks: adjudication.factChecks ?? [],
       extraModelCalls,
       totalFileBytes: allFiles.reduce((sum, f) => sum + (f.bytes ?? 0), 0),
