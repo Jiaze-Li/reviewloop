@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T12:24:26.902Z",
+  "updatedAt": "2026-11-20T12:32:43.232Z",
   "task": {
     "id": "workflow/controlled-review-exception-20261120",
     "branch": "workflow/controlled-review-exception-20261120",
@@ -19,7 +19,14 @@
         "message": "chore: bootstrap controlled review exception planning PR (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 67,
+      "state": "open",
+      "title": "plan: human-authorized Design exception and recoverable stage handoff",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/67",
+      "merged": false,
+      "updatedAt": "2026-11-20T12:32:32Z"
+    },
     "completed": null,
     "outcome": null
   }
