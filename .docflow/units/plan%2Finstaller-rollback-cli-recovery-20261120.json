@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T05:57:28.911Z",
+  "updatedAt": "2026-11-20T05:59:01.714Z",
   "task": {
     "id": "plan/installer-rollback-cli-recovery-20261120",
     "branch": "plan/installer-rollback-cli-recovery-20261120",
     "title": "plan/installer-rollback-cli-recovery-20261120",
     "task": "Development branch: plan/installer-rollback-cli-recovery-20261120",
     "started": "2026-11-20T12:26:52+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "Make the pre-existing AGY directory test reach the AGY branch and assert unchanged bytes",
     "next": "等自动审查复核这轮修复；通过后你决定是否合并，并另行授权修复本机失效的全局命令链接。",
     "history": [
@@ -72,13 +72,15 @@
     ],
     "pr": {
       "number": 60,
-      "state": "open",
+      "state": "closed",
       "title": "plan: make global installation rollback safe and restore ReviewLoop CLI entry",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/60",
-      "merged": false,
-      "updatedAt": "2026-11-20T05:57:15Z"
+      "merged": true,
+      "mergedAt": "2026-11-20T05:58:47Z",
+      "closedAt": "2026-11-20T05:58:47Z",
+      "updatedAt": "2026-11-20T05:58:47Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-20T05:58:47Z",
+    "outcome": "Merged"
   }
 }
