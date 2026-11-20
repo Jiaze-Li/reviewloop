@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T04:24:30.514Z",
+  "updatedAt": "2026-11-20T04:24:33.738Z",
   "task": {
     "id": "plan/human-required-diagnostics-recovery-20261120",
     "branch": "plan/human-required-diagnostics-recovery-20261120",
@@ -36,7 +36,7 @@
       "title": "plan: diagnose HUMAN_REQUIRED failures and enable audited human recovery",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/59",
       "merged": false,
-      "updatedAt": "2026-11-20T03:54:21Z"
+      "updatedAt": "2026-11-20T04:24:13Z"
     },
     "completed": null,
     "outcome": null
