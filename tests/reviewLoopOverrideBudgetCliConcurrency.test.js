@@ -63,7 +63,7 @@ test('override-budget CLI refuses real concurrent owner, then extends only after
       const blocked = runCli(root, args(loopId));
       assert.notEqual(blocked.status, 0,
         'the CLI itself must fail when another process holds the loop lease');
-      assert.match(blocked.stderr, /cannot override budget while the loop is active/i);
+      assert.match(blocked.stderr, /cannot override the budget while another process holds the loop lease/i);
       assert.equal(await readFile(file, 'utf8'), initial,
         'CLI may not modify even one byte while Worker owns the lease');
     } finally {

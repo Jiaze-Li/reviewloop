@@ -8,6 +8,7 @@
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
 import { resolveReviewLoopLimits } from './reviewSpend.js';
 import { reviewGateCount } from './phaseState.js';
+import { callCeilingsFromState } from './humanActionGuard.js';
 
 const STATE_KEY = 'reviewLoop';
 const SPEND_KEY = 'reviewLoopSpend';
@@ -72,7 +73,7 @@ export async function overrideLoopBudget({
 
   const effectiveLimits = resolveReviewLoopLimits(env, {
     gateCount,
-    budgetOverrides: existingOverridesObj,
+    budgetOverrides: { ...existingOverridesObj, ...callCeilingsFromState(workflow) },
   });
 
   const previousUsageLimit = effectiveLimits.maxUsageVolume;

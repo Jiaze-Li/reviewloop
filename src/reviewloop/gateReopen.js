@@ -9,14 +9,23 @@
 // ceilings, the Token Sentinel latch, the no-new-information ledger.
 
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
+import {
+  CALL_ALLOWANCE_KEY, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
+  assertUnchanged, fingerprint, nextCallAllowance, parseCallCount,
+} from './humanActionGuard.js';
 
 const STATE_KEY = 'reviewLoop';
 const TOKEN_ANOMALY_KEY = 'reviewLoopTokenAnomaly';
-export const MAX_HUMAN_REOPENS = 3;
+// Standard reopen count. Past it a reopen is still possible, but must state a
+// numeric Reviewer-call budget that is enforced as this loop's call ceiling.
+export const STANDARD_HUMAN_REOPENS = 3;
 
-export async function reopenExhaustedGate({ persistence, loopId, reason, now = () => new Date() }) {
+export async function reopenExhaustedGate({
+  persistence, loopId, reason, allowance = null, currentLimits = null, now = () => new Date(),
+}) {
   if (!loopId || !String(reason ?? '').trim()) throw new Error('reopen-gate requires a loopId and a reason');
   const workflow = await persistence.readWorkflowState(loopId);
+  const before = fingerprint(workflow);
   const loop = workflow?.[STATE_KEY];
   if (!loop) throw new Error(`unknown loopId ${loopId}`);
   if (loop.objective?.mode === 'PR') throw new Error('ReviewLoop PR session retired; cannot reopen it; use claude-review-bot');
@@ -27,11 +36,23 @@ export async function reopenExhaustedGate({ persistence, loopId, reason, now = (
     throw new Error('the Token Sentinel tripped for this loop; that safety stop cannot be reopened here; a human confirms it with `reviewloop acknowledge-token-anomaly` (see `reviewloop report --loop <id>`)');
   }
   const reopens = loop.humanReopens ?? [];
-  if (reopens.length >= MAX_HUMAN_REOPENS) {
-    throw new Error(`this loop was already reopened ${MAX_HUMAN_REOPENS} times; the task needs a human decision, not another attempt`);
+  const extended = reopens.length >= STANDARD_HUMAN_REOPENS;
+  const reviewerCalls = parseCallCount(allowance?.reviewerCalls, { name: '--max-reviewer-calls', max: MAX_ALLOWANCE_REVIEWER_CALLS });
+  const supervisorCalls = parseCallCount(allowance?.supervisorCalls, { name: '--max-supervisor-calls', max: MAX_ALLOWANCE_SUPERVISOR_CALLS });
+  if (extended && reviewerCalls == null) {
+    throw new Error(`this loop was already reopened ${reopens.length} times (standard limit ${STANDARD_HUMAN_REOPENS}); another attempt is still possible but must state how many more Reviewer calls it may use: add --max-reviewer-calls <1-${MAX_ALLOWANCE_REVIEWER_CALLS}> (enforced as this loop's call ceiling)`);
   }
 
   const at = now().toISOString();
+  const priorAllowanceEntries = Array.isArray(workflow?.[CALL_ALLOWANCE_KEY]?.history) ? workflow[CALL_ALLOWANCE_KEY].history.length : 0;
+  const nextAllowance = (reviewerCalls != null || supervisorCalls != null)
+    ? nextCallAllowance({
+      workflow, currentLimits, reviewerCalls, supervisorCalls, mode: 'tighten',
+      tier: extended ? 'EXTENDED' : 'STANDARD', reason, at, source: 'reopen-gate',
+    })
+    : null;
+  // Re-read before mutating anything: refuse if what this decision was based on moved.
+  await assertUnchanged({ persistence, loopId, before, action: 'reopening the gate' });
   // HUMAN_REQUIRED -> REVIEWING -> REWORK is the only legal path back.
   recordTransition(loop, REVIEW_LOOP_STATES.REVIEWING, `human reopen: ${reason}`);
   recordTransition(loop, REVIEW_LOOP_STATES.REWORK, `human reopen: ${reason}`);
@@ -48,8 +69,18 @@ export async function reopenExhaustedGate({ persistence, loopId, reason, now = (
     lastSupervisorGuidance: null,
     lastSupervisorRecommendation: null,
     chunkReviewCheckpoint: null,
-    humanReopens: [...reopens, { at, reason: String(reason), round: loop.round, phaseIndex: loop.currentPhaseIndex ?? null }],
+    humanReopens: [...reopens, {
+      at, reason: String(reason), round: loop.round, phaseIndex: loop.currentPhaseIndex ?? null,
+      tier: extended ? 'EXTENDED' : 'STANDARD',
+      ...(nextAllowance ? { allowance: nextAllowance.history.slice(priorAllowanceEntries) } : {}),
+    }],
   });
-  await persistence.updateWorkflowState(loopId, { [STATE_KEY]: loop });
-  return { loopId, reopens: loop.humanReopens.length, phaseIndex: loop.currentPhaseIndex ?? null };
+  await persistence.updateWorkflowState(loopId, {
+    [STATE_KEY]: loop,
+    ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
+  });
+  return {
+    loopId, reopens: loop.humanReopens.length, phaseIndex: loop.currentPhaseIndex ?? null,
+    tier: extended ? 'EXTENDED' : 'STANDARD', allowance: nextAllowance ? nextAllowance.history.slice(priorAllowanceEntries) : null,
+  };
 }

@@ -6,7 +6,7 @@ import { createReviewLoopSpend } from '../src/reviewloop/reviewSpend.js';
 import {
   acknowledgeTokenAnomaly,
   ackIdForRecord,
-  MAX_TOKEN_ANOMALY_ACKS,
+  TOKEN_ACK_STANDARD_LIMIT,
 } from '../src/reviewloop/tokenAnomalyAck.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
@@ -131,17 +131,51 @@ test('retired PR loop is refused', async () => {
   await assert.rejects(() => ack(persistence, latchAt), /PR session retired/);
 });
 
-test(`at most ${MAX_TOKEN_ANOMALY_ACKS} acknowledgements per loop`, async () => {
+const LIMITS = { maxReviewerCalls: 91, maxSupervisorCalls: 8 };
+
+test(`past the standard ${TOKEN_ACK_STANDARD_LIMIT} acknowledgements a human can still confirm, but only with an ENFORCED call budget (AC14, I9)`, async () => {
   const { persistence, latchAt } = await trippedLoop();
   let at = latchAt;
-  for (let i = 0; i < MAX_TOKEN_ANOMALY_ACKS; i += 1) {
-    await ack(persistence, at);
+  for (let i = 0; i < TOKEN_ACK_STANDARD_LIMIT; i += 1) {
+    const res = await ack(persistence, at);
+    assert.equal(res.tier, 'STANDARD');
     await new Promise((r) => setTimeout(r, 15));
     const s = createReviewLoopSpend({ loopId: 'L', persistence, env: {} });
     await assert.rejects(() => meter(s, BIG));
     at = (await persistence.readWorkflowState('L')).reviewLoopTokenAnomaly.at;
   }
-  await assert.rejects(() => ack(persistence, at), /product decision/);
+  // 4th: no hard cap, but it must state a numeric budget; refusing writes nothing.
+  const frozen = JSON.stringify(await persistence.readWorkflowState('L'));
+  await assert.rejects(() => ack(persistence, at), /--max-reviewer-calls/);
+  await assert.rejects(() => ack(persistence, at, { allowance: { reviewerCalls: 0 }, currentLimits: LIMITS }), /between 1 and 50/);
+  await assert.rejects(() => ack(persistence, at, { allowance: { reviewerCalls: 51 }, currentLimits: LIMITS }), /between 1 and 50/);
+  await assert.rejects(() => ack(persistence, at, { allowance: { reviewerCalls: 'many' }, currentLimits: LIMITS }), /between 1 and 50/);
+  assert.equal(JSON.stringify(await persistence.readWorkflowState('L')), frozen, 'a refused confirmation writes nothing');
+
+  const usedBefore = (await persistence.readWorkflowState('L')).reviewLoopSpend.records.length;
+  const res = await ack(persistence, at, { allowance: { reviewerCalls: 2 }, currentLimits: LIMITS });
+  assert.equal(res.tier, 'EXTENDED');
+  const wf = await persistence.readWorkflowState('L');
+  assert.equal(wf.reviewLoopTokenAnomalyAcks.at(-1).tier, 'EXTENDED');
+  assert.equal(wf.reviewLoopTokenAnomalyAcks.at(-1).allowance[0].newCeiling, usedBefore + 2);
+  assert.equal(wf.reviewLoopCallAllowance.maxReviewerCalls, usedBefore + 2);
+
+  // The text reason is audit only: the NUMBER is what the spend authority enforces.
+  const s = createReviewLoopSpend({ loopId: 'L', persistence, env: {} });
+  await meter(s, SMALL);
+  await meter(s, SMALL);
+  await assert.rejects(() => meter(s, SMALL), /reviewer call ceiling/);
+});
+
+test('an extended confirmation only TIGHTENS the ceiling, never raises it (I9)', async () => {
+  const { persistence, latchAt } = await trippedLoop();
+  const wf = await persistence.readWorkflowState('L');
+  const used = wf.reviewLoopSpend.records.length;
+  // Ask for far more than the effective ceiling allows: the ceiling stays the global one.
+  const res = await ack(persistence, latchAt, { allowance: { reviewerCalls: 50 }, currentLimits: { maxReviewerCalls: used + 3, maxSupervisorCalls: 8 } });
+  assert.equal(res.allowance[0].newCeiling, used + 3);
+  const after = await persistence.readWorkflowState('L');
+  assert.equal(after.reviewLoopCallAllowance.maxReviewerCalls, undefined, 'a non-lowering grant is audited but not pinned');
 });
 
 test('acknowledgement does not clear OTHER stops: unaccounted spend still blocks (I6, AC06)', async () => {

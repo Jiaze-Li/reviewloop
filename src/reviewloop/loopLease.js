@@ -364,3 +364,48 @@ async function releaseIfOwned(lockPath, token) {
     if (current?.token === token) await unlink(lockPath);
   } catch { /* already gone / not ours */ }
 }
+
+// READ-ONLY inspection of a loop's lease for the human recovery path. Never
+// writes, never signals the holder, never reclaims: it only reports what the
+// reclaim rule above would see. `status`: FREE (no lock), HELD (an owner we
+// cannot prove gone), RECLAIMABLE (provably abandoned - the next acquire
+// reclaims it), MALFORMED (unparseable lock - the next acquire reclaims it),
+// UNREADABLE (the lock cannot be read; nothing can be proven).
+export async function describeLoopLease({ runtimeRoot, loopId, clock = () => Date.now() } = {}) {
+  if (!runtimeRoot || !loopId) return { status: 'FREE', loopId: loopId ?? null };
+  const lockPath = path.join(runtimeRoot, loopId, 'reviewloop.lock');
+  let raw;
+  try {
+    raw = await readFile(lockPath, 'utf8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return { status: 'FREE', loopId };
+    return { status: 'UNREADABLE', loopId, error: String(err?.message ?? err).slice(0, 200) };
+  }
+  let record;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    return { status: 'MALFORMED', loopId };
+  }
+  if (!record || typeof record !== 'object') return { status: 'MALFORMED', loopId };
+  const now = clock();
+  const sameHost = ownedBySameHost(record);
+  const alive = sameHost ? holderAlive(record.pid) : null;
+  const renewedMs = Date.parse(record.renewedAt ?? record.acquiredAt ?? '');
+  const expiresMs = Date.parse(record.expiresAt ?? '');
+  const reclaimable = isReclaimable(record, now);
+  return {
+    status: reclaimable ? 'RECLAIMABLE' : 'HELD',
+    loopId,
+    pid: record.pid ?? null,
+    host: record.host ?? null,
+    sameHost,
+    alive,
+    acquiredAt: record.acquiredAt ?? null,
+    renewedAt: record.renewedAt ?? null,
+    expiresAt: record.expiresAt ?? null,
+    secondsSinceRenewal: Number.isFinite(renewedMs) ? Math.max(0, Math.round((now - renewedMs) / 1000)) : null,
+    ttlExpired: Number.isFinite(expiresMs) ? expiresMs < now : null,
+    reclaimable,
+  };
+}

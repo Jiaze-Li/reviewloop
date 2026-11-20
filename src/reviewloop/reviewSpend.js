@@ -28,6 +28,7 @@ import { ReservationLedger, ReservationStore, humanExcludedFamilies } from '../o
 import { AuthorizationError, AUTHORIZATION_ERROR_CODES, isAuthorizationFailure } from '../orchestrator/errors.js';
 import { ackIdForRecord, acknowledgedIds, TOKEN_ANOMALY_ACKS_KEY } from './tokenAnomalyAck.js';
 import { parsePositiveNumber, parsePositiveInt, parseBoundedNumber } from './settingsFile.js';
+import { callCeilingsFromState } from './humanActionGuard.js';
 import {
   NewInformationLedger,
   InformationStore,
@@ -167,6 +168,14 @@ export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budg
     if (Number.isFinite(budgetOverrides.maxCostUsd) && budgetOverrides.maxCostUsd > 0) {
       resolved.maxCostUsd = budgetOverrides.maxCostUsd;
     }
+    // Task-level call ceilings a human set for this loop (extend-calls, or the
+    // call allowance attached to an extended confirmation).
+    if (Number.isInteger(budgetOverrides.maxReviewerCalls) && budgetOverrides.maxReviewerCalls > 0) {
+      resolved.maxReviewerCalls = budgetOverrides.maxReviewerCalls;
+    }
+    if (Number.isInteger(budgetOverrides.maxSupervisorCalls) && budgetOverrides.maxSupervisorCalls > 0) {
+      resolved.maxSupervisorCalls = budgetOverrides.maxSupervisorCalls;
+    }
   }
   return resolved;
 }
@@ -192,10 +201,12 @@ export class ReviewLoopSpendStore {
     const fromLoop = state?.reviewLoop;
     const maxUsageVolume = fromRoot?.maxUsageVolume ?? fromLoop?.maxUsageVolumeOverride ?? null;
     const maxCostUsd = fromRoot?.maxCostUsd ?? fromLoop?.maxCostUsdOverride ?? null;
-    if (maxUsageVolume != null || maxCostUsd != null) {
+    const callCeilings = callCeilingsFromState(state);
+    if (maxUsageVolume != null || maxCostUsd != null || Object.keys(callCeilings).length) {
       return {
         ...(maxUsageVolume != null ? { maxUsageVolume: Number(maxUsageVolume) } : {}),
         ...(maxCostUsd != null ? { maxCostUsd: Number(maxCostUsd) } : {}),
+        ...callCeilings,
       };
     }
     return null;

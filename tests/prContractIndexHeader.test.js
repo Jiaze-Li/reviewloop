@@ -86,3 +86,12 @@ test('recoverPrContract works against a PR description using the "任务 ID" hea
   assert.equal(recovered.sha256, formatted.sha256);
   assert.equal(recovered.version, 'v1.4');
 });
+
+test('documented compatibility: a data row whose FIRST cell is exactly "任务" is read as a header (old behaviour, decision recorded in Design d3 §4.6)', () => {
+  // Kept on purpose, not fixed: real task ids are never the bare word "任务",
+  // and every rejection path above is about rows with a real task id. Changing
+  // this must be a deliberate decision, so the current behaviour is pinned.
+  const rows = parseContractIndex(table(HEADERS[0], ['| 任务 | Bogus | v1 | x | y | 1/1 | current |', row()]));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].taskId, 'T-1');
+});

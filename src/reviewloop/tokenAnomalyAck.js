@@ -13,12 +13,16 @@
 // state machine. A later over-threshold call latches again as usual.
 
 import { REVIEW_LOOP_STATES } from './state.js';
+import {
+  CALL_ALLOWANCE_KEY, TOKEN_ACK_STANDARD_LIMIT, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
+  assertUnchanged, fingerprint, nextCallAllowance, parseCallCount,
+} from './humanActionGuard.js';
 
 export const TOKEN_ANOMALY_KEY = 'reviewLoopTokenAnomaly';
 export const TOKEN_ANOMALY_ACKS_KEY = 'reviewLoopTokenAnomalyAcks';
 export const SPEND_KEY = 'reviewLoopSpend';
 const STATE_KEY = 'reviewLoop';
-export const MAX_TOKEN_ANOMALY_ACKS = 3;
+export { TOKEN_ACK_STANDARD_LIMIT };
 
 // Stable identity of a durable spend record: the reservation id when present,
 // otherwise its position (the log is append-only, so the position is stable).
@@ -35,12 +39,20 @@ export function acknowledgedIds(acks) {
   return ids;
 }
 
-export async function acknowledgeTokenAnomaly({ persistence, loopId, latchAt, reason, now = () => new Date() }) {
+// `allowance` ({reviewerCalls, supervisorCalls}) and `currentLimits` (the
+// effective call ceilings the spend authority enforces now) are needed from the
+// 4th acknowledgement on: a human may always confirm again, but past the
+// standard count the confirmation must state a NUMERIC budget of further calls,
+// which is enforced as this loop's call ceiling (it can only tighten).
+export async function acknowledgeTokenAnomaly({
+  persistence, loopId, latchAt, reason, allowance = null, currentLimits = null, now = () => new Date(),
+}) {
   if (!loopId) throw new Error('acknowledge-token-anomaly requires a loopId');
   if (!String(latchAt ?? '').trim()) throw new Error('acknowledge-token-anomaly requires --latch <latch timestamp from the report>');
   if (!String(reason ?? '').trim()) throw new Error('acknowledge-token-anomaly requires an explicit reason');
 
   const workflow = await persistence.readWorkflowState(loopId);
+  const before = fingerprint(workflow);
   const loop = workflow?.[STATE_KEY];
   if (!loop) throw new Error(`unknown loopId ${loopId}`);
   if (loop.objective?.mode === 'PR') {
@@ -58,13 +70,26 @@ export async function acknowledgeTokenAnomaly({ persistence, loopId, latchAt, re
     throw new Error(`--latch does not match the current latch event (${latch.at}); re-read the report and confirm the event you mean`);
   }
   const acks = Array.isArray(workflow?.[TOKEN_ANOMALY_ACKS_KEY]) ? workflow[TOKEN_ANOMALY_ACKS_KEY] : [];
-  if (acks.length >= MAX_TOKEN_ANOMALY_ACKS) {
-    throw new Error(`this loop already had ${MAX_TOKEN_ANOMALY_ACKS} token anomalies acknowledged; the task needs a product decision, not another unlock`);
+  const extended = acks.length >= TOKEN_ACK_STANDARD_LIMIT;
+  const reviewerCalls = parseCallCount(allowance?.reviewerCalls, { name: '--max-reviewer-calls', max: MAX_ALLOWANCE_REVIEWER_CALLS });
+  const supervisorCalls = parseCallCount(allowance?.supervisorCalls, { name: '--max-supervisor-calls', max: MAX_ALLOWANCE_SUPERVISOR_CALLS });
+  if (extended && reviewerCalls == null) {
+    throw new Error(`this loop already had ${acks.length} token anomalies acknowledged (standard limit ${TOKEN_ACK_STANDARD_LIMIT}); a further confirmation is still possible but must state how many more Reviewer calls this attempt may use: add --max-reviewer-calls <1-${MAX_ALLOWANCE_REVIEWER_CALLS}> (enforced as this loop's call ceiling)`);
   }
 
   const records = Array.isArray(workflow?.[SPEND_KEY]?.records) ? workflow[SPEND_KEY].records : [];
   const at = now().toISOString();
+  const priorAllowanceEntries = Array.isArray(workflow?.[CALL_ALLOWANCE_KEY]?.history) ? workflow[CALL_ALLOWANCE_KEY].history.length : 0;
+  const applyAllowance = reviewerCalls != null || supervisorCalls != null;
+  const nextAllowance = applyAllowance
+    ? nextCallAllowance({
+      workflow, currentLimits, reviewerCalls, supervisorCalls, mode: 'tighten',
+      tier: extended ? 'EXTENDED' : 'STANDARD', reason, at, source: 'acknowledge-token-anomaly',
+    })
+    : null;
   const entry = {
+    tier: extended ? 'EXTENDED' : 'STANDARD',
+    ...(nextAllowance ? { allowance: nextAllowance.history.slice(priorAllowanceEntries) } : {}),
     at,
     latchAt: latch.at,
     reason: String(reason).trim(),
@@ -78,19 +103,11 @@ export async function acknowledgeTokenAnomaly({ persistence, loopId, latchAt, re
   // Defence in depth on top of the CLI's loop lease (bin/reviewloop.js takes it
   // before calling this): re-read right before the write and refuse if anything
   // this decision was based on has moved, so a stale snapshot is never written.
-  const fresh = await persistence.readWorkflowState(loopId);
-  const freshAcks = Array.isArray(fresh?.[TOKEN_ANOMALY_ACKS_KEY]) ? fresh[TOKEN_ANOMALY_ACKS_KEY] : [];
-  const freshRecords = Array.isArray(fresh?.[SPEND_KEY]?.records) ? fresh[SPEND_KEY].records : [];
-  if (fresh?.[TOKEN_ANOMALY_KEY]?.tripped !== true
-    || String(fresh[TOKEN_ANOMALY_KEY].at) !== String(latch.at)
-    || freshAcks.length !== acks.length
-    || freshRecords.length !== records.length
-    || fresh?.[STATE_KEY]?.updatedAt !== loop.updatedAt) {
-    throw new Error(`concurrent modification detected in loop ${loopId} while acknowledging the token anomaly; nothing was written, re-read the report and retry`);
-  }
+  await assertUnchanged({ persistence, loopId, before, action: 'acknowledging the token anomaly' });
   await persistence.updateWorkflowState(loopId, {
     [TOKEN_ANOMALY_KEY]: { ...latch, tripped: false, clearedAt: at, clearedReason: entry.reason },
     [TOKEN_ANOMALY_ACKS_KEY]: [...acks, entry],
+    ...(nextAllowance ? { [CALL_ALLOWANCE_KEY]: nextAllowance } : {}),
   });
-  return { loopId, acknowledgements: acks.length + 1, latchAt: latch.at, trigger: entry.trigger, loopState: loop.state, acknowledgedRecords: records.length };
+  return { loopId, tier: entry.tier, allowance: entry.allowance ?? null, acknowledgements: acks.length + 1, latchAt: latch.at, trigger: entry.trigger, loopState: loop.state, acknowledgedRecords: records.length };
 }

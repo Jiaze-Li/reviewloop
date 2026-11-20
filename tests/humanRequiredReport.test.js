@@ -180,12 +180,14 @@ test('long reason text is clipped; a multi-line reason cannot break the single-l
   assert.ok(r.reportText.length < 6000);
 });
 
-test('acknowledgement budget spent: the report says a product decision is needed, no unlock command', () => {
+test('past the standard confirmations the report still offers the command, now asking for a numeric call budget (AC14)', () => {
   const w = sentinelWorkflow([call()]);
   w.reviewLoopTokenAnomalyAcks = [{}, {}, {}];
   const r = reportOf(w);
-  assert.equal(r.humanDecision.command, null);
-  assert.match(r.humanDecision.choices[0], /不能再次解锁/);
+  assert.match(r.humanDecision.command, /--max-reviewer-calls/);
+  assert.doesNotMatch(r.reportText, /不能再次解锁/);
+  assert.match(r.reportText, /系统会按这个数字强制执行/);
+  assert.match(r.humanDecision.terminate, /^reviewloop stop-loop --loop rl-x/);
 });
 
 test('the Token Sentinel report carries the exact copyable recovery command bound to the latch event', () => {
