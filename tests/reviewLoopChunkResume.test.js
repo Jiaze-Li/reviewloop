@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
+import { releaseHardStop } from './helpers/humanRelease.js';
 
 function bigDiff() {
   const file = (n) => [
@@ -61,6 +62,7 @@ test('crash after chunk N -> resume reviews only chunk N+1..', async () => {
   failChunk2 = false;
   const beforeResume = { ...callsByChunk };
   const ctlB = build();
+  await releaseHardStop({ controller: ctlB, persistence, loopId });
   const r2 = await ctlB.review({ loopId });
   assert.equal(r2.status, 'PASS');
   assert.equal(callsByChunk[0], beforeResume[0], 'chunk 0 was NOT re-sent to the model on resume');
@@ -133,6 +135,8 @@ test('a resume under a larger chunk-size limit re-reviews the re-chunked layout 
   maxChars = '100000';
   failChunk1 = false;
   seen.length = 0;
+  await releaseHardStop({ controller: build(), persistence, loopId });
+  seen.length = 0;
   const r2 = await build().review({ loopId });
   assert.equal(r2.status, 'PASS');
   // The new layout has a different chunk 0; it MUST have been re-reviewed, not
@@ -180,6 +184,7 @@ test('a re-chunk of the SAME (delta + gate) state preserves its assigned round',
   // so it must not consume a second round.
   maxChars = '100000';
   failChunk1 = false;
+  await releaseHardStop({ controller: build(), persistence, loopId });
   const r2 = await build().review({ loopId });
   assert.equal(r2.status, 'PASS', 'the re-chunked, unchanged evidence passes without exhausting the round budget');
   assert.equal(r2.round, 1, 'the re-chunk reused round 1 instead of consuming round 2');

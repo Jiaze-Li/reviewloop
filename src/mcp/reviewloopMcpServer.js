@@ -257,6 +257,7 @@ export function createReviewLoopMcpServer({
         contextRefreshSafe: z.boolean().optional(),
         evidenceRecordCount: z.number().int().nonnegative().optional(),
         designSha256: z.string().optional().describe('Design PASS only: SHA-256 of the whitespace-trimmed UTF-8 content of the design file the Reviewer actually reviewed; publish it with the design-pass comment and pass it to the Code reviewloop_begin'),
+        adjudicatedDesignSha256: z.string().regex(/^[0-9a-f]{64}$/).optional().describe('Design only: SHA-256 of the exact design file content a genuinely adjudicated round (REWORK, HUMAN_REQUIRED or PASS) reviewed, re-read unchanged after the Reviewer ran. ABSENT when the review produced no usable adjudication (tool failure, input too large, cancelled): then no design version may be recorded as reviewed'),
         designPassComment: z.string().optional().describe('Design PASS only: Supervisor-written PR comment (already ends with the designSha256 line); post it to the PR VERBATIM and give the user a concise minimum-sufficient summary'),
         planConcern: z.string().optional().describe('the Supervisor thinks following the Plan itself may be wrong; tell the user, it does not block'),
         humanRequiredReport: z.record(z.string(), z.any()).optional().describe('HUMAN_REQUIRED only: the structured standard report (cause, evidence, impact, fixes, recommendation, decision)'),

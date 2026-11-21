@@ -5,6 +5,7 @@
 //   #2  the cross-process BUSY path is strictly read-only — it must not
 //       reconcile / rewrite an in-flight RESERVED / DISPATCHING reservation
 
+import { releaseHardStop } from './helpers/humanRelease.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -47,14 +48,17 @@ test('#5 a chunk checkpoint resume does NOT consume another review round', async
   await build().review({ loopId }); // crashes mid-round (chunk 2)
   const afterCrash = (await persistence.readWorkflowState(loopId)).reviewLoop.round;
 
-  // Two more resumes while chunk 2 still fails — the round must not move.
+  // Two more human-authorized resumes while chunk 2 still fails — the round must not move.
+  await releaseHardStop({ controller: build(), persistence, loopId });
   await build().review({ loopId });
+  await releaseHardStop({ controller: build(), persistence, loopId });
   await build().review({ loopId });
   const afterResumes = (await persistence.readWorkflowState(loopId)).reviewLoop.round;
   assert.equal(afterResumes, afterCrash, 'repeated resume of the same chunk checkpoint keeps the round fixed');
 
   // Now let chunk 2 succeed: the SAME round completes, still round 1.
   failChunk2 = false;
+  await releaseHardStop({ controller: build(), persistence, loopId });
   const done = await build().review({ loopId });
   assert.equal(done.status, 'PASS');
   assert.equal(done.round, 1, 'the completed review is still round 1');

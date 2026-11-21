@@ -4,6 +4,18 @@ ReviewLoop verifies **LOCAL coding-agent work**. The Worker writes code;
 ReviewLoop freezes the task contract and pre-edit baseline, runs the
 mechanical Gate, and controls independent Reviewer/Supervisor and bounded repair.
 
+## Product principles
+
+ReviewLoop's first goal is to **reduce the user's engineering workload and interventions while increasing actual AI task completion**. The user owns product direction, important trade-offs and high-impact authorization; the Worker handles implementation details.
+
+- **Autonomy by default within existing authorization.** Routine work and provably safe, bounded technical retries should continue without requesting user decisions. An effective `HUMAN_REQUIRED` stop remains binding.
+- **Non-negotiable safety floor, not maximum friction.** Preserve genuine independent review, source evidence, accurate model-spend accounting (`UNKNOWN != ZERO`), permissions, frozen task identity and separate merge/deployment authority. Never counterfeit PASS.
+- **Optimize total cost.** Judge safety mechanisms by completed tasks, model tokens/money, human interventions, elapsed time, false refusals and ongoing maintenance, not the number of locks or assertions.
+- **Simplest shared contract wins.** Prefer one authoritative state/recovery path over redundant gates, new coordinators and special-case patches. Protection that causes new dead ends has failed its purpose.
+- **Ship a usable loop first.** Improve with real measurements rather than blocking delivery on speculative guarantees.
+
+These are design priorities, not exemptions from current engineering policy or tool permissions; the decision is documented in [DECISIONS.md](docs/DECISIONS.md).
+
 **GitHub PR review is owned by [review-bot](https://github.com/Jiaze-Li/review-bot).**
 ReviewLoop's PR mode is retired under [decision D37](docs/DECISIONS.md). Saved
 PR sessions remain on disk but cannot be resumed as LOCAL; start a new PR review
@@ -43,6 +55,8 @@ next frozen phase in the same loop), `PASS` (final whole-task certification),
 `NO_PROGRESS`.
 
 Full Worker contract: [`agent-policy/COMMON.md`](agent-policy/COMMON.md).
+
+Design process trace (draft snapshots, review records, PR progress block): `reviewloop trace <prepare|inspect>`; rules in [`engineering/contracts.md`](engineering/contracts.md) §5.
 
 
 Optional `reviewloop-artifact:<filename>` references for frozen

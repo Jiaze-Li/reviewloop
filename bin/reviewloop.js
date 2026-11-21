@@ -7,6 +7,8 @@
 //   reviewloop report       read-only HUMAN_REQUIRED report rebuilt from the durable loop state
 //   reviewloop acknowledge-token-anomaly  human confirmation of a tripped Token Sentinel stop
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
+//   reviewloop restore-hold human action: re-append the hard stop on an ambiguous old record
+//   reviewloop authorize-rereview  human action: release a hard stop for ONE exact submission
 //   reviewloop extend-calls task-level: more Reviewer/Supervisor calls for ONE loop (audited)
 //   reviewloop stop-loop    human end of a task: STOPPED, every record kept
 //   reviewloop accept-design-exception  human-authorized Design exception after a review-TOOL stop (never a PASS)
@@ -34,6 +36,8 @@ import { grantDesignException, revokeDesignException } from '../src/reviewloop/d
 import { readLoopWorkflow } from '../src/reviewloop/humanActionGuard.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
+import { restoreHold } from '../src/reviewloop/holdRestore.js';
+import { authorizeRereview } from '../src/reviewloop/rereviewAuthorization.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
 import { buildHumanRequiredReport } from '../src/reviewloop/humanRequiredReport.js';
@@ -51,6 +55,9 @@ import {
   runFinalPrGateReport,
   verifyDesignArchiveAndCleanupReady,
 } from '../src/reviewloop/prContract.js';
+import {
+  analyzeComments, applyProgressBlock, formatDraft, formatReview, inspectTrace, renderProgressBlock, verifyArchiveWithTrace,
+} from '../src/reviewloop/designTrace.js';
 
 async function listSessions() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
@@ -154,6 +161,44 @@ async function reopenGate(rest) {
     for (const a of result.allowance ?? []) console.log(`  call ceiling enforced for this loop (${a.role}): ${a.previousCeiling} -> ${a.newCeiling} (used ${a.usedAtGrant}, this attempt may use ${a.granted})`);
     console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; if they are the limit, `reviewloop extend-calls` raises them for THIS loop only');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function authorizeRereviewCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const submission = flagValue(rest, '--submission');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !submission || !reason) throw new Error('usage: reviewloop authorize-rereview --loop <loopId> --submission <submissionDigest shown when the Worker was refused> --reason "<your decision / what was fixed>" [--max-reviewer-calls <n>] [--max-supervisor-calls <n>]  (the call budget is required from the 4th authorization on)');
+  const lease = await takeLoopLease(loopId, 'authorize a re-review');
+  try {
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await authorizeRereview({
+      persistence, loopId, submission, reason,
+      allowance: { reviewerCalls: flagValue(rest, '--max-reviewer-calls'), supervisorCalls: flagValue(rest, '--max-supervisor-calls') },
+      currentLimits: await currentCallLimits(persistence, loopId),
+    });
+    console.log('Re-review authorized for exactly one submission of this task.');
+    console.log(`  loop: ${result.loopId}  (authorization ${result.grants}, ${result.tier})`);
+    console.log('  not reset: history, budgets, fingerprints, spend ledger, call ceilings');
+    console.log('Next: tell the Worker to call reviewloop_review again with the same loopId and the same content; different content needs a new authorization.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function restoreHoldCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason) throw new Error('usage: reviewloop restore-hold --loop <loopId> --reason "<why the earlier stop should be restored>"');
+  const lease = await takeLoopLease(loopId, 'restore the hard stop');
+  try {
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await restoreHold({ persistence, loopId, reason });
+    console.log('Hard stop restored. The loop is HUMAN_REQUIRED again; no earlier record was changed.');
+    console.log(`  loop: ${result.loopId}`);
+    console.log('Next: the Worker still cannot re-review by itself; see `reviewloop report --loop <id>` for the human actions that apply.');
   } finally {
     await lease.release();
   }
@@ -488,6 +533,111 @@ function flagValues(args, name) {
   return out;
 }
 
+// `trace prepare` formats comment bodies (never posts); `trace inspect` reads the
+// PR, verifies every trace record and can emit the updated PR description. The
+// Worker posts / edits with `gh`; this command never writes to GitHub.
+async function handleTraceCommand(rest) {
+  const [sub, ...args] = rest;
+  const asJson = args.includes('--json');
+  const need = (name) => {
+    const v = flagValue(args, name);
+    if (!v) throw new Error(`missing ${name}`);
+    return v;
+  };
+  if (sub === 'prepare') {
+    const kind = need('--kind');
+    const taskId = need('--task-id');
+    let formatted;
+    if (kind === 'draft') {
+      const parts = flagValue(args, '--parts');
+      formatted = formatDraft({
+        taskId,
+        version: need('--version'),
+        content: await readFile(need('--file'), 'utf8'),
+        policySha: need('--policy-sha'),
+        planVersion: need('--plan-version'),
+        planSha256: need('--plan-sha'),
+        baseline: flagValue(args, '--baseline'),
+        changeNote: flagValue(args, '--note'),
+        findingResponses: flagValues(args, '--finding-response'),
+        onlyParts: parts == null ? null : (/^\d+(,\d+)*$/.test(parts)
+          ? [...new Set(parts.split(',').map(Number))]
+          : (() => { throw new Error(`--parts must be comma-separated part numbers like 2,3 (got ${JSON.stringify(parts)})`); })()),
+      });
+    } else if (kind === 'review') {
+      const designVersion = need('--design-version');
+      if (args.includes('--external')) {
+        formatted = formatReview({
+          taskId, designVersion, version: flagValue(args, '--version'),
+          external: {
+            reviewer: need('--reviewer'), independence: need('--independence'), conclusion: need('--conclusion'),
+            relayedBy: need('--relayed-by'), seq: flagValue(args, '--seq') ?? '1',
+            reviewedDesignSha256: need('--reviewed-sha'),
+            report: await readFile(need('--report-file'), 'utf8'),
+          },
+        });
+      } else {
+        const resultFile = flagValue(args, '--result');
+        const result = resultFile ? JSON.parse(await readFile(resultFile, 'utf8')) : null;
+        formatted = formatReview({
+          taskId, designVersion, result, round: Number(flagValue(args, '--round')) || null,
+          errorNote: flagValue(args, '--error-note'),
+        });
+      }
+    } else {
+      throw new Error('--kind must be draft or review');
+    }
+    const outDir = flagValue(args, '--out-dir');
+    const files = [];
+    if (outDir) {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(outDir, { recursive: true });
+      for (const c of formatted.comments) {
+        const f = path.join(outDir, `${formatted.kind}-${formatted.version}-part${c.part}of${c.total}.md`);
+        await writeFile(f, c.body, 'utf8');
+        files.push(f);
+      }
+    }
+    const out = { kind: formatted.kind, version: formatted.version, sha256: formatted.sha256, totalParts: formatted.totalParts, files };
+    if (asJson) console.log(JSON.stringify(outDir ? out : { ...out, comments: formatted.comments }, null, 2));
+    else {
+      console.log(`${out.kind} ${out.version} sha256=${out.sha256} parts=${out.totalParts}`);
+      if (outDir) files.forEach((f) => console.log(`wrote ${f}`));
+      else formatted.comments.forEach((c) => console.log(`--- part ${c.part}/${c.total} ---\n${c.body}`));
+    }
+    return;
+  }
+  if (sub === 'inspect') {
+    const repo = need('--repo');
+    const pr = need('--pr');
+    const taskId = need('--task-id');
+    const file = flagValue(args, '--file');
+    const localDraft = file ? await readFile(file, 'utf8') : null;
+    const res = await inspectTrace({ repo, prNumber: pr, taskId, localDraft });
+    const block = renderProgressBlock(res, { repo, prNumber: pr, taskId });
+    const bodyOut = flagValue(args, '--body-out');
+    if (bodyOut) await writeFile(bodyOut, applyProgressBlock(res.prBody, block), 'utf8');
+    const summary = {
+      ok: res.ok,
+      localState: res.localState,
+      latestDraft: res.latestDraft ? { version: res.latestDraft.version, sha256: res.latestDraft.sha256, commentIds: res.latestDraft.commentIds } : null,
+      records: res.records.map((r) => ({ kind: r.kind, version: r.version, valid: r.valid, sha256: r.sha256 ?? null, commentIds: r.commentIds ?? [], reason: r.reason ?? null, missingParts: r.missingParts ?? [] })),
+      problems: res.problems,
+      bodyOut: bodyOut ?? null,
+    };
+    if (asJson) console.log(JSON.stringify(summary, null, 2));
+    else {
+      console.log(`trace: ${res.ok ? 'OK' : 'PROBLEMS'} · local draft: ${res.localState}`);
+      res.records.forEach((r) => console.log(`  ${r.kind} ${r.version} ${r.valid ? `valid ${r.sha256.slice(0, 12)}` : `INVALID (${r.reason})`}`));
+      res.problems.forEach((p) => console.log(`  ! ${p.code}: ${p.message}`));
+      if (bodyOut) console.log(`wrote updated PR description to ${bodyOut}`);
+    }
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+  throw new Error('usage: reviewloop trace <prepare|inspect> ...  (prepare --kind draft|review --task-id <id> ...; inspect --repo <o/n> --pr <n> --task-id <id> [--file <design>] [--body-out <file>])');
+}
+
 async function handleContractCommand(rest) {
   const [sub, ...args] = rest;
   const asJson = args.includes('--json');
@@ -559,9 +709,9 @@ async function handleContractCommand(rest) {
     const clean = args.includes('--clean');
     const authors = flagValues(args, '--author');
     if (!repo || !prNumber || !taskId) {
-      throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--json]');
+      throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--require-trace] [--json]');
     }
-    const res = await verifyDesignArchiveAndCleanupReady({
+    const res = await verifyArchiveWithTrace({
       cwd,
       repo,
       prNumber: Number(prNumber),
@@ -571,6 +721,7 @@ async function handleContractCommand(rest) {
       reviewTarget,
       allowedAuthors: authors.length ? authors : null,
       clean,
+      requireTrace: args.includes('--require-trace'),
     });
     const source = res.authority === 'HUMAN_EXCEPTION'
       ? `Design source: HUMAN-AUTHORIZED EXCEPTION ${res.exceptionId} — NOT a ReviewLoop Design PASS (original review loop ${res.loopId} is unchanged).`
@@ -670,6 +821,12 @@ async function main() {
     case 'reopen-gate':
       await reopenGate(rest);
       break;
+    case 'restore-hold':
+      await restoreHoldCommand(rest);
+      break;
+    case 'authorize-rereview':
+      await authorizeRereviewCommand(rest);
+      break;
     case 'report':
       await report(rest);
       break;
@@ -697,6 +854,9 @@ async function main() {
     case 'contract':
       await handleContractCommand(rest);
       break;
+    case 'trace':
+      await handleTraceCommand(rest);
+      break;
     case 'spec':
       handleSpecCommand(rest);
       break;
@@ -716,7 +876,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|authorize-rereview|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|trace|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);
