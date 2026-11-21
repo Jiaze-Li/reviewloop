@@ -553,12 +553,12 @@ export function createReviewLoopController({
     // human action recorded after the stop (acknowledgements, raised ceilings) with
     // no independent safety stop still in force.
     let releasedByGrant = null;
-    let heldImage = null;
+    let humanReleased = false;
     if (loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
       const hold = await evaluateHardStop({ loopState });
       if (!hold.release) return hold.result;
       releasedByGrant = hold.grant;
-      if (releasedByGrant) heldImage = JSON.parse(JSON.stringify(loopState));
+      humanReleased = true;
     }
 
     const continueReview = async () => {
@@ -586,7 +586,9 @@ export function createReviewLoopController({
         // Preflight is a review operation even when it does not run the Gate.
         // Preserve the frozen objective verbatim; fail closed instead of
         // truncating or rewriting a fingerprint-valid legacy task definition.
-        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
+        if (loopState.state !== REVIEW_LOOP_STATES.REVIEWING) {
+          recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
+        }
         recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err?.message ?? String(err));
         await saveLoop(loopState);
         return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
@@ -597,37 +599,20 @@ export function createReviewLoopController({
       return reviewLocal({ loopState, evidence, signal, onHeartbeat });
     };
 
-    if (!releasedByGrant) return continueReview();
+    if (!humanReleased) return continueReview();
 
-    // Released by a grant. Safety direction: the grant is marked consumed and saved
-    // BEFORE anything can be paid for, so a crash or an abort after a model call is
-    // reserved can never let the same grant be replayed for another paid call. The
-    // price is that a crash BEFORE any spend loses the authorization (the user simply
-    // authorizes again). If the call ends having spent nothing (Gate failure, evidence
-    // stop, no progress, an exception), the loop is put back EXACTLY as it was: still
-    // HUMAN_REQUIRED and the grant unconsumed.
-    const spendMark = async () => {
-      const wf = await persistence.readWorkflowState(loopState.loopId);
-      const reservations = wf?.modelSpendReservations && typeof wf.modelSpendReservations === 'object' ? Object.keys(wf.modelSpendReservations).length : 0;
-      const records = Array.isArray(wf?.reviewLoopSpend?.records) ? wf.reviewLoopSpend.records.length : 0;
-      return reservations + records;
-    };
-    const markBefore = await spendMark();
-    loopState.rereviewGrants = (loopState.rereviewGrants ?? []).map((g) => (g?.id === releasedByGrant.id ? { ...g, consumedAt: new Date().toISOString() } : g));
-    await saveLoop(loopState);
-    const putBackIfUnspent = async () => {
-      if ((await spendMark()) > markBefore) return;
-      await saveLoop(heldImage);
-    };
-    let out;
-    try {
-      out = await continueReview();
-    } catch (err) {
-      try { await putBackIfUnspent(); } catch { /* the original error is the one to surface */ }
-      throw err;
+    // A human release grants one entry to the existing review state machine.
+    // Mark exact grants consumed before any model dispatch. Never restore an
+    // entire pre-review snapshot on zero spend: a Gate REWORK or NO_PROGRESS
+    // is a valid outcome whose durable state must agree with its return.
+    if (releasedByGrant) {
+      loopState.rereviewGrants = (loopState.rereviewGrants ?? []).map((g) => (
+        g?.id === releasedByGrant.id ? { ...g, consumedAt: new Date().toISOString() } : g
+      ));
     }
-    await putBackIfUnspent();
-    return out;
+    recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'review released by an authorized human action');
+    await saveLoop(loopState);
+    return continueReview();
   }
 
   // Read-only decision for a HUMAN_REQUIRED loop. Never writes, never calls a model.
@@ -843,7 +828,9 @@ export function createReviewLoopController({
       };
     }
 
-    recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'review requested');
+    if (loopState.state !== REVIEW_LOOP_STATES.REVIEWING) {
+      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'review requested');
+    }
 
     // Validate shape/requirement/current-scope membership before the LOCAL Gate
     // can spend time or mutate the worktree. Exact-code binding still happens
