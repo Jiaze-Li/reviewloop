@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T15:24:16.829Z",
+  "updatedAt": "2026-11-21T12:36:19.726Z",
   "task": {
     "id": "fix/settings-effective-authority-20261120",
     "branch": "fix/settings-effective-authority-20261120",
     "title": "fix/settings-effective-authority-20261120",
     "task": "Development branch: fix/settings-effective-authority-20261120",
     "started": "2026-11-20T23:21:15+08:00",
-    "status": "In progress",
+    "status": "Abandoned",
     "current": "chore: bootstrap effective settings authority plan (no file changes)",
     "next": "",
     "history": [],
@@ -21,13 +21,14 @@
     ],
     "pr": {
       "number": 68,
-      "state": "open",
+      "state": "closed",
       "title": "plan: make effective ReviewLoop settings explicit and fail safely",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/68",
       "merged": false,
-      "updatedAt": "2026-11-20T15:24:05Z"
+      "closedAt": "2026-11-21T12:36:10Z",
+      "updatedAt": "2026-11-21T12:36:10Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-21T12:36:10Z",
+    "outcome": "Closed without merge"
   }
 }
