@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T08:00:09.554Z",
+  "updatedAt": "2026-11-21T08:00:16.443Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/review-input-choice-and-decision-origin-20261121",
     "started": "2026-11-21T09:40:28+08:00",
     "status": "In progress",
-    "current": "Add decision-provenance rule and zero-paid A/B/C review-input comparison",
+    "current": "Add selectable incremental review route for large Design reviews",
     "next": "用真实模型小范围试跑分步审查，确认质量与费用后再决定是否对大型设计默认启用",
     "history": [
       {
@@ -18,6 +18,10 @@
       {
         "at": "2026-11-21T15:35:55+08:00",
         "text": "Merge main into #71 Design branch"
+      },
+      {
+        "at": "2026-11-21T16:00:05+08:00",
+        "text": "Add decision-provenance rule and zero-paid A/B/C review-input comparison"
       }
     ],
     "commits": [
@@ -38,6 +42,12 @@
         "branch": "plan/review-input-choice-and-decision-origin-20261121",
         "timestamp": "2026-11-21T15:35:55+08:00",
         "message": "Add decision-provenance rule and zero-paid A/B/C review-input comparison"
+      },
+      {
+        "sha": "4a5ecdfb52015301808e7bff47444ee2651277e5",
+        "branch": "plan/review-input-choice-and-decision-origin-20261121",
+        "timestamp": "2026-11-21T16:00:05+08:00",
+        "message": "Add selectable incremental review route for large Design reviews"
       }
     ],
     "pr": {
