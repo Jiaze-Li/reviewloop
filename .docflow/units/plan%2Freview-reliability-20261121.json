@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T02:13:46.025Z",
+  "updatedAt": "2026-11-21T02:13:59.965Z",
   "task": {
     "id": "plan/review-reliability-20261121",
     "branch": "plan/review-reliability-20261121",
@@ -9,7 +9,7 @@
     "started": "2026-11-21T00:07:08+08:00",
     "status": "In progress",
     "current": "Replay an old stopped task end to end, hide model text in reports, document decisions",
-    "next": "",
+    "next": "等待你验收这次改动；如需合并，请你本人决定（尚未合并、尚未经过 PR 机器人审查）",
     "history": [
       {
         "at": "2026-11-21T10:00:12+08:00",
