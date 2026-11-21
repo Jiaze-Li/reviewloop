@@ -11,6 +11,7 @@ import path from 'node:path';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import { INCREMENTAL_LIMITS, segmentText, validateStepReply, applyStepReply, mergeOpenFindings, loadCheckpoint, newStageCheckpoint } from '../src/reviewloop/designIncremental.js';
 import { DESIGN_LIMITS } from '../src/reviewloop/designTwoStage.js';
+import { resolveReviewLoopLimits } from '../src/reviewloop/reviewSpend.js';
 import { MemoryPersistence } from './helpers/reviewLoopHarness.js';
 
 const BUDGET = 58 * 1024;
@@ -55,10 +56,11 @@ class CrashingPersistence extends MemoryPersistence {
   async writeWorkflowState(id, st) { this._maybe(JSON.stringify(st)); return super.writeWorkflowState(id, st); }
 }
 
-function makeCtl({ cwd, persistence = new MemoryPersistence(), reviewer, supervisor, limitBytes = BUDGET }) {
+function makeCtl({ cwd, persistence = new MemoryPersistence(), reviewer, supervisor, limitBytes = BUDGET, env = undefined }) {
   const log = { reviewer: [], supervisor: [] };
   const ctl = createReviewLoopController({
     persistence,
+    ...(env ? { env } : {}),
     designInputBudgetFn: async () => ({ limitBytes, source: 'TEST_58KIB' }),
     captureBaselineFn: async () => ({ head: 'B', dirtyFiles: [], evidenceComplete: true }),
     collectWorkerDeltaFn: async () => {
@@ -318,5 +320,74 @@ test('E2E UNKNOWN spend: a step dispatched but never settled before a kill is no
   const res = await second.ctl.review({ loopId: b.loopId });
   assert.equal(res.status, 'HUMAN_REQUIRED');
   assert.equal(second.log.supervisor.length + second.log.reviewer.length, 0, 'no model call for an unsettled step');
+  cleanup(cwd);
+});
+
+// ------------------------------------------------ route-specific Supervisor ceiling
+
+test('Supervisor ceiling: 16 for a frozen incremental loop, 8 for everything else; tighter settings and human overrides are respected', () => {
+  const lim = (env, o = {}) => resolveReviewLoopLimits(env, o).maxSupervisorCalls;
+  assert.equal(lim({}), 8);
+  assert.equal(lim({}, { incrementalRoute: true }), 16);
+  assert.equal(lim({ REVIEWLOOP_MAX_SUPERVISOR_CALLS: '8' }, { incrementalRoute: true }), 16);
+  assert.equal(lim({ REVIEWLOOP_MAX_SUPERVISOR_CALLS: '5' }, { incrementalRoute: true }), 5, 'a user-tightened ceiling is never raised');
+  assert.equal(lim({ REVIEWLOOP_MAX_SUPERVISOR_CALLS: '5' }), 5);
+  assert.equal(lim({ REVIEWLOOP_MAX_SUPERVISOR_CALLS: '20' }, { incrementalRoute: true }), 20);
+  assert.equal(lim({ REVIEWLOOP_MAX_SUPERVISOR_CALLS: '8' }, { incrementalRoute: false }), 8);
+  assert.equal(lim({}, { incrementalRoute: true, budgetOverrides: { maxSupervisorCalls: 10 } }), 10, 'an explicit human call override still wins');
+});
+
+test('E2E ceiling: two large incremental rounds fit in 16 Supervisor calls; the 17th is blocked by the real spend authority; retries count', async () => {
+  const cwd = repoWithSources();
+  let supCalls = 0;
+  const { ctl, log } = makeCtl({
+    cwd, limitBytes: 30_000,
+    supervisor: (a) => { supCalls += 1; return isTerminal(a) ? adj({ blockingFindings: [{ severity: 'P2', title: `defect ${supCalls}`, detail: 'd', rule: 'r' }] }) : step(); },
+  });
+  const plan = bigPlan(30_000);
+  const b = await begin(ctl, cwd, plan);
+  const results = [];
+  for (let round = 1; round <= 4; round += 1) {
+    write(cwd, `${bigDesign(30_000)}\nREVISION ${round}\n`);
+    // eslint-disable-next-line no-await-in-loop
+    results.push(await ctl.review({ loopId: b.loopId }));
+    if (results.at(-1).status === 'HUMAN_REQUIRED') break;
+  }
+  const calls = log.supervisor.length;
+  assert.equal(results[0].telemetry.limits.maxSupervisorCalls, 16);
+  assert.equal(results[0].status, 'REWORK'); assert.equal(results[1].status, 'REWORK');
+  assert.ok(calls <= 16, `never more than 16 physical Supervisor calls, got ${calls}`);
+  const last = results.at(-1);
+  assert.equal(last.status, 'HUMAN_REQUIRED', `the loop stops at the ceiling instead of paying for call 17: ${JSON.stringify(last).slice(0, 300)}`);
+  assert.match(last.reason, /ceiling \(16\)/);
+  cleanup(cwd);
+});
+
+test('E2E ceiling: the default route still reports 8 and an explicitly tightened value is not raised for route C', async () => {
+  const cwd = repoWithSources();
+  const a = makeCtl({ cwd });
+  const ba = await a.ctl.begin({ goal: 'g', cwd, taskType: 'design', contractText: bigPlan(2000), reviewTarget: 'Prompt.md' });
+  write(cwd, bigDesign(2000));
+  const ra = await a.ctl.review({ loopId: ba.loopId });
+  assert.equal(ra.telemetry.limits.maxSupervisorCalls, 8);
+  cleanup(cwd);
+  const cwd2 = repoWithSources();
+  const c = makeCtl({ cwd: cwd2, env: { REVIEWLOOP_MAX_SUPERVISOR_CALLS: '5' } });
+  const bc = await begin(c.ctl, cwd2, bigPlan(2000));
+  write(cwd2, bigDesign(2000));
+  const rc = await c.ctl.review({ loopId: bc.loopId });
+  assert.equal(rc.telemetry.limits.maxSupervisorCalls, 5);
+  cleanup(cwd2);
+});
+
+test('E2E ceiling: a format retry is a physical Supervisor call and is counted in telemetry', async () => {
+  const cwd = repoWithSources();
+  let bad = true;
+  const { ctl, log } = makeCtl({ cwd, supervisor: (a) => { if (bad && a.stage === 'inc-s2-r1') { bad = false; return { not: 'a step' }; } return isTerminal(a) ? adj() : step(); } });
+  const b = await begin(ctl, cwd, bigPlan(8000)); write(cwd, bigDesign(8000));
+  const r = await ctl.review({ loopId: b.loopId });
+  assert.equal(r.status, 'PASS');
+  assert.equal(r.telemetry.supervisorCalls, log.supervisor.length);
+  assert.ok(log.supervisor.filter((a) => a.stage === 'inc-s2-r1').length === 2, 'the corrective retry happened');
   cleanup(cwd);
 });

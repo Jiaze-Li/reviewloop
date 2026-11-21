@@ -64,6 +64,12 @@ export const REVIEWLOOP_DEFAULTS = Object.freeze({
   // traverse the full four-candidate Supervisor pool under bounded failover.
   // MAX_COST_USD / MAX_USAGE_VOLUME remain the real runaway guards.
   MAX_SUPERVISOR_CALLS: 2 * 4,
+  // Task-wide Supervisor ceiling for a NEW Design loop frozen with
+  // designInputRoute 'incremental' (route C: ~6 Supervisor calls per large
+  // adjudication round; 16 covers two such rounds plus a little retry headroom,
+  // not a guarantee). Applied only as a floor over the configured value, never
+  // over a value the user tightened below the default 8.
+  MAX_SUPERVISOR_CALLS_INCREMENTAL: 16,
   // ---- post-settlement single-call Token Sentinel -------------------------
   // A runaway guard for ONE physical call: the durable aggregate ceilings
   // (MAX_USAGE_VOLUME / MAX_COST_USD) only fire once the running total crosses
@@ -133,7 +139,9 @@ export function isMechanicallyZeroPreSend(err) {
   return true;
 }
 
-export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budgetOverrides = null } = {}) {
+export const usesIncrementalRoute = (objective) => objective?.designInputRoute === 'incremental';
+
+export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budgetOverrides = null, incrementalRoute = false } = {}) {
   const gates = Number.isInteger(gateCount) && gateCount > 0 ? gateCount : 1;
   const resolved = {
     // Cost / aggregate usage remain TASK-WIDE across all phase gates.
@@ -161,6 +169,12 @@ export function resolveReviewLoopLimits(env = process.env, { gateCount = 1, budg
       REVIEWLOOP_DEFAULTS.MAX_CONTEXT_OVERHEAD_TOKENS, TOKEN_SENTINEL_HARD_CAPS.MAX_CONTEXT_OVERHEAD_TOKENS,
     ),
   };
+  // Route-specific ceiling (frozen incremental Design loops only): the configured
+  // value wins when the user tightened it below the default; otherwise it is raised
+  // to at least the route ceiling. A human call override below still wins.
+  if (incrementalRoute && resolved.maxSupervisorCalls >= REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS * gates) {
+    resolved.maxSupervisorCalls = Math.max(resolved.maxSupervisorCalls, REVIEWLOOP_DEFAULTS.MAX_SUPERVISOR_CALLS_INCREMENTAL * gates);
+  }
   if (budgetOverrides && typeof budgetOverrides === 'object') {
     if (Number.isFinite(budgetOverrides.maxUsageVolume) && budgetOverrides.maxUsageVolume > 0) {
       resolved.maxUsageVolume = budgetOverrides.maxUsageVolume;
@@ -375,11 +389,12 @@ export function createReviewLoopSpend({
   persistence = null,
   env = process.env,
   gateCount = 1,
+  incrementalRoute = false,
   budgetOverrides = null,
   onEvent,
   recordSafetyEvent,
 } = {}) {
-  let limits = resolveReviewLoopLimits(env, { gateCount, budgetOverrides });
+  let limits = resolveReviewLoopLimits(env, { gateCount, budgetOverrides, incrementalRoute });
   const spendStore = new ReviewLoopSpendStore(persistence);
   const anomalyStore = new ReviewLoopTokenAnomalyStore(persistence);
 
@@ -390,6 +405,7 @@ export function createReviewLoopSpend({
     } catch { /* best effort */ }
     return resolveReviewLoopLimits(env, {
       gateCount,
+      incrementalRoute,
       budgetOverrides: durable ?? budgetOverrides,
     });
   };

@@ -12,7 +12,7 @@
 // becomes PASS without an independent Reviewer PASS.
 
 import { REVIEW_LOOP_STATES } from './state.js';
-import { resolveReviewLoopLimits } from './reviewSpend.js';
+import { resolveReviewLoopLimits, usesIncrementalRoute } from './reviewSpend.js';
 import { reviewGateCount } from './phaseState.js';
 import {
   CALL_ALLOWANCE_KEY, MAX_ALLOWANCE_REVIEWER_CALLS, MAX_ALLOWANCE_SUPERVISOR_CALLS,
@@ -28,6 +28,7 @@ export function effectiveCallLimits({ workflow, env = process.env }) {
   };
   return resolveReviewLoopLimits(env, {
     gateCount: reviewGateCount(loop?.objective),
+    incrementalRoute: usesIncrementalRoute(loop?.objective),
     budgetOverrides: { ...existing, ...callCeilingsFromState(workflow) },
   });
 }

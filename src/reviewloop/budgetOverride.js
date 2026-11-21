@@ -6,7 +6,7 @@
 // or resetting the physical spend ledger, call counts, Token Sentinel, or baseline.
 
 import { REVIEW_LOOP_STATES, recordTransition } from './state.js';
-import { resolveReviewLoopLimits } from './reviewSpend.js';
+import { resolveReviewLoopLimits, usesIncrementalRoute } from './reviewSpend.js';
 import { reviewGateCount } from './phaseState.js';
 import { callCeilingsFromState, commitGuardedUpdate, fingerprint } from './humanActionGuard.js';
 
@@ -72,6 +72,7 @@ export async function overrideLoopBudget({
 
   const effectiveLimits = resolveReviewLoopLimits(env, {
     gateCount,
+    incrementalRoute: usesIncrementalRoute(loop.objective),
     budgetOverrides: { ...existingOverridesObj, ...callCeilingsFromState(workflow) },
   });
 

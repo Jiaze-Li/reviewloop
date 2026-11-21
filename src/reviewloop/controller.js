@@ -45,7 +45,7 @@ import {
   reviewFingerprint,
   REVIEW_VERDICTS,
 } from './reviewPolicy.js';
-import { createReviewLoopSpend, reconstructPhysicalCalls } from './reviewSpend.js';
+import { createReviewLoopSpend, reconstructPhysicalCalls, usesIncrementalRoute } from './reviewSpend.js';
 import { reduceFinalDiff } from './finalDiffReducer.js';
 import {
   DEFAULT_TRANSIENT_AUTH_RETRY_DELAYS_MS,
@@ -317,6 +317,7 @@ export function createReviewLoopController({
       persistence,
       env,
       gateCount: reviewGateCount(objective),
+      incrementalRoute: usesIncrementalRoute(objective),
       budgetOverrides,
       onEvent,
       recordSafetyEvent: collectSafetyEvent,
