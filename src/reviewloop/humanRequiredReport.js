@@ -58,11 +58,19 @@ const clip = (v, n = TEXT_MAX) => {
 const num = (n) => (Number.isFinite(n) ? Number(n).toLocaleString('en-US') : '未记录');
 const fin = (n) => (Number.isFinite(n) ? n : null);
 
+// Old stored stops may end with the model's own words after this engine marker.
+// Model text is never shown in, nor classified from, the human report.
+const MODEL_TEXT_MARKER = '; model output began:';
+const stripModelText = (t) => {
+  const i = typeof t === 'string' ? t.indexOf(MODEL_TEXT_MARKER) : -1;
+  return i < 0 ? t : `${t.slice(0, i)}）`.replace(/））$/, '）');
+};
+
 function lastHumanRequiredReason(loop, result) {
-  const fromResult = clip(result?.reason);
+  const fromResult = clip(stripModelText(result?.reason));
   if (fromResult) return fromResult;
   const hit = [...(loop?.history ?? [])].reverse().find((h) => h?.to === 'HUMAN_REQUIRED');
-  return clip(hit?.reason ?? loop?.reason ?? '');
+  return clip(stripModelText(hit?.reason ?? loop?.reason ?? ''));
 }
 
 const ms = (v) => {

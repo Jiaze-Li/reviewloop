@@ -695,6 +695,17 @@ identical `(diff+gate+review-scope)` state across crash/resume yields exactly on
 Reviewer dispatch, and a post-send provider error is never a licence to retry.
 `NO NEW INFORMATION → NO NEW MODEL CALL` holds.
 
+**HUMAN_REQUIRED is a hard stop (D48)**: once a loop is at `HUMAN_REQUIRED`, an ordinary
+`reviewloop_review` call is answered read-only (no Gate, no model call, no write) with the
+current `submissionDigest`; changed content alone never releases it. The user releases it with
+`reviewloop authorize-rereview --loop <id> --submission <digest> --reason "..."`: one grant per
+stop and per exact submission, consumed before the first paid call, put back if the call spends
+nothing. Budgets, ledgers, Sentinel latches and history are never reset by it. An `acknowledge-*`
+or raised ceiling recorded after the stop still releases it when no independent stop remains.
+Design prompts are measured against the input budget before any reservation; oversize stops with
+zero calls. Receipts detect loss spanning a receipt line, not a loss shorter than one interval,
+and do not show the model understood the text.
+
 **Per-`loopId` serialization**: an in-process lock chain plus a durable
 cross-process lock file (`<runtime>/<loopId>/reviewloop.lock`) serialize every
 `reviewloop_review` for a loop. Overlapping calls run one after another (the
