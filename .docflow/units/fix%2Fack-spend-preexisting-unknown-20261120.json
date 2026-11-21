@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-20T10:55:02.880Z",
+  "updatedAt": "2026-11-21T12:36:14.992Z",
   "task": {
     "id": "fix/ack-spend-preexisting-unknown-20261120",
     "branch": "fix/ack-spend-preexisting-unknown-20261120",
     "title": "fix/ack-spend-preexisting-unknown-20261120",
     "task": "Development branch: fix/ack-spend-preexisting-unknown-20261120",
     "started": "2026-11-20T18:53:11+08:00",
-    "status": "In progress",
+    "status": "Abandoned",
     "current": "chore: bootstrap unresolved-spend recovery Plan PR (no file changes)",
     "next": "",
     "history": [],
@@ -21,13 +21,14 @@
     ],
     "pr": {
       "number": 65,
-      "state": "open",
+      "state": "closed",
       "title": "plan: safely acknowledge pre-recorded UNKNOWN spend",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/65",
       "merged": false,
-      "updatedAt": "2026-11-20T10:54:51Z"
+      "closedAt": "2026-11-21T12:36:04Z",
+      "updatedAt": "2026-11-21T12:36:04Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-21T12:36:04Z",
+    "outcome": "Closed without merge"
   }
 }
