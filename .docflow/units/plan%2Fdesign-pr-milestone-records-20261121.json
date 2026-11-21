@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T04:01:42.505Z",
+  "updatedAt": "2026-11-21T04:42:46.077Z",
   "task": {
     "id": "plan/design-pr-milestone-records-20261121",
     "branch": "plan/design-pr-milestone-records-20261121",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/design-pr-milestone-records-20261121",
     "started": "2026-11-21T08:07:13+08:00",
     "status": "In progress",
-    "current": "plan: fix trace review findings: MCP schema, strict trace gate, external report evidence",
+    "current": "plan: reject malformed --parts selections in trace prepare",
     "next": "等待用户对 PR #70 的修复结果验收；仍未经过独立设计审查。",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-21T12:01:31+08:00",
         "text": "plan: add Design review process trace to the task PR"
+      },
+      {
+        "at": "2026-11-21T12:42:35+08:00",
+        "text": "plan: fix trace review findings: MCP schema, strict trace gate, external report evidence"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/design-pr-milestone-records-20261121",
         "timestamp": "2026-11-21T12:01:31+08:00",
         "message": "plan: fix trace review findings: MCP schema, strict trace gate, external report evidence"
+      },
+      {
+        "sha": "3a8160f280faf1dc027c162471a327716b668871",
+        "branch": "plan/design-pr-milestone-records-20261121",
+        "timestamp": "2026-11-21T12:42:35+08:00",
+        "message": "plan: reject malformed --parts selections in trace prepare"
       }
     ],
     "pr": {
