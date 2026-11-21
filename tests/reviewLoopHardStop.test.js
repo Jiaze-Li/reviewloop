@@ -273,7 +273,7 @@ test('AC-08: state matrix - authorize-rereview is listed iff its own dry-run pre
   }
 });
 
-// ---- review findings: consume-before-spend, restore on exception --------------------
+// ---- review findings: consume before dispatch without overwriting subsequent state ----
 
 test('I3/O4: the grant is already consumed when the first model call is dispatched (a crash or abort cannot replay it)', async () => {
   const w = await stopped();

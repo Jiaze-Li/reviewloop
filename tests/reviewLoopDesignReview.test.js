@@ -1,7 +1,6 @@
 // Unified Design review: the complete design file (reviewTarget) is reviewed on
 // the SAME engine as Code, PASS is bound to the exact reviewed content, and
 // pre-existing (legacy) Design loops keep their historical route.
-import { withReceipts } from './helpers/receiptEcho.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync, rmSync } from 'node:fs';
@@ -96,7 +95,7 @@ function designFakes({ adjudicate = ALIGNED, proposals = PROPOSALS, onReviewer, 
     designSupervisorFn: async (args) => {
       log.supervisor.push(args);
       if (onSupervisor) await onSupervisor(args);
-      const value = withReceipts(args.prompt, typeof adjudicate === 'function' ? adjudicate(log.supervisor.length) : adjudicate);
+      const value = typeof adjudicate === 'function' ? adjudicate(log.supervisor.length) : adjudicate;
       return { value, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
     },
   };
@@ -394,7 +393,7 @@ function routingCtl({ cwd, routedRoles }) {
       let text = '{"findings":[]}';
       if (prompt.includes('Field: requestedFiles')) text = '{"requestedFiles":[]}';
       else if (prompt.includes('Fields: proposals')) text = JSON.stringify(PROPOSALS);
-      else if (prompt.includes('Rules: comparison.verdict')) text = JSON.stringify(withReceipts(prompt, ALIGNED));
+      else if (prompt.includes('Rules: comparison.verdict')) text = JSON.stringify(ALIGNED);
       return { model: opts?.model ?? 'm', exitCode: 0, text, usage: { input_tokens: 20, output_tokens: 5 } };
     },
   });

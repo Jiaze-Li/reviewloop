@@ -1378,7 +1378,6 @@ export function createReviewLoopController({
       attempts: (failedOut.physicalCalls ?? []).slice(-6).map((c) => ({
         family: typeof c?.family === 'string' ? c.family.slice(0, 40) : null, outcome: safeEnum(String(c?.outcome ?? '').toUpperCase()), code: safeEnum(c?.code ?? null),
       })),
-      receipts: last?.receipts ?? null,
       replyBytes: last?.replyBytes ?? null,
       replyClass: safeEnum(last?.replyClass ?? null),
       visibility: ['LOCAL_CONSTRUCTED', 'TRANSPORT_ACCEPTED', 'MODEL_ECHOED_RECEIPTS'].includes(last?.visibility) ? last.visibility : 'LOCAL_CONSTRUCTED',

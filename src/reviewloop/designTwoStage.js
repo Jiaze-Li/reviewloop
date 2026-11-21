@@ -820,8 +820,7 @@ export function createDesignTwoStageRunner({
     });
     // One stage = one paid call, plus at most one corrective retry and ONLY for a
     // format problem (non-empty reply that is not a usable object). An empty reply,
-    // an input-size stop and an incomplete-receipt reply are deterministic: they
-    // never buy the same prompt twice. Every prompt is measured against the budget
+    // an input-size stop is deterministic: it never buys the same prompt twice. Every prompt is measured against the budget
     // BEFORE evidence registration / reservation / dispatch, retries included.
     const runStage = async ({
       op, stageName, role, routeFn, defaultFamily, fn, prompt, validate, label, counter, components = {},

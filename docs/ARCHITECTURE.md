@@ -695,16 +695,19 @@ identical `(diff+gate+review-scope)` state across crash/resume yields exactly on
 Reviewer dispatch, and a post-send provider error is never a licence to retry.
 `NO NEW INFORMATION → NO NEW MODEL CALL` holds.
 
-**HUMAN_REQUIRED is a hard stop (D48)**: once a loop is at `HUMAN_REQUIRED`, an ordinary
-`reviewloop_review` call is answered read-only (no Gate, no model call, no write) with the
-current `submissionDigest`; changed content alone never releases it. The user releases it with
-`reviewloop authorize-rereview --loop <id> --submission <digest> --reason "..."`: one grant per
-stop and per exact submission, consumed before the first paid call, put back if the call spends
-nothing. Budgets, ledgers, Sentinel latches and history are never reset by it. An `acknowledge-*`
-or raised ceiling recorded after the stop still releases it when no independent stop remains.
-Design prompts are measured against the input budget before any reservation; oversize stops with
-zero calls. Receipts detect loss spanning a receipt line, not a loss shorter than one interval,
-and do not show the model understood the text.
+**HUMAN_REQUIRED is a hard stop (D48; streamlined by D49)**: once a loop is at
+`HUMAN_REQUIRED`, an ordinary review call is answered read-only (no Gate,
+model call or write). Changed content alone does not release it. An authorized
+human action or an exact-submission one-use `authorize-rereview` grant releases
+the loop into the EXISTING durable `REVIEWING` state. The grant is consumed on
+entry before any model dispatch; zero model spend no longer rewinds the task
+state. Gate REWORK/NO_PROGRESS are recorded and Worker rework continues
+normally. Budgets, spend records, Sentinel latches and histories are never reset.
+Design requests are checked against the whole-prompt pre-send budget, without
+trimming essential evidence. Mandatory dense receipt echo was removed under
+D49 because it was not validated with real providers and increased costs and
+false-refusal risk. Local argv and prompt checks do NOT prove the remote
+provider received or read all content; the remaining limitation is explicit.
 
 **Per-`loopId` serialization**: an in-process lock chain plus a durable
 cross-process lock file (`<runtime>/<loopId>/reviewloop.lock`) serialize every
