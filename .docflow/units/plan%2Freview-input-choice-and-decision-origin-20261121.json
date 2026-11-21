@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T07:12:45.083Z",
+  "updatedAt": "2026-11-21T07:36:04.537Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -9,7 +9,7 @@
     "started": "2026-11-21T09:40:28+08:00",
     "status": "In progress",
     "current": "Merge main into #71 Design branch",
-    "next": "",
+    "next": "等 Jack 决定审查输入路线（保持现状 / 采用分步读取方案），再决定是否对设计正式审查",
     "history": [
       {
         "at": "2026-11-21T15:12:31+08:00",
