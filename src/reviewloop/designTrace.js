@@ -18,6 +18,7 @@ import {
   defaultRunGh,
   parseContractIndex,
   splitContractText,
+  verifyDesignArchiveAndCleanupReady,
 } from './prContract.js';
 
 export const TRACE_KINDS = ['draft', 'review'];
@@ -95,6 +96,29 @@ function req(value, field) {
   return v;
 }
 
+// Task ids and versions are embedded in marker comments whose grammar is
+// `[^:\s]+`; anything else would post comments the trace silently cannot see.
+const IDENT_RE = /^[A-Za-z0-9._-]+$/;
+function ident(value, field) {
+  const v = req(value, field);
+  if (!IDENT_RE.test(v)) fail('TRACE_INVALID_ARG', `${field} may contain only letters, digits, ".", "_" and "-" (got ${JSON.stringify(v)})`);
+  return v;
+}
+
+// Free-text header fields live on ONE quoted line: newlines are collapsed and
+// anything that could forge a marker or close the block is refused.
+function oneLine(value, field) {
+  const v = req(value, field).replace(/\s+/g, ' ');
+  if (/<!--|-->|<\/?details|<\/?summary/i.test(v)) fail('TRACE_INVALID_ARG', `${field} must not contain HTML comment or details markup`);
+  return v;
+}
+
+function hex64(value, field) {
+  const v = req(value, field).toLowerCase();
+  if (!SHA_RE.test(v)) fail('TRACE_INVALID_ARG', `${field} must be a 64-character lowercase hex SHA-256`);
+  return v;
+}
+
 function wrap({ kind, taskId, version, content, header, trailerLabel, maxCharsPerPart, onlyParts = null }) {
   const trimmed = content.trim();
   const sha256 = contractContentSha256(trimmed);
@@ -134,8 +158,8 @@ export function formatDraft({
   changeNote = null, findingResponses = null, onlyParts = null,
   maxCharsPerPart = PR_CONTRACT_COMMENT_MAX_CHARS,
 }) {
-  const id = req(taskId, 'taskId');
-  const ver = req(version, 'version');
+  const id = ident(taskId, 'taskId');
+  const ver = ident(version, 'version');
   if (typeof content !== 'string' || !content.trim()) fail('TRACE_INVALID_ARG', 'draft content must be non-empty');
   if (Buffer.byteLength(content.trim(), 'utf8') > PR_CONTRACT_DESIGN_MAX_BYTES) {
     fail('PR_CONTRACT_SIZE_EXCEEDED', 'draft exceeds the 64 KiB Design limit');
@@ -143,10 +167,10 @@ export function formatDraft({
   assertPublicSafe(content, 'draft');
   const header = [
     '未经独立审查的设计草稿快照；不是 Design PASS、不是人工例外，也不授权进入 Code。',
-    `policy_sha: ${req(policySha, 'policySha')} · Plan ${req(planVersion, 'planVersion')} (sha256 ${req(planSha256, 'planSha256')})`,
-    ...(baseline ? [`核查基线：${baseline}`] : []),
-    ...(changeNote ? [`变更说明：${changeNote}`] : []),
-    ...(findingResponses ? ['对上一轮 finding 的处理（Worker 声明，未经审查确认）：', ...findingResponses.map((r) => `- ${r}`)] : []),
+    `policy_sha: ${oneLine(policySha, 'policySha')} · Plan ${oneLine(planVersion, 'planVersion')} (sha256 ${hex64(planSha256, 'planSha256')})`,
+    ...(baseline ? [`核查基线：${oneLine(baseline, 'baseline')}`] : []),
+    ...(changeNote ? [`变更说明：${oneLine(changeNote, 'changeNote')}`] : []),
+    ...(findingResponses?.length ? ['对上一轮 finding 的处理（Worker 声明，未经审查确认）：', ...findingResponses.map((r) => `- ${oneLine(r, 'findingResponse')}`)] : []),
   ];
   header.forEach((l) => assertPublicSafe(l, 'draft header'));
   return wrap({
@@ -174,28 +198,29 @@ export function formatReview({
   taskId, designVersion, round, result = null, errorNote = null, maxCharsPerPart = PR_CONTRACT_COMMENT_MAX_CHARS,
   external = null, version = null,
 }) {
-  const id = req(taskId, 'taskId');
-  const dv = req(designVersion, 'designVersion');
+  const id = ident(taskId, 'taskId');
+  const dv = ident(designVersion, 'designVersion');
   let meta;
   const body = [];
   if (external) {
+    const report = String(external.report ?? '').trim();
+    if (!report) fail('TRACE_INVALID_ARG', 'an external review record needs the report body; an empty report is not a review');
     meta = {
       source: 'EXTERNAL_REPORT',
       designVersion: dv,
-      reviewer: req(external.reviewer, 'reviewer'),
-      independence: `转贴者声明：${req(external.independence, 'independence')}（系统未验证）`,
-      conclusion: req(external.conclusion, 'conclusion'),
-      reviewedDesignSha256: external.reviewedDesignSha256 ?? null,
-      relayedBy: req(external.relayedBy, 'relayedBy'),
+      reviewer: oneLine(external.reviewer, 'reviewer'),
+      independence: `转贴者声明：${oneLine(external.independence, 'independence')}（系统未验证）`,
+      conclusion: oneLine(external.conclusion, 'conclusion'),
+      // The exact design content the external reviewer read: without it the
+      // report is not evidence about any version, whatever its conclusion says.
+      reviewedDesignSha256: hex64(external.reviewedDesignSha256, 'reviewedDesignSha256'),
+      relayedBy: oneLine(external.relayedBy, 'relayedBy'),
     };
-    if (meta.reviewedDesignSha256 && !SHA_RE.test(meta.reviewedDesignSha256)) {
-      fail('TRACE_INVALID_ARG', 'external reviewedDesignSha256 must be 64 hex chars');
-    }
     body.push(
       `# 外部独立审查报告（转贴）· ${dv}`, '',
-      `审查者：${meta.reviewer}`, meta.independence, `结论：${meta.conclusion}`,
+      `审查者：${meta.reviewer}`, meta.independence, `结论：${meta.conclusion}`, `所读设计哈希：${meta.reviewedDesignSha256}`,
       '本记录不改变 ReviewLoop 状态，不构成 Design PASS、人工例外或 Code 授权。', '',
-      String(external.report ?? '').trim() || '(无正文)',
+      report,
     );
   } else {
     const status = result?.status ?? 'NO_RESULT';
@@ -233,7 +258,11 @@ export function formatReview({
   }
   const content = `meta: ${JSON.stringify(meta)}\n\n${body.filter((l) => l !== undefined).join('\n')}`;
   assertPublicSafe(content, 'review record');
-  const ver = version ?? `${dv}.${external ? 'x' : 'r'}${meta.round ?? external?.seq ?? 0}`;
+  // Identity = designVersion + round + content digest: re-posting the SAME record
+  // is an idempotent duplicate, while a different record for the same round (or a
+  // record with no round number) can never collide into a TRACE_CONFLICT.
+  const ver = version ? ident(version, 'version')
+    : `${dv}.${external ? 'x' : 'r'}${meta.round ?? external?.seq ?? 0}.${contractContentSha256(content).slice(0, 8)}`;
   return wrap({
     kind: 'review', taskId: id, version: ver, content,
     header: ['里程碑记录，不是授权；被审哈希只来自工具返回。'],
@@ -377,7 +406,8 @@ function link(repo, pr, id) { return `[${id}](https://github.com/${repo}/pull/${
 export function renderProgressBlock(analysis, { repo, prNumber, taskId }) {
   const L = (id) => link(repo, prNumber, id);
   const drafts = analysis.records.filter((r) => r.kind === 'draft' && r.valid).sort((a, b) => compareVersions(a.version, b.version));
-  const reviews = analysis.records.filter((r) => r.kind === 'review' && r.valid).sort((a, b) => compareVersions(a.version, b.version));
+  const reviews = analysis.records.filter((r) => r.kind === 'review' && r.valid)
+    .sort((a, b) => Number(a.commentIds[0]) - Number(b.commentIds[0]));
   const latest = analysis.latestDraft;
   const rows = [];
   const lastReview = reviews[reviews.length - 1] ?? null;
@@ -389,8 +419,9 @@ export function renderProgressBlock(analysis, { repo, prNumber, taskId }) {
   let blockers = '—';
   if (lastReview) {
     const m = lastReview.meta;
-    const boundDraft = m.adjudicatedDesignSha256 ? drafts.find((d) => d.sha256 === m.adjudicatedDesignSha256) : null;
-    const currentness = !m.adjudicatedDesignSha256 ? '未绑定任何设计版本'
+    const boundSha = m.adjudicatedDesignSha256 ?? m.reviewedDesignSha256 ?? null;
+    const boundDraft = boundSha ? drafts.find((d) => d.sha256 === boundSha) : null;
+    const currentness = !boundSha ? '未绑定任何设计版本'
       : !boundDraft ? '被审哈希不对应任何已归档草稿'
         : boundDraft.sha256 === latest?.sha256 ? `针对当前草稿 ${boundDraft.version}` : `针对 ${boundDraft.version}，已过期（当前为 ${latest?.version}）`;
     reviewLine = `${m.source} · ${m.status ?? m.conclusion} · ${currentness} · ${L(lastReview.commentIds[0])}`;
@@ -413,7 +444,7 @@ export function renderProgressBlock(analysis, { repo, prNumber, taskId }) {
   rows.push(['下一动作', next]);
   const hist = [
     ...drafts.map((d) => `| 草稿 | ${d.version} | ${d.sha256.slice(0, 12)} | ${L(d.commentIds[0])} | ${d === latest ? 'current' : 'superseded'}${d.duplicateCommentIds.length ? ' (有重复评论)' : ''}${d.edited ? ' (已编辑)' : ''} |`),
-    ...reviews.map((r) => `| 审查 | ${r.version} | ${(r.meta.adjudicatedDesignSha256 ?? '未绑定').slice(0, 12)} | ${L(r.commentIds[0])} | ${r.meta.status ?? r.meta.conclusion} |`),
+    ...reviews.map((r) => `| 审查 | ${r.version} | ${(r.meta.adjudicatedDesignSha256 ?? r.meta.reviewedDesignSha256 ?? '未绑定').slice(0, 12)} | ${L(r.commentIds[0])} | ${r.meta.status ?? r.meta.conclusion} |`),
   ];
   const invalid = analysis.records.filter((r) => !r.valid).map((r) => `| ${r.kind === 'draft' ? '草稿' : '审查'} | ${r.version} | — | — | invalid (${r.reason}) |`);
   return [
@@ -439,4 +470,30 @@ export function applyProgressBlock(prBody, block) {
   if (b >= 0 && e > b) return `${body.slice(0, b)}${block}${body.slice(e + TRACE_BLOCK_END.length)}`;
   if (b >= 0 || e >= 0) fail('TRACE_BLOCK_CORRUPT', 'PR description has an unpaired reviewloop-trace marker; fix it by hand');
   return `${body.trimEnd()}\n\n${block}\n`;
+}
+
+/**
+ * `verify-archive` with the trace gate. The whole PR trace must be healthy (no
+ * conflict / partial / mismatch / bad author anywhere) AND contain a verified
+ * draft whose hash equals the archived Design. With `requireTrace` any failure
+ * refuses BEFORE a --clean unlink; without it the failure is only a warning
+ * (old tasks). The cleaning run re-verifies everything itself.
+ */
+export async function verifyArchiveWithTrace({ requireTrace = false, clean = false, runGh = defaultRunGh, ...verifyArgs }) {
+  const probe = await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean: false, runGh });
+  let warning = null;
+  try {
+    const trace = await inspectTrace({ repo: verifyArgs.repo, prNumber: verifyArgs.prNumber, taskId: verifyArgs.taskId, runGh });
+    const hasDraft = trace.records.some((r) => r.kind === 'draft' && r.valid && r.sha256 === probe.designSha256);
+    if (!trace.ok) {
+      warning = `TRACE_PROBLEM: the PR trace reports ${trace.problems.map((p) => p.code).join(', ')}`;
+    } else if (!hasDraft) {
+      warning = 'TRACE_ABSENT: no verified UNREVIEWED draft snapshot matches this designSha256 in the PR';
+    }
+  } catch (err) {
+    warning = `TRACE_ABSENT: trace could not be verified (${err?.message ?? err})`;
+  }
+  if (warning && requireTrace) fail('TRACE_REQUIRED', `${warning}; refusing (--require-trace)`);
+  const res = clean ? await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean, runGh }) : probe;
+  return warning ? { ...res, warnings: [...(res.warnings ?? []), warning] } : res;
 }

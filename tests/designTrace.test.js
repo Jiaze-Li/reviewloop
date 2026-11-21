@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   TRACE_BLOCK_BEGIN,
@@ -11,6 +15,7 @@ import {
   inspectTrace,
   renderProgressBlock,
   scanSensitive,
+  verifyArchiveWithTrace,
 } from '../src/reviewloop/designTrace.js';
 import {
   contractContentSha256,
@@ -157,7 +162,7 @@ test('revision keeps v1.0 and its review; the old verdict is shown as expired fo
 test('external report is labelled as relayed, unverified independence, and never authorizes', () => {
   const ext = formatReview({
     taskId: TASK, designVersion: 'v1.0',
-    external: { reviewer: 'Other model', independence: '独立上下文', conclusion: 'NO_BLOCKING', relayedBy: 'owner', seq: 1, report: 'looks fine' },
+    external: { reviewer: 'Other model', independence: '独立上下文', conclusion: 'NO_BLOCKING', relayedBy: 'owner', seq: 1, report: 'looks fine', reviewedDesignSha256: 'd'.repeat(64) },
   });
   const body = ext.comments[0].body;
   assert.match(body, /系统未验证/);
@@ -242,4 +247,114 @@ test('reviewloop trace prepare CLI writes comment files, refuses sensitive text,
   const bad = path.join(dir, 'bad.md');
   fs.writeFileSync(bad, 'see /Users/alice/x');
   await assert.rejects(run('node', [cli, 'trace', ...base, '--file', bad]), (e) => /possible sensitive content/.test(e.stderr));
+});
+
+test('external review needs a real report body and the exact design hash it read', () => {
+  const ok = { reviewer: 'R', independence: 'ctx', conclusion: 'NO_BLOCKING', relayedBy: 'owner', report: 'findings...', reviewedDesignSha256: 'e'.repeat(64) };
+  assert.doesNotThrow(() => formatReview({ taskId: TASK, designVersion: 'v1.0', external: ok }));
+  for (const [field, value] of [['report', ''], ['report', '   '], ['reviewedDesignSha256', undefined], ['reviewedDesignSha256', 'abc'], ['reviewer', ''], ['independence', ''], ['conclusion', ''], ['relayedBy', '']]) {
+    assert.throws(() => formatReview({ taskId: TASK, designVersion: 'v1.0', external: { ...ok, [field]: value } }), (e) => e.code === 'TRACE_INVALID_ARG', `${field}=${JSON.stringify(value)}`);
+  }
+});
+
+test('an external NO_BLOCKING for a hash that matches no archived draft is shown as unbound to any draft', () => {
+  const d = formatDraft(draftArgs('the design'));
+  const ext = formatReview({ taskId: TASK, designVersion: 'v1.0', external: { reviewer: 'R', independence: 'ctx', conclusion: 'NO_BLOCKING', relayedBy: 'o', report: 'x', reviewedDesignSha256: 'f'.repeat(64) } });
+  const a = analyze([...asComments(d), ...asComments(ext)]);
+  assert.match(renderProgressBlock({ ...a, contractRows: [] }, { repo: 'o/r', prNumber: 1, taskId: TASK }), /被审哈希不对应任何已归档草稿/);
+  const good = formatReview({ taskId: TASK, designVersion: 'v1.0', external: { reviewer: 'R', independence: 'ctx', conclusion: 'NO_BLOCKING', relayedBy: 'o', report: 'x', reviewedDesignSha256: d.sha256 } });
+  const b = analyze([...asComments(d), ...asComments(good)]);
+  assert.match(renderProgressBlock({ ...b, contractRows: [] }, { repo: 'o/r', prNumber: 1, taskId: TASK }), /针对当前草稿 v1\.0/);
+});
+
+test('review records of the same round / without a round never collide; an identical re-post is a harmless duplicate', () => {
+  const fail1 = formatReview({ taskId: TASK, designVersion: 'v1.0', errorNote: 'first outage' });
+  const fail2 = formatReview({ taskId: TASK, designVersion: 'v1.0', errorNote: 'second outage' });
+  assert.notEqual(fail1.version, fail2.version);
+  const ext = (n) => formatReview({ taskId: TASK, designVersion: 'v1.0', external: { reviewer: `R${n}`, independence: 'c', conclusion: 'REWORK', relayedBy: 'o', report: `report ${n}`, reviewedDesignSha256: 'a'.repeat(64) } });
+  assert.notEqual(ext(1).version, ext(2).version);
+  const a = analyze([...asComments(fail1), ...asComments(fail2), ...asComments(ext(1)), ...asComments(ext(2)), ...asComments(fail1)]);
+  assert.equal(a.ok, true);
+  assert.equal(a.records.filter((r) => r.kind === 'review' && r.valid).length, 4);
+  assert.equal(a.records.find((r) => r.version === fail1.version).duplicateCommentIds.length, 1);
+});
+
+test('ids and versions that the marker grammar cannot see are refused; header text cannot inject markers', () => {
+  for (const v of ['v1.0 beta', 'v1:2', '', 'v1/2']) {
+    assert.throws(() => formatDraft(draftArgs('x', v)), (e) => e.code === 'TRACE_INVALID_ARG', v);
+  }
+  assert.throws(() => formatDraft({ ...draftArgs('x'), taskId: 'a b' }), (e) => e.code === 'TRACE_INVALID_ARG');
+  assert.throws(() => formatDraft(draftArgs('x', 'v1.0', { changeNote: 'x -->\n<!-- reviewloop-draft:T:v9:begin -->' })), (e) => e.code === 'TRACE_INVALID_ARG');
+  const f = formatDraft(draftArgs('x', 'v1.0', { changeNote: 'line one\nline two', baseline: 'main\nabc' }));
+  const header = f.comments[0].body.split('<!-- reviewloop-draft')[0];
+  assert.ok(header.split('\n').filter((l) => l.trim()).every((l, i) => i === 0 || l.startsWith('> ')), 'every header line stays quoted');
+  assert.equal(analyze(asComments(f)).ok, true);
+});
+
+// ---- verify-archive trace gate ------------------------------------------------
+
+function archiveFixture({ traceComments }) {
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-trace-arch-'));
+  const g = (...a) => execFileSync('git', a, { cwd: repoDir, stdio: 'pipe' });
+  g('init', '-q', '-b', 'main'); g('config', 'user.email', 't@e.x'); g('config', 'user.name', 't');
+  fs.writeFileSync(path.join(repoDir, 'README.md'), '#');
+  g('add', '.'); g('commit', '-qm', 'init');
+  const designText = '# Design\n\n## Options\nA\n\n## Assumptions\nNone\n';
+  const designSha = contractContentSha256(designText);
+  fs.writeFileSync(path.join(repoDir, 'Design-x.md'), designText);
+  const runtimeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-trace-rt-'));
+  fs.mkdirSync(path.join(runtimeDir, 'rl-1'));
+  fs.writeFileSync(path.join(runtimeDir, 'rl-1', 'workflow.json'), JSON.stringify({ reviewLoop: { state: 'PASS', designReview: { reviewTarget: 'Design-x.md', designSha256: designSha, round: 1 } } }));
+  const formatted = formatContractComments({ taskId: TASK, type: 'design', version: 'v1.0', content: designText, designSha256: designSha });
+  const prBody = upsertContractIndex('', { taskId: TASK, type: 'design', version: 'v1.0', commentIds: ['77777'], sha256: designSha, totalParts: 1 });
+  const comments = traceComments(designText);
+  const runGh = async (args) => {
+    if (args[0] === 'pr') return JSON.stringify({ body: prBody, headRefOid: 'a'.repeat(40) });
+    if (args[0] === 'api' && args.includes('--paginate')) return JSON.stringify([comments]);
+    if (args[1]?.endsWith('/77777')) return JSON.stringify({ id: 77777, node_id: 'N7', issue_url: `https://api.github.com/repos/${OWNER}/r/issues/54`, user: { login: OWNER }, body: formatted.comments[0].body });
+    return JSON.stringify({ data: { node: { lastEditedAt: null, userContentEdits: { totalCount: 0 } } } });
+  };
+  const args = { cwd: repoDir, repo: `${OWNER}/r`, prNumber: 54, taskId: TASK, loopId: 'rl-1', runtimeDir, runGh };
+  return { args, file: path.join(repoDir, 'Design-x.md') };
+}
+
+test('verify-archive --require-trace: a matching verified draft passes and --clean then removes the file', async () => {
+  const fx = archiveFixture({ traceComments: (t) => asComments(formatDraft(draftArgs(t))) });
+  const res = await verifyArchiveWithTrace({ ...fx.args, requireTrace: true, clean: true });
+  assert.equal(res.cleaned, true);
+  assert.equal(fs.existsSync(fx.file), false);
+});
+
+test('verify-archive --require-trace refuses when the trace reports ANY conflict, even with a matching draft, and --clean deletes nothing', async () => {
+  const fx = archiveFixture({
+    traceComments: (t) => {
+      const good = asComments(formatDraft(draftArgs(t)));
+      const conflicting = asComments(formatDraft(draftArgs('some other v1.1 text', 'v1.1')));
+      const conflicting2 = asComments(formatDraft(draftArgs('yet another v1.1 text', 'v1.1')));
+      return [...good, ...conflicting, ...conflicting2];
+    },
+  });
+  await assert.rejects(() => verifyArchiveWithTrace({ ...fx.args, requireTrace: true, clean: true }), (e) => e.code === 'TRACE_REQUIRED' && /TRACE_CONFLICT/.test(e.message));
+  assert.equal(fs.existsSync(fx.file), true, 'the design file must survive a refused --clean');
+});
+
+test('verify-archive --require-trace refuses a missing draft; without the flag it only warns and still cleans', async () => {
+  const none = archiveFixture({ traceComments: () => [] });
+  await assert.rejects(() => verifyArchiveWithTrace({ ...none.args, requireTrace: true, clean: true }), (e) => e.code === 'TRACE_REQUIRED' && /TRACE_ABSENT/.test(e.message));
+  assert.equal(fs.existsSync(none.file), true);
+  const legacy = archiveFixture({ traceComments: () => [] });
+  const res = await verifyArchiveWithTrace({ ...legacy.args, requireTrace: false, clean: true });
+  assert.equal(res.cleaned, true);
+  assert.ok(res.warnings.some((w) => w.startsWith('TRACE_ABSENT')));
+});
+
+test('verify-archive --require-trace refuses a partial or tampered trace elsewhere in the PR', async () => {
+  const fx = archiveFixture({
+    traceComments: (t) => {
+      const good = asComments(formatDraft(draftArgs(t)));
+      const long = asComments(formatDraft(draftArgs(`# L\n${'x\n'.repeat(900)}`, 'v1.1', { maxCharsPerPart: 800 })));
+      return [...good, ...long.slice(0, 1)];
+    },
+  });
+  await assert.rejects(() => verifyArchiveWithTrace({ ...fx.args, requireTrace: true }), (e) => e.code === 'TRACE_REQUIRED' && /TRACE_PARTIAL/.test(e.message));
 });

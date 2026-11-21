@@ -56,7 +56,7 @@ import {
   verifyDesignArchiveAndCleanupReady,
 } from '../src/reviewloop/prContract.js';
 import {
-  analyzeComments, applyProgressBlock, formatDraft, formatReview, inspectTrace, renderProgressBlock,
+  analyzeComments, applyProgressBlock, formatDraft, formatReview, inspectTrace, renderProgressBlock, verifyArchiveWithTrace,
 } from '../src/reviewloop/designTrace.js';
 
 async function listSessions() {
@@ -570,7 +570,7 @@ async function handleTraceCommand(rest) {
           external: {
             reviewer: need('--reviewer'), independence: need('--independence'), conclusion: need('--conclusion'),
             relayedBy: need('--relayed-by'), seq: flagValue(args, '--seq') ?? '1',
-            reviewedDesignSha256: flagValue(args, '--reviewed-sha'),
+            reviewedDesignSha256: need('--reviewed-sha'),
             report: await readFile(need('--report-file'), 'utf8'),
           },
         });
@@ -709,7 +709,7 @@ async function handleContractCommand(rest) {
     if (!repo || !prNumber || !taskId) {
       throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--require-trace] [--json]');
     }
-    const verifyArgs = {
+    const res = await verifyArchiveWithTrace({
       cwd,
       repo,
       prNumber: Number(prNumber),
@@ -718,23 +718,9 @@ async function handleContractCommand(rest) {
       loopId,
       reviewTarget,
       allowedAuthors: authors.length ? authors : null,
-    };
-    // Trace check first (read-only verify), so a missing draft snapshot can
-    // refuse BEFORE any --clean unlink. Without --require-trace it only warns.
-    const probe = await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean: false });
-    let traceWarning = null;
-    try {
-      const trace = await inspectTrace({ repo, prNumber, taskId });
-      const hasDraft = trace.records.some((r) => r.kind === 'draft' && r.valid && r.sha256 === probe.designSha256);
-      if (!hasDraft) traceWarning = 'TRACE_ABSENT: no verified UNREVIEWED draft snapshot matches this designSha256 in the PR';
-    } catch (err) {
-      traceWarning = `TRACE_ABSENT: trace could not be verified (${err?.message ?? err})`;
-    }
-    if (traceWarning && args.includes('--require-trace')) {
-      throw new Error(`${traceWarning}; refusing (--require-trace)`);
-    }
-    const res = clean ? await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean }) : probe;
-    if (traceWarning) res.warnings = [...(res.warnings ?? []), traceWarning];
+      clean,
+      requireTrace: args.includes('--require-trace'),
+    });
     const source = res.authority === 'HUMAN_EXCEPTION'
       ? `Design source: HUMAN-AUTHORIZED EXCEPTION ${res.exceptionId} — NOT a ReviewLoop Design PASS (original review loop ${res.loopId} is unchanged).`
       : `Design source: ReviewLoop Design PASS (loop ${res.loopId}).`;
