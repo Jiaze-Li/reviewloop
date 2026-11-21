@@ -38,12 +38,12 @@ const TRANSITIONS = Object.freeze({
   REWORK: ['REVIEWING', 'STOPPED', 'FAILED'],
   SUPERVISING: ['REWORK', 'REVIEWING', 'HUMAN_REQUIRED', 'FAILED', 'STOPPED'],
   PASS: [],
-  // A HUMAN_REQUIRED from a TRANSIENT/infra failure (a chunk-review crash, a
-  // provider blip, GitHub unreachable) is resumed by re-calling
-  // reviewloop_review with the durable checkpoint. A HUMAN_REQUIRED from the
-  // convergence policy is truly terminal only after the Reviewer epochs plus
-  // Supervisor escalations are exhausted; budgetExhausted then latches and the
-  // controller refuses to re-enter.
+  // HUMAN_REQUIRED is a HARD STOP enforced by the controller (not by this table):
+  // an ordinary reviewloop_review call - even a transient/infra failure's retry -
+  // is refused read-only. The loop re-enters REVIEWING only through a human
+  // action (a re-review authorization bound to the exact stop and submission, or
+  // an acknowledgement / raised ceiling recorded after the stop). The table keeps
+  // the edge because that human-released review is the one legal way back.
   HUMAN_REQUIRED: ['REVIEWING'],
   FAILED: [],
   STOPPED: [],
@@ -113,7 +113,7 @@ export function initialLoopState(objective) {
   };
 }
 
-export function recordTransition(loopState, to, reason) {
+export function recordTransition(loopState, to, reason, cause = null) {
   const from = loopState.state;
   if (from === to) {
     loopState.updatedAt = new Date().toISOString();
@@ -126,7 +126,11 @@ export function recordTransition(loopState, to, reason) {
   loopState.updatedAt = new Date().toISOString();
   loopState.history = [
     ...(loopState.history ?? []),
-    { from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt },
+    {
+      from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt,
+      // Optional engine-written structured stop cause (see stopCause.js); absent on old entries.
+      ...(cause ? { cause } : {}),
+    },
   ];
   return loopState;
 }

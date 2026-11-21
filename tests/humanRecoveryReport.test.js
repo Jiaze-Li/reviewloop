@@ -19,10 +19,10 @@ const dispatched = new Set([...cliSource.matchAll(/case '([a-z-]+)':/g)].map((m)
 const T0 = '2026-11-20T01:00:00.000Z';
 const T1 = '2026-11-20T02:00:00.000Z';
 
-function loopWith({ reason, from = 'REVIEWING', extra = {} }) {
+function loopWith({ reason, from = 'REVIEWING', extra = {}, cause = null }) {
   return {
     loopId: 'rl-x', state: 'HUMAN_REQUIRED', round: 4, objective: { mode: 'LOCAL', taskType: 'code' },
-    history: [{ from, to: 'HUMAN_REQUIRED', reason, round: 4, at: T0 }], ...extra,
+    history: [{ from, to: 'HUMAN_REQUIRED', reason, round: 4, at: T0, ...(cause ? { cause } : {}) }], ...extra,
   };
 }
 function report(loop, workflowExtra = {}, env = {}) {
@@ -41,7 +41,7 @@ const SCENARIOS = {
   CONVERGENCE_EXHAUSTED: () => report(loopWith({ reason: 'review did not converge', extra: { budgetExhausted: true } })),
   NO_NEW_INFORMATION: () => report(loopWith({ reason: 'NO_NEW_INFORMATION_MODEL_SPEND_BLOCKED' })),
   ATTRIBUTION_INCOMPLETE: () => report(loopWith({ reason: 'baseline attribution incomplete' })),
-  REVIEW_FAILED: () => report(loopWith({ reason: 'review failed: provider timeout' })),
+  REVIEW_FAILED: () => report(loopWith({ reason: 'review failed: provider timeout', cause: { v: 1, kind: 'REVIEW_TOOL_FAILED', source: 'ENGINE', resume: 'HUMAN_AUTHORIZATION' } })),
   TASK_DEFINITION: () => report(loopWith({ reason: 'task definition fingerprint mismatch' })),
   SUPERVISOR_ESCALATION: () => report(loopWith({ reason: 'Supervisor says a product decision is needed', from: 'SUPERVISING', extra: { budgetExhausted: true } })),
   CANCELLED: () => report(loopWith({ reason: 'review cancelled by caller' })),

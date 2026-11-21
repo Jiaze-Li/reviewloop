@@ -12,6 +12,7 @@ import {
 import { reviewStatusLine } from '../src/reviewloop/statusLine.js';
 import { toolResultContent } from '../src/mcp/reviewloopMcpServer.js';
 import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
+import { authorizeRereview } from '../src/reviewloop/rereviewAuthorization.js';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
   DEFAULT_ROLE_POLICY, PRODUCTION_ROLE_CAPABILITIES, RoleRouter, QuotaPoolRegistry, ProviderHealthRegistry,
@@ -48,10 +49,10 @@ const EXITS = [
   ['ATTRIBUTION_INCOMPLETE', 'baseline attribution incomplete', {}],
   ['ATTRIBUTION_INCOMPLETE', 'the deterministic Gate ran and the post-Gate Worker delta could not be re-collected safely: x', {}],
   ['CANCELLED', 'review cancelled by caller', {}],
-  ['REVIEW_FAILED', 'review failed: transport timeout', {}],
+  ['REVIEW_FAILED', 'review failed: transport timeout', { history: [{ from: 'REVIEWING', to: 'HUMAN_REQUIRED', reason: 'review failed: transport timeout', round: 3, at: 'T', cause: { v: 1, kind: 'REVIEW_TOOL_FAILED', source: 'ENGINE', resume: 'HUMAN_AUTHORIZATION' } }] }],
   ['DESIGN_ROUNDS', 'design review round budget (3) is spent', {}],
   ['CONVERGENCE_EXHAUSTED', 'review did not converge', { budgetExhausted: true }],
-  ['SUPERVISOR_ESCALATION', 'supervisor recommends human decision', {}],
+  ['SUPERVISOR_ESCALATION', 'supervisor recommends human decision', { history: [{ from: 'SUPERVISING', to: 'HUMAN_REQUIRED', reason: 'supervisor recommends human decision', round: 3, at: 'T' }] }],
   ['UNACCOUNTED_SPEND', 'model spend blocked: MODEL_SPEND_USAGE_UNRESOLVED (x)', {}],
   ['SPEND_CEILING', 'model spend blocked: SPEND_DENIED usage-volume ceiling', {}],
   ['CALL_CEILING', 'model spend blocked: reviewer call ceiling reached', {}],
@@ -293,6 +294,12 @@ test('controller: HUMAN_REQUIRED carries report + cause in statusLine; human ack
   assert.equal(same.humanRequiredReport.category, 'NO_NEW_INFORMATION');
   // The Worker changes the code (what the report asked for) -> normal review resumes.
   delta.fingerprint = 'd2'; delta.diff = 'y';
+  // Changed content alone does NOT release a hard stop: the call is refused read-only.
+  const refused = await controller.review({ loopId });
+  assert.equal(refused.status, 'HUMAN_REQUIRED');
+  assert.equal(refused.hardStop, true);
+  assert.ok(refused.submissionDigest);
+  await authorizeRereview({ persistence, loopId, submission: refused.submissionDigest, reason: 'code was changed as the report asked' });
   const r2 = await controller.review({ loopId });
   assert.equal(r2.loopId, loopId);
   assert.notEqual(r2.status, 'PASS');
