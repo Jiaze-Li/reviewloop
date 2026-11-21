@@ -560,7 +560,9 @@ async function handleTraceCommand(rest) {
         baseline: flagValue(args, '--baseline'),
         changeNote: flagValue(args, '--note'),
         findingResponses: flagValues(args, '--finding-response'),
-        onlyParts: parts ? parts.split(',').map(Number) : null,
+        onlyParts: parts == null ? null : (/^\d+(,\d+)*$/.test(parts)
+          ? [...new Set(parts.split(',').map(Number))]
+          : (() => { throw new Error(`--parts must be comma-separated part numbers like 2,3 (got ${JSON.stringify(parts)})`); })()),
       });
     } else if (kind === 'review') {
       const designVersion = need('--design-version');

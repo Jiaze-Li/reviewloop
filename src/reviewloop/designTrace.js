@@ -125,6 +125,13 @@ function wrap({ kind, taskId, version, content, header, trailerLabel, maxCharsPe
   const chunks = splitContractText(trimmed, maxCharsPerPart);
   const total = chunks.length;
   const banner = kind === 'draft' ? DRAFT_BANNER : REVIEW_BANNER;
+  if (onlyParts != null) {
+    // A top-up of selected parts must name real parts; anything else would emit
+    // nothing while looking like success.
+    const bad = !Array.isArray(onlyParts) || onlyParts.length === 0
+      || onlyParts.some((n) => !Number.isInteger(n) || n < 1 || n > total);
+    if (bad) fail('TRACE_INVALID_ARG', `onlyParts must be a non-empty list of integers between 1 and ${total} (this record has ${total} part${total > 1 ? 's' : ''})`);
+  }
   const comments = chunks.map((chunk, idx) => {
     const part = idx + 1;
     const tag = total > 1 ? `:part=${part}/${total}` : '';

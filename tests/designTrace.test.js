@@ -358,3 +358,30 @@ test('verify-archive --require-trace refuses a partial or tampered trace elsewhe
   });
   await assert.rejects(() => verifyArchiveWithTrace({ ...fx.args, requireTrace: true }), (e) => e.code === 'TRACE_REQUIRED' && /TRACE_PARTIAL/.test(e.message));
 });
+
+test('onlyParts must name real parts: NaN, zero, out-of-range and empty selections are refused, never silently empty', () => {
+  const text = `# D\n${'line of design text\n'.repeat(200)}`;
+  const base = draftArgs(text, 'v1.0', { maxCharsPerPart: 1000 });
+  const total = formatDraft(base).totalParts;
+  assert.ok(total >= 3);
+  for (const bad of [[], [Number.NaN], [0], [total + 1], [1.5], ['2']]) {
+    assert.throws(() => formatDraft({ ...base, onlyParts: bad }), (e) => e.code === 'TRACE_INVALID_ARG', JSON.stringify(bad));
+  }
+  assert.equal(formatDraft({ ...base, onlyParts: [2, total] }).comments.length, 2);
+});
+
+test('trace prepare CLI rejects a malformed --parts value instead of exiting 0 with no files', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-trace-parts-'));
+  const file = path.join(dir, 'd.md');
+  fs.writeFileSync(file, '# Design\nok\n');
+  const base = ['trace', 'prepare', '--kind', 'draft', '--task-id', TASK, '--version', 'v1.0', '--policy-sha', 'reviewloop@x',
+    '--plan-version', 'v1.0', '--plan-sha', PLAN_SHA, '--file', file, '--out-dir', path.join(dir, 'out'), '--json'];
+  const cli0 = [path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'bin', 'reviewloop.js')];
+  for (const bad of ['1,x', '', '1-2', '9']) {
+    await assert.rejects(run('node', [...cli0, ...base, '--parts', bad]), (e) => e.code !== 0, bad);
+  }
+  assert.equal(fs.existsSync(path.join(dir, 'out')), false, 'nothing was written');
+});
