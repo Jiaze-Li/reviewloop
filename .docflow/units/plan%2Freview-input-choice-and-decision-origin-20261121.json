@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T07:12:41.572Z",
+  "updatedAt": "2026-11-21T07:12:45.083Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -36,7 +36,7 @@
       "title": "plan: distinguish Jack decisions from AI comments and choose review input architecture",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/71",
       "merged": false,
-      "updatedAt": "2026-11-21T01:41:44Z"
+      "updatedAt": "2026-11-21T07:12:34Z"
     },
     "completed": null,
     "outcome": null
