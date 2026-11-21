@@ -7,7 +7,9 @@ import { createBeginTask } from './taskBegin.js';
 import { createReviewerRunner } from './reviewerRunner.js';
 import { reviewStatusLine } from './statusLine.js';
 import { buildReviewRecord } from './reviewRecord.js';
-import { safeBuildHumanRequiredReport } from './humanRequiredReport.js';
+import { safeBuildHumanRequiredReport, activeBlockers as reportActiveBlockers, humanActions } from './humanRequiredReport.js';
+import { computeSubmissionDigest } from './submissionDigest.js';
+import { usableGrant } from './rereviewAuthorization.js';
 import { readLoopWorkflow } from './humanActionGuard.js';
 import {
   createDesignTwoStageRunner, decideDesignTransition, finalizePassComment, initialDesignTwoStageState, DESIGN_LIMITS,
@@ -69,7 +71,7 @@ import {
 } from './phaseState.js';
 import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 import { parsePositiveInt } from './settingsFile.js';
-import { buildStopCause, STOP_KINDS } from './stopCause.js';
+import { buildStopCause, STOP_KINDS, PROVIDER_FAILURE_CODES } from './stopCause.js';
 import { DESIGN_SOURCE_LIMIT_REASON } from './designExceptionState.js';
 import { DesignTargetError, readReviewTarget, assertTargetWithinOneChunk } from './designTarget.js';
 import {
@@ -542,6 +544,23 @@ export function createReviewLoopController({
       return terminalResult(loopState);
     }
 
+    // ---- HARD STOP (Plan R04 / AC-05) ---------------------------------------------
+    // A loop stopped at HUMAN_REQUIRED is stopped FOR A HUMAN. An ordinary review
+    // call - unchanged content, changed content, repeated, NO_PROGRESS-shaped, or with
+    // invalid arguments - is answered read-only here: no Gate, no model call, no
+    // state write, no spend. It is released only by (a) an unconsumed human
+    // re-review grant bound to this exact stop AND this exact submission, or (b) a
+    // human action recorded after the stop (acknowledgements, raised ceilings) with
+    // no independent safety stop still in force.
+    let releasedByGrant = null;
+    let heldImage = null;
+    if (loopState.state === REVIEW_LOOP_STATES.HUMAN_REQUIRED) {
+      const hold = await evaluateHardStop({ loopState });
+      if (!hold.release) return hold.result;
+      releasedByGrant = hold.grant;
+      if (releasedByGrant) heldImage = JSON.parse(JSON.stringify(loopState));
+    }
+
     try {
       // Upgrade-safe task-definition preflight. New begins enforce these bounds
       // before repository work, but an in-flight objective frozen by an older
@@ -575,7 +594,62 @@ export function createReviewLoopController({
     // completed phase, objective or task-wide spend counter.
     loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
 
-    return reviewLocal({ loopState, evidence, signal, onHeartbeat });
+    if (!releasedByGrant) return reviewLocal({ loopState, evidence, signal, onHeartbeat });
+
+    // Released by a grant: the stop is only really lifted once a model call is
+    // actually paid for. A Gate failure / evidence stop / no-progress answer spent
+    // nothing, so the loop is put back EXACTLY as it was (still HUMAN_REQUIRED, grant
+    // unconsumed); otherwise the grant is marked consumed.
+    const spendMark = async () => {
+      const wf = await persistence.readWorkflowState(loopState.loopId);
+      const reservations = wf?.modelSpendReservations && typeof wf.modelSpendReservations === 'object' ? Object.keys(wf.modelSpendReservations).length : 0;
+      const records = Array.isArray(wf?.reviewLoopSpend?.records) ? wf.reviewLoopSpend.records.length : 0;
+      return reservations + records;
+    };
+    const markBefore = await spendMark();
+    const out = await reviewLocal({ loopState, evidence, signal, onHeartbeat });
+    const spent = (await spendMark()) > markBefore;
+    const fresh = await loadLoop(loopState.loopId);
+    if (!spent) {
+      await saveLoop(heldImage);
+      return out;
+    }
+    fresh.rereviewGrants = (fresh.rereviewGrants ?? []).map((g) => (g?.id === releasedByGrant.id ? { ...g, consumedAt: new Date().toISOString() } : g));
+    await saveLoop(fresh);
+    return out;
+  }
+
+  // Read-only decision for a HUMAN_REQUIRED loop. Never writes, never calls a model.
+  async function evaluateHardStop({ loopState }) {
+    const objective = loopState.objective ?? {};
+    let workflow = null;
+    try { workflow = await persistence.readWorkflowState(loopState.loopId); } catch { workflow = null; }
+    const stop = [...(loopState.history ?? [])].reverse().find((h) => h?.to === 'HUMAN_REQUIRED') ?? null;
+    const stopMs = Date.parse(stop?.at ?? '');
+    // (b) an auditable human action after the stop, with no safety stop in force.
+    if (workflow && Number.isFinite(stopMs)) {
+      const acts = humanActions(workflow, stopMs);
+      if (acts.length > 0) {
+        const blockers = reportActiveBlockers({ loop: loopState, workflow, fromSupervisor: stop?.from === 'SUPERVISING', env });
+        if (!blockers.unreadable && blockers.list.length === 0) return { release: true, grant: null };
+      }
+    }
+    // (a) a grant bound to this stop and this exact submission.
+    const sub = await computeSubmissionDigest({ loop: loopState, collectWorkerDeltaFn });
+    const grant = sub.ok ? usableGrant({ loop: loopState, submissionDigest: sub.digest }) : null;
+    if (grant) return { release: true, grant };
+    return {
+      release: false,
+      result: {
+        status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
+        terminal: false, hardStop: true,
+        ...(sub.ok ? { submissionDigest: sub.digest } : { submissionDigestUnavailable: sub.reason }),
+        reason: 'this task is stopped for a human decision. Calling review again changes nothing and spends nothing: '
+          + 'report to the user and stop. Only the user can release it (see the report for the exact command).',
+        lastReview: compactLastReview(loopState),
+        telemetry: await durableTelemetry(loopState.loopId), safetyEvents: safetyEventsForReview(),
+      },
+    };
   }
 
   // ---- Reviewer over full attributed evidence (bounded or chunked) --------
@@ -1756,7 +1830,14 @@ export function createReviewLoopController({
     const detail = err?.code && err?.message && err.code !== err.message
       ? `${err.code} (${err.message})`
       : (err?.code ?? err?.message ?? err);
-    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${detail}`, buildStopCause({ kind: STOP_KINDS.SPEND_BLOCKED, code: 'SPEND_BLOCKED' }));
+    recordTransition(
+      loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${detail}`,
+      // A denial carrying an engine provider-failure code is the review TOOL failing;
+      // every other denial (ceilings, unresolved spend, sentinel) stays a spend stop.
+      PROVIDER_FAILURE_CODES.includes(err?.code)
+        ? buildStopCause({ kind: STOP_KINDS.REVIEW_TOOL_FAILED, code: err.code })
+        : buildStopCause({ kind: STOP_KINDS.SPEND_BLOCKED, code: 'SPEND_BLOCKED' }),
+    );
     try { await saveLoop(loopState); } catch { /* best effort; the returned status still reflects intent */ }
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,

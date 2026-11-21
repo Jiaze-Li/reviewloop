@@ -4,6 +4,7 @@
 // reconstructs the durable physical-call record from existing spend logs,
 // even when an earlier process has already reviewed a diff chunk.
 
+import { releaseHardStop } from './helpers/humanRelease.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
@@ -62,6 +63,7 @@ test('chunk 0 dispatched pre-crash -> resume never re-dispatches it, and its phy
   // log now.
   failChunk1 = false;
   const beforeResume = { ...callsByChunk };
+  await releaseHardStop({ controller: build(), persistence, loopId });
   const r2 = await build().review({ loopId });
   assert.equal(r2.status, 'PASS');
   assert.equal(callsByChunk[0], beforeResume[0], 'chunk 0 was NOT re-dispatched to the provider on resume');

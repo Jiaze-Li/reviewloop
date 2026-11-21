@@ -12,6 +12,7 @@ import {
 import { reviewStatusLine } from '../src/reviewloop/statusLine.js';
 import { toolResultContent } from '../src/mcp/reviewloopMcpServer.js';
 import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
+import { authorizeRereview } from '../src/reviewloop/rereviewAuthorization.js';
 import { createReviewLoopController } from '../src/reviewloop/controller.js';
 import {
   DEFAULT_ROLE_POLICY, PRODUCTION_ROLE_CAPABILITIES, RoleRouter, QuotaPoolRegistry, ProviderHealthRegistry,
@@ -293,6 +294,12 @@ test('controller: HUMAN_REQUIRED carries report + cause in statusLine; human ack
   assert.equal(same.humanRequiredReport.category, 'NO_NEW_INFORMATION');
   // The Worker changes the code (what the report asked for) -> normal review resumes.
   delta.fingerprint = 'd2'; delta.diff = 'y';
+  // Changed content alone does NOT release a hard stop: the call is refused read-only.
+  const refused = await controller.review({ loopId });
+  assert.equal(refused.status, 'HUMAN_REQUIRED');
+  assert.equal(refused.hardStop, true);
+  assert.ok(refused.submissionDigest);
+  await authorizeRereview({ persistence, loopId, submission: refused.submissionDigest, reason: 'code was changed as the report asked' });
   const r2 = await controller.review({ loopId });
   assert.equal(r2.loopId, loopId);
   assert.notEqual(r2.status, 'PASS');

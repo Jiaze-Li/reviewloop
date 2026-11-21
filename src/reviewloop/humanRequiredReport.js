@@ -20,6 +20,7 @@ import {
 } from './humanActionGuard.js';
 import { DESIGN_SOURCE_LIMIT_REASON, evaluateDesignException } from './designExceptionState.js';
 import { resolveStopCause, isTrustedToolFailure, STOP_KINDS } from './stopCause.js';
+import { rereviewPrecondition, STANDARD_REREVIEW_GRANTS } from './rereviewAuthorization.js';
 
 export const REPORT_VERSION = 1;
 export const HEADLINE_MAX = 120;
@@ -138,8 +139,11 @@ export function classify({ loop, workflow, reason, result = null, env = process.
   const acks = Array.isArray(workflow?.[TOKEN_ANOMALY_ACKS_KEY]) ? workflow[TOKEN_ANOMALY_ACKS_KEY] : [];
   // Trusted structured cause (engine-written or closed legacy template with state
   // corroboration). Model/label text never decides a privileged category.
-  const stopCause = resolveStopCause({ loop, blockers: activeBlockers({ loop, workflow, fromSupervisor, env }) });
-  const trustedToolFailure = isTrustedToolFailure(stopCause);
+  const blockersNow = activeBlockers({ loop, workflow, fromSupervisor, env });
+  const stopCause = resolveStopCause({ loop, blockers: blockersNow });
+  // An independent safety stop that is STILL in force outranks a tool-failure label:
+  // fall through to the state-derived classification below.
+  const trustedToolFailure = isTrustedToolFailure(stopCause) && !blockersNow.unreadable && blockersNow.list.length === 0;
   const tokenText = !trustedToolFailure && /TOKEN_ANOMALY|token anomaly/i.test(reason);
   const ackedLatch = Boolean(latch) && latch.tripped !== true && acks.some((a) => String(a?.latchAt) === String(latch.at));
   if (latch?.tripped === true || (tokenText && !ackedLatch)) return { category: 'TOKEN_SENTINEL', checked, ctx };
@@ -314,10 +318,14 @@ function buildRepeated(loopId, workflow) {
 
 // ---- per-category static knowledge ----------------------------------------
 
-function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null }) {
+function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null, rereviewCommand = null }) {
   const latchAt = workflow?.[TOKEN_ANOMALY_KEY]?.at ?? '<报告中的触发时间>';
   const profile = `reviewloop profile --loop ${loopId}`;
-  const retry = '修复原因后，让 Worker 用同一个任务再次发起审查';
+  // A Worker re-calling review on a stopped task is refused read-only (no cost), so
+  // the only honest "try again" is the user's own authorization - or none at all.
+  const retry = rereviewCommand
+    ? '由你本人授权重新审查（运行下方命令）；Worker 自己再次调用会被直接拒绝，不会消耗额度'
+    : '当前没有可用的重新审查入口：由你决定终止该任务，或改用其他处理方式（Worker 自己再次调用会被直接拒绝）';
   const acksDone = Array.isArray(workflow?.[TOKEN_ANOMALY_ACKS_KEY]) ? workflow[TOKEN_ANOMALY_ACKS_KEY].length : 0;
   const reopensDone = Array.isArray(loop?.humanReopens) ? loop.humanReopens.length : 0;
   // Past the standard count a confirmation is still possible, but it must state a
@@ -340,6 +348,7 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
       recommended: '如果替代审查报告没有阻断问题，由你本人运行下方命令授权进入 Code；原审查记录保持“未通过”，不会被改写',
       choices: [exceptionChoice, '先修复审查工具后重新审查（需要你明确指令）', '终止该任务'],
       command: exceptionCommand,
+      extraFix: rereviewCommand ? [`或在修复审查工具后，由你本人授权重新审查这份设计：${rereviewCommand}`] : [],
     },
     TOKEN_SENTINEL: {
       paused: ['该任务后续所有模型审查调用已被暂停'],
@@ -388,23 +397,23 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
     NO_NEW_INFORMATION: {
       paused: ['本次审查没有发送：送审内容与已审查过的完全相同，重复发送不会得到新信息，只会消耗额度'],
       fixOptions: ['让 Worker 对代码或证据做出实质修改（例如缩小送审内容、修复已知问题）后再审', '重复、重试、切换提供商都不算新信息，不会被放行'],
-      recommended: '先改动内容再审；这道关卡独立于其他人工确认，不会因为确认过其他异常而解除',
-      choices: ['让 Worker 修改后再审', '终止该任务'],
-      command: null,
+      recommended: '先改动内容；然后由你本人授权重新审查（这道关卡独立于其他人工确认，不会因为确认过其他异常而解除）',
+      choices: ['让 Worker 修改后，由我授权重新审查', '终止该任务'],
+      command: rereviewCommand,
     },
     ATTRIBUTION_INCOMPLETE: {
       paused: ['审查已暂停，因为无法可靠区分本次改动与之前已有的改动'],
       fixOptions: ['让工作区状态保持清晰（提交或暂存无关改动）', retry],
       recommended: retry,
       choices: ['整理工作区后继续', '终止该任务'],
-      command: null,
+      command: rereviewCommand,
     },
     REVIEW_FAILED: {
       paused: ['本轮独立审查没有完成，没有得出任何通过结论'],
-      fixOptions: ['查看下方原因，如是临时的提供商/网络问题，稍后重试', '如是输出格式问题，检查送审内容是否过大'],
+      fixOptions: ['查看下方原因：如是临时的提供商/网络问题，等问题消除后由你授权重新审查', '如是输入过大或回复不完整，缩小送审内容（不会被自动裁剪或原样重试）'],
       recommended: retry,
-      choices: isNewDesignLoop ? ['稍后重试审查', exceptionChoice, '终止该任务'] : ['稍后重试审查', '终止该任务'],
-      command: null,
+      choices: isNewDesignLoop ? ['授权重新审查', exceptionChoice, '终止该任务'] : ['授权重新审查', '终止该任务'],
+      command: rereviewCommand,
       extraFix: isNewDesignLoop ? [`如果审查工具持续无法完成，可改用替代独立审查，由你本人授权（人工授权例外，不是审查通过）：${exceptionCommand}`] : [],
     },
     TASK_DEFINITION: {
@@ -427,7 +436,7 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
       fixOptions: [retry],
       recommended: retry,
       choices: ['继续审查', '终止该任务'],
-      command: null,
+      command: rereviewCommand,
     },
     RESUME_PENDING: {
       paused: ['无（此前的阻断已由人工处理，该事件不再阻断）'],
@@ -454,7 +463,7 @@ function categoryPlan(category, { loopId, workflow, loop = null, stateDir = null
       fixOptions: [`查看任务的调用记录（${profile}）`, '根据原因文本判断是临时问题还是需要改变做法'],
       recommended: '先查看下面列出的已检查项与最小下一步，再决定',
       choices: ['处理后继续', '终止该任务'],
-      command: null,
+      command: rereviewCommand,
     },
   };
   return plans[category] ?? plans.OTHER;
@@ -466,7 +475,19 @@ export function buildHumanRequiredReport({ loopId, loop, workflow, result = null
   const reason = lastHumanRequiredReason(loop, result);
   const { category, checked, ctx } = classify({ loop, workflow, reason, result, env });
   const stateDir = clip(result?.stateUnreadable?.dir, 300) || null;
-  const plan = categoryPlan(category, { loopId, workflow, loop, stateDir });
+  // The re-review command is offered only when its own preconditions hold right now
+  // (the same dry-run the action itself uses), so a recommended command is never one
+  // that would be refused.
+  const reviewPre = loop && workflow ? rereviewPrecondition({ loop, workflow, env }) : { ok: false };
+  const grantsDone = Array.isArray(loop?.rereviewGrants) ? loop.rereviewGrants.length : 0;
+  const rereviewCommand = reviewPre.ok
+    ? `reviewloop authorize-rereview --loop ${loopId} --submission ${result?.submissionDigest ?? '<Worker 被拒绝时返回的 submissionDigest>'} --reason "<你的决定/修复说明>"${grantsDone >= STANDARD_REREVIEW_GRANTS ? ' --max-reviewer-calls <本次最多允许的审查调用数>' : ''}`
+    : null;
+  let plan = categoryPlan(category, { loopId, workflow, loop, stateDir, rereviewCommand });
+  // Whatever the category's own exit is, a valid re-review authorization is always listed.
+  if (rereviewCommand && !JSON.stringify(plan).includes(rereviewCommand)) {
+    plan = { ...plan, extraFix: [...(plan.extraFix ?? []), `或由你本人授权重新审查（只放行当前这一版内容）：${rereviewCommand}`] };
+  }
 
   const confirmed = [];
   const probable = [];

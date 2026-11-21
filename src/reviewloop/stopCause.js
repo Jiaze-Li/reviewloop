@@ -34,6 +34,14 @@ export const STOP_SOURCES = Object.freeze({
   UNKNOWN: 'UNKNOWN',
 });
 
+// Engine-defined failure codes of the review/provider transports (never model
+// text). A model-spend denial that carries one of these is the review TOOL failing.
+export const PROVIDER_FAILURE_CODES = Object.freeze([
+  'PROVIDER_UNAVAILABLE', 'PROVIDER_TIMEOUT', 'PROVIDER_RATE_LIMITED', 'PROVIDER_QUOTA_EXHAUSTED',
+  'PROVIDER_PROTOCOL_ERROR', 'PROVIDER_AUTH_FAILED', 'EXECUTOR_TIMEOUT', 'AGY_ENOENT', 'AGY_SPAWN_FAILED',
+  'AGY_NETWORK_UNAVAILABLE',
+]);
+
 const KNOWN_KINDS = new Set(Object.values(STOP_KINDS));
 const DETAIL_MAX = 200;
 
@@ -106,6 +114,18 @@ function resolveLegacy(entry, { blockers, loop }) {
     return { kind: null, source: STOP_SOURCES.UNKNOWN };
   }
   if (reason.startsWith(LEGACY_SPEND_PREFIX)) {
+    // "model spend blocked: <CODE> (...)": an engine-enum provider failure code is a tool failure
+    // (same corroboration as above); any other code stays a spend stop.
+    const code = /^model spend blocked: ([A-Z_]+)(?: |$)/.exec(reason)?.[1] ?? null;
+    if (code && PROVIDER_FAILURE_CODES.includes(code)) {
+      const supervisorSaidHuman = String(loop?.lastSupervisorRecommendation ?? '').toUpperCase() === 'HUMAN_REQUIRED';
+      const corroborated = entry.from === 'REVIEWING'
+        && blockers && blockers.unreadable !== true && Array.isArray(blockers.list) && blockers.list.length === 0
+        && !supervisorSaidHuman;
+      return corroborated
+        ? { kind: STOP_KINDS.REVIEW_TOOL_FAILED, source: STOP_SOURCES.LEGACY_TEMPLATE }
+        : { kind: null, source: STOP_SOURCES.UNKNOWN };
+    }
     return { kind: STOP_KINDS.SPEND_BLOCKED, source: STOP_SOURCES.LEGACY_TEMPLATE };
   }
   return { kind: null, source: STOP_SOURCES.UNKNOWN };

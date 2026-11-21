@@ -8,6 +8,7 @@
 //   reviewloop acknowledge-token-anomaly  human confirmation of a tripped Token Sentinel stop
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
 //   reviewloop restore-hold human action: re-append the hard stop on an ambiguous old record
+//   reviewloop authorize-rereview  human action: release a hard stop for ONE exact submission
 //   reviewloop extend-calls task-level: more Reviewer/Supervisor calls for ONE loop (audited)
 //   reviewloop stop-loop    human end of a task: STOPPED, every record kept
 //   reviewloop accept-design-exception  human-authorized Design exception after a review-TOOL stop (never a PASS)
@@ -36,6 +37,7 @@ import { readLoopWorkflow } from '../src/reviewloop/humanActionGuard.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
 import { restoreHold } from '../src/reviewloop/holdRestore.js';
+import { authorizeRereview } from '../src/reviewloop/rereviewAuthorization.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
 import { buildHumanRequiredReport } from '../src/reviewloop/humanRequiredReport.js';
@@ -156,6 +158,28 @@ async function reopenGate(rest) {
     for (const a of result.allowance ?? []) console.log(`  call ceiling enforced for this loop (${a.role}): ${a.previousCeiling} -> ${a.newCeiling} (used ${a.usedAtGrant}, this attempt may use ${a.granted})`);
     console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; if they are the limit, `reviewloop extend-calls` raises them for THIS loop only');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function authorizeRereviewCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const submission = flagValue(rest, '--submission');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !submission || !reason) throw new Error('usage: reviewloop authorize-rereview --loop <loopId> --submission <submissionDigest shown when the Worker was refused> --reason "<your decision / what was fixed>" [--max-reviewer-calls <n>] [--max-supervisor-calls <n>]  (the call budget is required from the 4th authorization on)');
+  const lease = await takeLoopLease(loopId, 'authorize a re-review');
+  try {
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await authorizeRereview({
+      persistence, loopId, submission, reason,
+      allowance: { reviewerCalls: flagValue(rest, '--max-reviewer-calls'), supervisorCalls: flagValue(rest, '--max-supervisor-calls') },
+      currentLimits: await currentCallLimits(persistence, loopId),
+    });
+    console.log('Re-review authorized for exactly one submission of this task.');
+    console.log(`  loop: ${result.loopId}  (authorization ${result.grants}, ${result.tier})`);
+    console.log('  not reset: history, budgets, fingerprints, spend ledger, call ceilings');
+    console.log('Next: tell the Worker to call reviewloop_review again with the same loopId and the same content; different content needs a new authorization.');
   } finally {
     await lease.release();
   }
@@ -691,6 +715,9 @@ async function main() {
     case 'restore-hold':
       await restoreHoldCommand(rest);
       break;
+    case 'authorize-rereview':
+      await authorizeRereviewCommand(rest);
+      break;
     case 'report':
       await report(rest);
       break;
@@ -737,7 +764,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|authorize-rereview|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);
