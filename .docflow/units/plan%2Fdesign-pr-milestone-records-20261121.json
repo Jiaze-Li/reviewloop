@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T00:07:25.838Z",
+  "updatedAt": "2026-11-21T00:09:38.525Z",
   "task": {
     "id": "plan/design-pr-milestone-records-20261121",
     "branch": "plan/design-pr-milestone-records-20261121",
@@ -19,7 +19,14 @@
         "message": "plan: initialize Design review milestone recording task (no file changes)"
       }
     ],
-    "pr": null,
+    "pr": {
+      "number": 70,
+      "state": "open",
+      "title": "plan: publish Design drafts, reviews and revisions to task PR",
+      "url": "https://github.com/Jiaze-Li/reviewloop/pull/70",
+      "merged": false,
+      "updatedAt": "2026-11-21T00:09:14Z"
+    },
     "completed": null,
     "outcome": null
   }
