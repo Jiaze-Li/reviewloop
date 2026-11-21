@@ -1,5 +1,11 @@
 # ReviewLoop
 
+> [!IMPORTANT]
+> **RETIRED — 2026-11-21. Do not start new tasks with ReviewLoop.**
+> This repository is kept as a historical reference; the old Controller/MCP review workflow is no longer the recommended or actively developed delivery path. The chosen direction is [agent-delivery](https://github.com/Jiaze-Li/agent-delivery) for the lightweight `/deliver` workflow and [pr-bot](https://github.com/Jiaze-Li/pr-bot) for GitHub PR review. Their real end-to-end integration is not yet fully verified; retirement does not certify replacement readiness.
+> **[Retirement decision, known defects, and PR disposition → #72](https://github.com/Jiaze-Li/reviewloop/issues/72).** Historical loops, spend ledgers and unmerged PRs remain untouched. The documentation below describes the former implementation and should not be treated as current installation or execution guidance.
+
+
 ReviewLoop verifies **LOCAL coding-agent work**. The Worker writes code;
 ReviewLoop freezes the task contract and pre-edit baseline, runs the
 mechanical Gate, and controls independent Reviewer/Supervisor and bounded repair.
