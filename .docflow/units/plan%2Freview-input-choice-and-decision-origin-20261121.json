@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T07:36:16.621Z",
+  "updatedAt": "2026-11-21T08:00:09.554Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -9,7 +9,7 @@
     "started": "2026-11-21T09:40:28+08:00",
     "status": "In progress",
     "current": "Add decision-provenance rule and zero-paid A/B/C review-input comparison",
-    "next": "等 Jack 决定审查输入路线（保持现状 / 采用分步读取方案），再决定是否对设计正式审查",
+    "next": "用真实模型小范围试跑分步审查，确认质量与费用后再决定是否对大型设计默认启用",
     "history": [
       {
         "at": "2026-11-21T15:12:31+08:00",
