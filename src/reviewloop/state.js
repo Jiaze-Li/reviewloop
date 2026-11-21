@@ -113,7 +113,7 @@ export function initialLoopState(objective) {
   };
 }
 
-export function recordTransition(loopState, to, reason) {
+export function recordTransition(loopState, to, reason, cause = null) {
   const from = loopState.state;
   if (from === to) {
     loopState.updatedAt = new Date().toISOString();
@@ -126,7 +126,11 @@ export function recordTransition(loopState, to, reason) {
   loopState.updatedAt = new Date().toISOString();
   loopState.history = [
     ...(loopState.history ?? []),
-    { from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt },
+    {
+      from, to, reason: reason ?? null, round: loopState.round, at: loopState.updatedAt,
+      // Optional engine-written structured stop cause (see stopCause.js); absent on old entries.
+      ...(cause ? { cause } : {}),
+    },
   ];
   return loopState;
 }

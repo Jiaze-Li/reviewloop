@@ -379,7 +379,7 @@ test('report: REVIEW_FAILED on a new Design loop also offers the exception; a co
   const base = (taskType) => ({
     loopId: 'rl-y', state: 'HUMAN_REQUIRED', round: 1,
     objective: { mode: 'LOCAL', taskType, ...(taskType === 'design' ? { reviewTarget: 'D.md' } : {}) },
-    history: [{ from: 'REVIEWING', to: 'HUMAN_REQUIRED', reason: 'review failed: provider timeout', round: 1, at: T0 }],
+    history: [{ from: 'REVIEWING', to: 'HUMAN_REQUIRED', reason: 'review failed: provider timeout', round: 1, at: T0, cause: { v: 1, kind: 'REVIEW_TOOL_FAILED', source: 'ENGINE', resume: 'HUMAN_AUTHORIZATION' } }],
   });
   const d = buildHumanRequiredReport({ loopId: 'rl-y', loop: base('design'), workflow: { reviewLoop: base('design') }, env: {} });
   assert.ok(d.humanDecision.choices.some((c) => /人工授权例外/.test(c)));

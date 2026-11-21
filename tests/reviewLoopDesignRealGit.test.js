@@ -1,6 +1,7 @@
 // Real-git integration for the unified Design path: the whole design file as
 // gitEvidence ACTUALLY renders it must be recognised as sitting in one
 // Reviewer request. Hand-written diff fixtures cannot prove that.
+import { withReceipts } from './helpers/receiptEcho.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -85,10 +86,10 @@ test('real git end-to-end through the controller: PASS with the exact digest of 
     designSupervisorFn: async (args) => {
       supervisorSaw = String(args.prompt);
       return {
-        value: {
+        value: withReceipts(args.prompt, {
           comparison: { verdict: 'MINOR_DIFF', reason: 'close', workerSummary: 'w', planConcern: null },
           blockingFindings: [], nonBlockingFindings: [], humanQuestions: [], designPassComment: 'Builds it.',
-        },
+        }),
         usage: { input_tokens: 1, output_tokens: 1 },
         model: 'm',
       };

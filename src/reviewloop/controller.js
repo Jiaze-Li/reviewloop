@@ -69,6 +69,8 @@ import {
 } from './phaseState.js';
 import { chunkDiffForReview, reviewDiffBudget } from './diffChunker.js';
 import { parsePositiveInt } from './settingsFile.js';
+import { buildStopCause, STOP_KINDS } from './stopCause.js';
+import { DESIGN_SOURCE_LIMIT_REASON } from './designExceptionState.js';
 import { DesignTargetError, readReviewTarget, assertTargetWithinOneChunk } from './designTarget.js';
 import {
   EvidenceValidationError,
@@ -116,6 +118,9 @@ export function createReviewLoopController({
   // reviewMode === 'design-two-stage'.
   designReviewerFn = requireProvider('Design Reviewer'),
   designSupervisorFn = requireProvider('Design Supervisor'),
+  // Optional override of the pre-dispatch input budget ({ spend }) => { limitBytes, source }.
+  // Production resolves it from the Token Sentinel limit and the local transport envelope.
+  designInputBudgetFn = null,
   // optional pool routing (production wiring). Return { family, provider,
   // model, transport } or null. When present, the controller binds the real
   // selected family into the CallIntent and drives bounded failover.
@@ -1168,7 +1173,7 @@ export function createReviewLoopController({
     loopState.chunkReviewCheckpoint = null;
 
     if (review.status === 'FAILED') {
-      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, review.error?.reason ?? 'review failed');
+      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, review.error?.reason ?? 'review failed', buildStopCause({ kind: STOP_KINDS.REVIEW_TOOL_FAILED, code: 'REVIEW_FAILED' }));
       await saveLoop(loopState);
       return {
         status: 'HUMAN_REQUIRED',
@@ -1268,7 +1273,54 @@ export function createReviewLoopController({
   const designRunner = createDesignTwoStageRunner({
     meteredWithFailover, routeReviewerFn, routeSupervisorFn, designReviewerFn, designSupervisorFn,
     saveLoop: (ls) => saveLoop(ls),
+    inputBudgetFn: designInputBudgetFn,
   });
+
+  // Text-free metrics for comparing review-input architectures later (numbers and
+  // enums only). Capped so state cannot grow without bound.
+  function pushDesignMetrics(loopState, m) {
+    const n = (v) => (Number.isFinite(v) ? v : 0);
+    loopState.reviewMetrics = [...(Array.isArray(loopState.reviewMetrics) ? loopState.reviewMetrics : []), {
+      round: loopState.round, fixedBytes: n(m.fixedBytes), evidenceBytes: n(m.evidenceBytes), rejectedCount: n(m.rejectedCount),
+      outcomeKind: String(m.outcomeKind ?? 'UNKNOWN').slice(0, 40), physicalCalls: n(m.physicalCalls), estimatedTokens: n(m.estimatedTokens),
+    }].slice(-20);
+  }
+
+  // Failure evidence for audit/replay: sizes, hashes, enums, validated labels.
+  // Never a prompt, a model reply or free text (Plan R07, AC-10, I8).
+  function recordFailedRound(loopState, failedOut) {
+    const log = Array.isArray(failedOut.evidence) ? failedOut.evidence : [];
+    const last = log[log.length - 1] ?? null;
+    const safeEnum = (v) => (typeof v === 'string' && /^[A-Z_]{1,40}$/.test(v) ? v : null);
+    const comp = {};
+    for (const [k, v] of Object.entries(last?.components ?? {})) if (Number.isFinite(v)) comp[k] = v;
+    loopState.failedRounds = [...(Array.isArray(loopState.failedRounds) ? loopState.failedRounds : []), {
+      round: loopState.round,
+      stage: safeEnum(String(last?.stage ?? '').toUpperCase()) ?? null,
+      promptBytes: last?.promptBytes ?? null,
+      promptSha256: last?.promptSha256 ?? null,
+      components: comp,
+      budget: last?.budget ? { limitBytes: last.budget.limitBytes, source: safeEnum(last.budget.source) } : null,
+      files: (failedOut.fileMeta?.files ?? []).slice(0, 30),
+      rejected: (failedOut.fileMeta?.rejected ?? []).slice(0, 30),
+      attempts: (failedOut.physicalCalls ?? []).slice(-6).map((c) => ({
+        family: typeof c?.family === 'string' ? c.family.slice(0, 40) : null, outcome: safeEnum(String(c?.outcome ?? '').toUpperCase()), code: safeEnum(c?.code ?? null),
+      })),
+      receipts: last?.receipts ?? null,
+      replyBytes: last?.replyBytes ?? null,
+      replyClass: safeEnum(last?.replyClass ?? null),
+      visibility: ['LOCAL_CONSTRUCTED', 'TRANSPORT_ACCEPTED', 'MODEL_ECHOED_RECEIPTS'].includes(last?.visibility) ? last.visibility : 'LOCAL_CONSTRUCTED',
+    }].slice(-5);
+    const lc = last?.components ?? {};
+    pushDesignMetrics(loopState, {
+      fixedBytes: (lc.plan ?? 0) + (lc.design ?? 0) + (lc.proposals ?? 0) + (lc.instructions ?? 0),
+      evidenceBytes: (lc.tree ?? 0) + (lc.files ?? 0),
+      rejectedCount: (failedOut.fileMeta?.rejected ?? []).length,
+      outcomeKind: failedOut.stop?.kind ?? 'REVIEW_TOOL_FAILED',
+      physicalCalls: (failedOut.physicalCalls ?? []).length,
+      estimatedTokens: last ? Math.ceil((last.promptBytes ?? 0) / 3) : 0,
+    });
+  }
 
   function designFindingSignature(f) { return `${f.severity}::${f.title}`; }
 
@@ -1311,9 +1363,17 @@ export function createReviewLoopController({
       if (err instanceof LeaseLostError) throw err;
       return spendDenialResult(loopState, err, await spend.telemetry());
     }
-    const failClosed = async (reason) => {
+    const failClosed = async (reason, failedOut = null) => {
       ds.inFlight = null;
-      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, reason);
+      // Persist ONLY engine text: the model-output excerpt stays in the immediate
+      // (in-memory) reply and is never written to state (Plan R07 / I8).
+      const persistedReason = failedOut?.safeReason ?? String(reason).split('; model output began:')[0];
+      const kind = failedOut?.stop?.kind ?? STOP_KINDS.REVIEW_TOOL_FAILED;
+      recordTransition(
+        loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, persistedReason,
+        buildStopCause({ kind, code: failedOut?.stop?.code ?? 'DESIGN_REVIEW_UNUSABLE' }),
+      );
+      if (failedOut) recordFailedRound(loopState, failedOut);
       await saveLoop(loopState);
       return {
         status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,
@@ -1321,7 +1381,8 @@ export function createReviewLoopController({
         telemetry: await spend.telemetry(), safetyEvents: safetyEventsForReview(),
       };
     };
-    if (out.kind === 'FAILED') return failClosed(out.reason);
+    if (out.kind === 'FAILED') return failClosed(out.reason, out);
+    if (out.stats) pushDesignMetrics(loopState, out.stats);
 
     const drift = await designDriftReason({ cwd, objective, designTarget, delta, baseline });
     if (drift) {
@@ -1390,7 +1451,10 @@ export function createReviewLoopController({
     if (decision.kind === 'HUMAN') {
       const exhausted = decision.humanQuestions.length === 0;
       if (exhausted) loopState.budgetExhausted = true;
-      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason);
+      recordTransition(
+        loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, decision.reason,
+        decision.reason === DESIGN_SOURCE_LIMIT_REASON ? buildStopCause({ kind: STOP_KINDS.DESIGN_SOURCE_LIMIT, code: 'DESIGN_SOURCE_LIMIT' }) : null,
+      );
       await saveLoop(loopState);
       return {
         ...humanRequiredResult(loopState, review, telemetry, null),
@@ -1692,7 +1756,7 @@ export function createReviewLoopController({
     const detail = err?.code && err?.message && err.code !== err.message
       ? `${err.code} (${err.message})`
       : (err?.code ?? err?.message ?? err);
-    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${detail}`);
+    recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, `model spend blocked: ${detail}`, buildStopCause({ kind: STOP_KINDS.SPEND_BLOCKED, code: 'SPEND_BLOCKED' }));
     try { await saveLoop(loopState); } catch { /* best effort; the returned status still reflects intent */ }
     return {
       status: 'HUMAN_REQUIRED', loopId: loopState.loopId, round: loopState.round,

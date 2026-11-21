@@ -19,6 +19,7 @@ import {
   CALL_ALLOWANCE_KEY, TOKEN_ACK_STANDARD_LIMIT, usedCalls,
 } from './humanActionGuard.js';
 import { DESIGN_SOURCE_LIMIT_REASON, evaluateDesignException } from './designExceptionState.js';
+import { resolveStopCause, isTrustedToolFailure, STOP_KINDS } from './stopCause.js';
 
 export const REPORT_VERSION = 1;
 export const HEADLINE_MAX = 120;
@@ -135,7 +136,11 @@ export function classify({ loop, workflow, reason, result = null, env = process.
   const latch = workflow?.[TOKEN_ANOMALY_KEY];
   checked.push(`Token 哨兵记录：${latch?.tripped === true ? '已触发' : '未触发'}`);
   const acks = Array.isArray(workflow?.[TOKEN_ANOMALY_ACKS_KEY]) ? workflow[TOKEN_ANOMALY_ACKS_KEY] : [];
-  const tokenText = /TOKEN_ANOMALY|token anomaly/i.test(reason);
+  // Trusted structured cause (engine-written or closed legacy template with state
+  // corroboration). Model/label text never decides a privileged category.
+  const stopCause = resolveStopCause({ loop, blockers: activeBlockers({ loop, workflow, fromSupervisor, env }) });
+  const trustedToolFailure = isTrustedToolFailure(stopCause);
+  const tokenText = !trustedToolFailure && /TOKEN_ANOMALY|token anomaly/i.test(reason);
   const ackedLatch = Boolean(latch) && latch.tripped !== true && acks.some((a) => String(a?.latchAt) === String(latch.at));
   if (latch?.tripped === true || (tokenText && !ackedLatch)) return { category: 'TOKEN_SENTINEL', checked, ctx };
   checked.push('停止原因文本匹配');
@@ -143,7 +148,8 @@ export function classify({ loop, workflow, reason, result = null, env = process.
   // The stop this loop reported, by its text. Token text on an already
   // confirmed latch is the "confirmed" variant, resolved below.
   let textCat = null;
-  if (tokenText && ackedLatch) textCat = 'TOKEN_ACKED';
+  if (trustedToolFailure) textCat = null;
+  else if (tokenText && ackedLatch) textCat = 'TOKEN_ACKED';
   else if (/MODEL_SPEND_USAGE_UNRESOLVED|unaccounted|UNRESOLVED/i.test(reason)) textCat = 'UNACCOUNTED_SPEND';
   else if (/(reviewer|supervisor)\s+call\s+ceiling/i.test(reason)) textCat = 'CALL_CEILING';
   else if (/SPEND_DENIED|usage[- ]volume|cost\s*ceiling|usage.*ceiling/i.test(reason)) textCat = 'SPEND_CEILING';
@@ -167,17 +173,26 @@ export function classify({ loop, workflow, reason, result = null, env = process.
   }
   // Exact match only: the two-stage Design review's tool-boundary stop (a review
   // TOOL limit, not a design defect). Never a fuzzy pattern.
-  if (reason === DESIGN_SOURCE_LIMIT_REASON) return { category: 'DESIGN_SOURCE_LIMIT', checked, ctx };
+  if (reason === DESIGN_SOURCE_LIMIT_REASON || (stopCause.kind === STOP_KINDS.DESIGN_SOURCE_LIMIT && stopCause.source === 'ENGINE')) return { category: 'DESIGN_SOURCE_LIMIT', checked, ctx };
+  // A trusted (engine-written / closed-template) tool failure is decided BEFORE any
+  // free-text pattern: its reason can only carry fixed engine text, and no phrase in
+  // it may select another category. The supervisor and spent-budget signals keep
+  // their own priority (handled below), so they are excluded here.
+  if (trustedToolFailure && !fromSupervisor && loop?.budgetExhausted !== true) {
+    return { category: 'REVIEW_FAILED', checked: [...checked, `停止来源：${stopCause.source === 'ENGINE' ? '引擎记录' : '旧记录（固定模板 + 状态佐证）'}`], ctx };
+  }
   if (/design review round budget/i.test(reason)) return { category: 'DESIGN_ROUNDS', checked, ctx };
   if (/New Information|NO_NEW_INFORMATION/i.test(reason)) return { category: 'NO_NEW_INFORMATION', checked, ctx };
   checked.push(`收敛预算：${loop?.budgetExhausted === true ? '已用尽' : '未用尽'}；停止来自监督者：${fromSupervisor ? '是' : '否'}`);
   if (fromSupervisor) return { category: 'SUPERVISOR_ESCALATION', checked, ctx };
   if (loop?.budgetExhausted === true) return { category: 'CONVERGENCE_EXHAUSTED', checked, ctx };
+  // A trusted tool failure is decided here, before any free-text pattern below.
+  if (trustedToolFailure) return { category: 'REVIEW_FAILED', checked: [...checked, `停止来源：${stopCause.source === 'ENGINE' ? '引擎记录' : '旧记录（固定模板 + 状态佐证）'}`], ctx };
   if (/attribution|cannot reliably separate|Worker delta/i.test(reason)) return { category: 'ATTRIBUTION_INCOMPLETE', checked, ctx };
   if (/cancelled/i.test(reason)) return { category: 'CANCELLED', checked, ctx };
   if (/task[- ]definition|phase plan|contract.*(exceed|bound)|fingerprint|objective/i.test(reason)) return { category: 'TASK_DEFINITION', checked, ctx };
-  if (/supervisor/i.test(reason)) return { category: 'SUPERVISOR_ESCALATION', checked, ctx };
-  if (/review failed|reviewer|provider|transport|timeout|quota|output|schema|parse/i.test(reason)) return { category: 'REVIEW_FAILED', checked, ctx };
+  // Free-text "supervisor"/"reviewer"/"provider" patterns are deliberately gone:
+  // an unrecognised reason is OTHER and carries no Design-exception eligibility.
   return { category: 'OTHER', checked, ctx };
 }
 

@@ -7,6 +7,7 @@
 //   reviewloop report       read-only HUMAN_REQUIRED report rebuilt from the durable loop state
 //   reviewloop acknowledge-token-anomaly  human confirmation of a tripped Token Sentinel stop
 //   reviewloop reopen-gate  human override: fresh convergence budget for a stuck gate
+//   reviewloop restore-hold human action: re-append the hard stop on an ambiguous old record
 //   reviewloop extend-calls task-level: more Reviewer/Supervisor calls for ONE loop (audited)
 //   reviewloop stop-loop    human end of a task: STOPPED, every record kept
 //   reviewloop accept-design-exception  human-authorized Design exception after a review-TOOL stop (never a PASS)
@@ -34,6 +35,7 @@ import { grantDesignException, revokeDesignException } from '../src/reviewloop/d
 import { readLoopWorkflow } from '../src/reviewloop/humanActionGuard.js';
 import { acknowledgeUnresolvedSpend } from '../src/reviewloop/spendRecovery.js';
 import { reopenExhaustedGate } from '../src/reviewloop/gateReopen.js';
+import { restoreHold } from '../src/reviewloop/holdRestore.js';
 import { overrideLoopBudget } from '../src/reviewloop/budgetOverride.js';
 import { acknowledgeTokenAnomaly } from '../src/reviewloop/tokenAnomalyAck.js';
 import { buildHumanRequiredReport } from '../src/reviewloop/humanRequiredReport.js';
@@ -154,6 +156,22 @@ async function reopenGate(rest) {
     for (const a of result.allowance ?? []) console.log(`  call ceiling enforced for this loop (${a.role}): ${a.previousCeiling} -> ${a.newCeiling} (used ${a.usedAtGrant}, this attempt may use ${a.granted})`);
     console.log('  note: task-wide Reviewer/Supervisor call ceilings still apply; if they are the limit, `reviewloop extend-calls` raises them for THIS loop only');
     console.log('Next: tell the Worker to fix the blocker and call reviewloop_review again with the same loopId.');
+  } finally {
+    await lease.release();
+  }
+}
+
+async function restoreHoldCommand(rest) {
+  const loopId = flagValue(rest, '--loop');
+  const reason = flagValue(rest, '--reason');
+  if (!loopId || !reason) throw new Error('usage: reviewloop restore-hold --loop <loopId> --reason "<why the earlier stop should be restored>"');
+  const lease = await takeLoopLease(loopId, 'restore the hard stop');
+  try {
+    const persistence = new Persistence(REVIEWLOOP_RUNTIME_ROOT);
+    const result = await restoreHold({ persistence, loopId, reason });
+    console.log('Hard stop restored. The loop is HUMAN_REQUIRED again; no earlier record was changed.');
+    console.log(`  loop: ${result.loopId}`);
+    console.log('Next: the Worker still cannot re-review by itself; see `reviewloop report --loop <id>` for the human actions that apply.');
   } finally {
     await lease.release();
   }
@@ -670,6 +688,9 @@ async function main() {
     case 'reopen-gate':
       await reopenGate(rest);
       break;
+    case 'restore-hold':
+      await restoreHoldCommand(rest);
+      break;
     case 'report':
       await report(rest);
       break;
@@ -716,7 +737,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);
