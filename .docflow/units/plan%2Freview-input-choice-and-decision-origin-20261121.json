@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T07:36:04.537Z",
+  "updatedAt": "2026-11-21T07:36:14.263Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -8,12 +8,16 @@
     "task": "Development branch: plan/review-input-choice-and-decision-origin-20261121",
     "started": "2026-11-21T09:40:28+08:00",
     "status": "In progress",
-    "current": "Merge main into #71 Design branch",
+    "current": "Add decision-provenance rule and zero-paid A/B/C review-input comparison",
     "next": "等 Jack 决定审查输入路线（保持现状 / 采用分步读取方案），再决定是否对设计正式审查",
     "history": [
       {
         "at": "2026-11-21T15:12:31+08:00",
         "text": "plan: initialize input-route decision and AI-recorded user decision provenance (no files)"
+      },
+      {
+        "at": "2026-11-21T15:35:55+08:00",
+        "text": "Merge main into #71 Design branch"
       }
     ],
     "commits": [
@@ -28,6 +32,12 @@
         "branch": "plan/review-input-choice-and-decision-origin-20261121",
         "timestamp": "2026-11-21T15:12:31+08:00",
         "message": "Merge main into #71 Design branch"
+      },
+      {
+        "sha": "d25086c792ddb856b4d5eb2026d2aafc8f66f434",
+        "branch": "plan/review-input-choice-and-decision-origin-20261121",
+        "timestamp": "2026-11-21T15:35:55+08:00",
+        "message": "Add decision-provenance rule and zero-paid A/B/C review-input comparison"
       }
     ],
     "pr": {
