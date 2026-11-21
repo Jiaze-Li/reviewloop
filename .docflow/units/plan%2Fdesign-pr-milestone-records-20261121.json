@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T03:50:16.842Z",
+  "updatedAt": "2026-11-21T04:01:33.951Z",
   "task": {
     "id": "plan/design-pr-milestone-records-20261121",
     "branch": "plan/design-pr-milestone-records-20261121",
@@ -9,7 +9,7 @@
     "started": "2026-11-21T08:07:13+08:00",
     "status": "In progress",
     "current": "plan: add Design review process trace to the task PR",
-    "next": "等待用户对 PR #70 的实现做验收；本次未经过独立设计审查与 PR 机器人审查。",
+    "next": "等待用户对 PR #70 的修复结果验收；仍未经过独立设计审查。",
     "history": [
       {
         "at": "2026-11-21T11:44:53+08:00",
