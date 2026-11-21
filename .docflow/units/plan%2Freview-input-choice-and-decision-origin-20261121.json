@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T08:18:19.251Z",
+  "updatedAt": "2026-11-21T12:36:31.063Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
     "title": "plan/review-input-choice-and-decision-origin-20261121",
     "task": "Development branch: plan/review-input-choice-and-decision-origin-20261121",
     "started": "2026-11-21T09:40:28+08:00",
-    "status": "In progress",
+    "status": "Abandoned",
     "current": "Raise the Supervisor call ceiling to 16 for incremental Design loops only",
     "next": "用真实模型小范围试跑分步审查，确认质量与费用后再决定是否对大型设计默认启用",
     "history": [
@@ -62,13 +62,14 @@
     ],
     "pr": {
       "number": 71,
-      "state": "open",
+      "state": "closed",
       "title": "plan: distinguish Jack decisions from AI comments and choose review input architecture",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/71",
       "merged": false,
-      "updatedAt": "2026-11-21T08:18:08Z"
+      "closedAt": "2026-11-21T12:36:17Z",
+      "updatedAt": "2026-11-21T12:36:17Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-21T12:36:17Z",
+    "outcome": "Closed without merge"
   }
 }
