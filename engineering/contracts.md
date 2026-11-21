@@ -25,7 +25,7 @@
 
 **3. 阶段顺序**
 - **Plan：** 零文件引导（与 main 同树的空提交）→ Draft PR → Plan 评论 + 描述索引；到此停。
-- **Design：** 先按第 2 节核对 Plan；`begin(design)` 以恢复出的 Plan 全文为合同；在仓库根目录创建尚不存在的未跟踪设计文件，审查至 PASS；不提交、不加忽略规则。
+- **Design：** 先按第 2 节核对 Plan；`begin(design)` 以恢复出的 Plan 全文为合同；在仓库根目录创建尚不存在的未跟踪设计文件；**每次送审前先按第 5 节把该版本全文作为“未审查草稿”发布并读回**，再审查至 PASS；不提交、不加忽略规则。
 - **PASS 后：** 发设计归档评论和 ReviewLoop 返回的五句评论（逐字）；重新取回归档评论，哈希 = `designSha256` 才算归档成功，随后登记索引并**才**删除未跟踪的工作文件；校验失败则保留文件并停下。删除发生在 Code 开始前。
 - **Code：** 按第 2 节恢复设计全文 → `begin(code, 全文, designSha256)`（由 ReviewLoop 再核对）。
 - **人工授权例外（审查工具自身故障时）：** 新式 Design loop 因审查工具无法完成（如关键源码超出读取上限）停在 `HUMAN_REQUIRED` 时，只有**用户本人**可运行 `reviewloop accept-design-exception`，把一份精确的设计内容、冻结 Plan 与结构化外部独立审查报告绑定成一条人工裁决记录；原 loop 状态、预算与账本不变，**不产生 Design PASS**。归档时设计评论用 `contract format --exception`（尾行写明“非 ReviewLoop PASS”，不得用 PASS 同款 `designSha256:` 尾行），裁决记录以类型 `exception`、同一版本号归档并登记索引；`verify-archive` 在找不到 PASS 时才接受有效例外，并核对 Plan、例外归档、PR/任务/版本绑定，输出标明 `HUMAN_EXCEPTION`。外部报告有未关闭的 P1/P2 即拒绝；未核实风险须用户另行用 `--accept-risk` 明确承担。
@@ -33,3 +33,11 @@
 **4. 什么进 PR，什么进 main**
 - 有长期依据价值且有维护人的才进 main，并须在 Work Contract 的“正式资产清单”逐条列出（路径、为何长期、谁维护）；只服务本次审查的（Plan/Design 全文、引导提交、过程记录）留在 PR。
 - 最终 PR 差异不得出现 `Plan*.md`/`Design*.md` 类任务文件或与已归档合同哈希相同的文件（清单内除外）；该检查不得靠删旧文件或隐藏审查证据通过。
+
+**5. Design 过程留痕（草稿与审查记录；不是合同、不是授权）**
+- **两类记录，独立命名空间：** `reviewloop-draft:<任务>:<版本>`（设计全文，标注 `UNREVIEWED · NOT DESIGN PASS`）与 `reviewloop-review:<任务>:<版本>`（一轮审查里程碑、工具失败或外部审查转贴）。这两类标记**不会**被 `contract recover` / `verify-archive` 识别，因此不可能被当成正式 Plan/Design/Exception；不进入“合同索引”表，不新增合同类型。
+- **发布顺序（Worker 用 `gh` 发，ReviewLoop 不写 GitHub）：** `reviewloop trace inspect`（已存在同哈希草稿则复用）→ `trace prepare --kind draft`（先做敏感信息扫描，命中即拒绝，无绕过开关）→ `gh pr comment` → `trace inspect` 读回（作者=仓库所有者、分段齐全、正文哈希=尾行哈希=本地文件）→ 成功才送审；失败则保留本地设计、不送审、报告用户。同哈希不得发新版本；修订发新版本并附变更说明与对上一轮 finding 的逐项处理（Worker 声明）。旧评论不原地编辑。
+- **审查记录只绑定工具返回的 `adjudicatedDesignSha256`**（仅在审查真正产生可用裁决且内容未漂移时返回；PASS 仍用 `designSha256`）。工具超限、无结果、取消等一律记为“未绑定”，不得写成已审查或合格。外部独立审查转贴须写明审查者、独立性（转贴者声明，系统不验证）、材料与结论；NO_BLOCKING 不改变 ReviewLoop 状态，不构成 PASS、人工例外或 Code 许可。
+- **PR 描述“设计过程”区块**由 `trace inspect --body-out` 从已校验评论派生，只替换 `<!-- reviewloop-trace:begin/end -->` 之间的内容；它不是权威，可随时由评论重建；Code 授权栏恒为“未授权，由用户另行决定”，正式 Design 与人工例外只引用合同索引并标 NOT_VERIFIED，核验仍用 `verify-archive`。同键同哈希重复评论取最小评论号为 canonical；同键异哈希、缺段、错作者、哈希与尾行不符一律失败关闭，不删不改。PR 描述无原子读改写：写后读回比对，不一致则停止并从评论重建。
+- `verify-archive --require-trace` 要求存在与被归档 Design 哈希一致的已校验草稿；不带该参数时缺失只给 `TRACE_ABSENT` 警告（旧任务兼容）。新任务的 Design 阶段应带该参数。`NOT_ENFORCED`：`reviewloop_review` 本身不联网读 PR，“先发草稿再送审”是流程要求，由上述检查事后发现。
+

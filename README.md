@@ -56,6 +56,8 @@ next frozen phase in the same loop), `PASS` (final whole-task certification),
 
 Full Worker contract: [`agent-policy/COMMON.md`](agent-policy/COMMON.md).
 
+Design process trace (draft snapshots, review records, PR progress block): `reviewloop trace <prepare|inspect>`; rules in [`engineering/contracts.md`](engineering/contracts.md) §5.
+
 
 Optional `reviewloop-artifact:<filename>` references for frozen
 `type:"artifact"` requirements can carry a bounded, SHA-256-bound UTF-8

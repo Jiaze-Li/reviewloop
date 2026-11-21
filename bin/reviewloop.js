@@ -55,6 +55,9 @@ import {
   runFinalPrGateReport,
   verifyDesignArchiveAndCleanupReady,
 } from '../src/reviewloop/prContract.js';
+import {
+  analyzeComments, applyProgressBlock, formatDraft, formatReview, inspectTrace, renderProgressBlock,
+} from '../src/reviewloop/designTrace.js';
 
 async function listSessions() {
   const root = REVIEWLOOP_RUNTIME_ROOT;
@@ -530,6 +533,109 @@ function flagValues(args, name) {
   return out;
 }
 
+// `trace prepare` formats comment bodies (never posts); `trace inspect` reads the
+// PR, verifies every trace record and can emit the updated PR description. The
+// Worker posts / edits with `gh`; this command never writes to GitHub.
+async function handleTraceCommand(rest) {
+  const [sub, ...args] = rest;
+  const asJson = args.includes('--json');
+  const need = (name) => {
+    const v = flagValue(args, name);
+    if (!v) throw new Error(`missing ${name}`);
+    return v;
+  };
+  if (sub === 'prepare') {
+    const kind = need('--kind');
+    const taskId = need('--task-id');
+    let formatted;
+    if (kind === 'draft') {
+      const parts = flagValue(args, '--parts');
+      formatted = formatDraft({
+        taskId,
+        version: need('--version'),
+        content: await readFile(need('--file'), 'utf8'),
+        policySha: need('--policy-sha'),
+        planVersion: need('--plan-version'),
+        planSha256: need('--plan-sha'),
+        baseline: flagValue(args, '--baseline'),
+        changeNote: flagValue(args, '--note'),
+        findingResponses: flagValues(args, '--finding-response'),
+        onlyParts: parts ? parts.split(',').map(Number) : null,
+      });
+    } else if (kind === 'review') {
+      const designVersion = need('--design-version');
+      if (args.includes('--external')) {
+        formatted = formatReview({
+          taskId, designVersion, version: flagValue(args, '--version'),
+          external: {
+            reviewer: need('--reviewer'), independence: need('--independence'), conclusion: need('--conclusion'),
+            relayedBy: need('--relayed-by'), seq: flagValue(args, '--seq') ?? '1',
+            reviewedDesignSha256: flagValue(args, '--reviewed-sha'),
+            report: await readFile(need('--report-file'), 'utf8'),
+          },
+        });
+      } else {
+        const resultFile = flagValue(args, '--result');
+        const result = resultFile ? JSON.parse(await readFile(resultFile, 'utf8')) : null;
+        formatted = formatReview({
+          taskId, designVersion, result, round: Number(flagValue(args, '--round')) || null,
+          errorNote: flagValue(args, '--error-note'),
+        });
+      }
+    } else {
+      throw new Error('--kind must be draft or review');
+    }
+    const outDir = flagValue(args, '--out-dir');
+    const files = [];
+    if (outDir) {
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(outDir, { recursive: true });
+      for (const c of formatted.comments) {
+        const f = path.join(outDir, `${formatted.kind}-${formatted.version}-part${c.part}of${c.total}.md`);
+        await writeFile(f, c.body, 'utf8');
+        files.push(f);
+      }
+    }
+    const out = { kind: formatted.kind, version: formatted.version, sha256: formatted.sha256, totalParts: formatted.totalParts, files };
+    if (asJson) console.log(JSON.stringify(outDir ? out : { ...out, comments: formatted.comments }, null, 2));
+    else {
+      console.log(`${out.kind} ${out.version} sha256=${out.sha256} parts=${out.totalParts}`);
+      if (outDir) files.forEach((f) => console.log(`wrote ${f}`));
+      else formatted.comments.forEach((c) => console.log(`--- part ${c.part}/${c.total} ---\n${c.body}`));
+    }
+    return;
+  }
+  if (sub === 'inspect') {
+    const repo = need('--repo');
+    const pr = need('--pr');
+    const taskId = need('--task-id');
+    const file = flagValue(args, '--file');
+    const localDraft = file ? await readFile(file, 'utf8') : null;
+    const res = await inspectTrace({ repo, prNumber: pr, taskId, localDraft });
+    const block = renderProgressBlock(res, { repo, prNumber: pr, taskId });
+    const bodyOut = flagValue(args, '--body-out');
+    if (bodyOut) await writeFile(bodyOut, applyProgressBlock(res.prBody, block), 'utf8');
+    const summary = {
+      ok: res.ok,
+      localState: res.localState,
+      latestDraft: res.latestDraft ? { version: res.latestDraft.version, sha256: res.latestDraft.sha256, commentIds: res.latestDraft.commentIds } : null,
+      records: res.records.map((r) => ({ kind: r.kind, version: r.version, valid: r.valid, sha256: r.sha256 ?? null, commentIds: r.commentIds ?? [], reason: r.reason ?? null, missingParts: r.missingParts ?? [] })),
+      problems: res.problems,
+      bodyOut: bodyOut ?? null,
+    };
+    if (asJson) console.log(JSON.stringify(summary, null, 2));
+    else {
+      console.log(`trace: ${res.ok ? 'OK' : 'PROBLEMS'} · local draft: ${res.localState}`);
+      res.records.forEach((r) => console.log(`  ${r.kind} ${r.version} ${r.valid ? `valid ${r.sha256.slice(0, 12)}` : `INVALID (${r.reason})`}`));
+      res.problems.forEach((p) => console.log(`  ! ${p.code}: ${p.message}`));
+      if (bodyOut) console.log(`wrote updated PR description to ${bodyOut}`);
+    }
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+  throw new Error('usage: reviewloop trace <prepare|inspect> ...  (prepare --kind draft|review --task-id <id> ...; inspect --repo <o/n> --pr <n> --task-id <id> [--file <design>] [--body-out <file>])');
+}
+
 async function handleContractCommand(rest) {
   const [sub, ...args] = rest;
   const asJson = args.includes('--json');
@@ -601,9 +707,9 @@ async function handleContractCommand(rest) {
     const clean = args.includes('--clean');
     const authors = flagValues(args, '--author');
     if (!repo || !prNumber || !taskId) {
-      throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--json]');
+      throw new Error('usage: reviewloop contract verify-archive --repo <owner/name> --pr <num> --task-id <id> [--version <ver>] [--loop <loopId>] [--target <path>] [--cwd <dir>] [--clean] [--require-trace] [--json]');
     }
-    const res = await verifyDesignArchiveAndCleanupReady({
+    const verifyArgs = {
       cwd,
       repo,
       prNumber: Number(prNumber),
@@ -612,8 +718,23 @@ async function handleContractCommand(rest) {
       loopId,
       reviewTarget,
       allowedAuthors: authors.length ? authors : null,
-      clean,
-    });
+    };
+    // Trace check first (read-only verify), so a missing draft snapshot can
+    // refuse BEFORE any --clean unlink. Without --require-trace it only warns.
+    const probe = await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean: false });
+    let traceWarning = null;
+    try {
+      const trace = await inspectTrace({ repo, prNumber, taskId });
+      const hasDraft = trace.records.some((r) => r.kind === 'draft' && r.valid && r.sha256 === probe.designSha256);
+      if (!hasDraft) traceWarning = 'TRACE_ABSENT: no verified UNREVIEWED draft snapshot matches this designSha256 in the PR';
+    } catch (err) {
+      traceWarning = `TRACE_ABSENT: trace could not be verified (${err?.message ?? err})`;
+    }
+    if (traceWarning && args.includes('--require-trace')) {
+      throw new Error(`${traceWarning}; refusing (--require-trace)`);
+    }
+    const res = clean ? await verifyDesignArchiveAndCleanupReady({ ...verifyArgs, clean }) : probe;
+    if (traceWarning) res.warnings = [...(res.warnings ?? []), traceWarning];
     const source = res.authority === 'HUMAN_EXCEPTION'
       ? `Design source: HUMAN-AUTHORIZED EXCEPTION ${res.exceptionId} — NOT a ReviewLoop Design PASS (original review loop ${res.loopId} is unchanged).`
       : `Design source: ReviewLoop Design PASS (loop ${res.loopId}).`;
@@ -745,6 +866,9 @@ async function main() {
     case 'contract':
       await handleContractCommand(rest);
       break;
+    case 'trace':
+      await handleTraceCommand(rest);
+      break;
     case 'spec':
       handleSpecCommand(rest);
       break;
@@ -764,7 +888,7 @@ async function main() {
     case undefined:
     case '--help':
     case '-h':
-      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|authorize-rereview|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|spec|install|uninstall|cli>');
+      console.log('usage: reviewloop <doctor|status|profile|report|inspect-spend|resume|acknowledge-spend|acknowledge-token-anomaly|reopen-gate|restore-hold|authorize-rereview|override-budget|extend-calls|stop-loop|accept-design-exception|lock-status|contract|trace|spec|install|uninstall|cli>');
       break;
     default:
       console.error(`unknown command: ${command}`);

@@ -32,7 +32,7 @@
 
 ## 在 ReviewLoop 中送审（方法要点；命令细节归 ReviewLoop Worker Contract）
 1. **先开始，再写文件**：先 `reviewloop_begin(taskType: "design")`，把完整 Plan 作为合同，指定一个**尚不存在**的设计文件作为审查目标；然后才创建该文件。文件在开始前已存在会被拒绝。Design 使用单一完成关卡，不分阶段。在不支持原子防符号链接的系统（如 Linux）上，ReviewLoop 只能审查**仓库根目录下**的新文件（如 `Prompt.md`）；PASS 后可按项目约定移动到别的目录，内容不变则 `designSha256` 不变。
-2. 每次 `reviewloop_review`，Reviewer 看到完整 Plan 与当轮**完整**设计文件。`REWORK` 时在同一 loop 内修改同一文件并复审，不重置目标、预算和证据；不收敛由 ReviewLoop 按共用策略升级；`HUMAN_REQUIRED` 必须停止并报告。
+2. 每次送审前先按 `contracts.md` §5 把该版本全文作为未审查草稿发布并读回；每轮结果后发布审查记录。每次 `reviewloop_review`，Reviewer 看到完整 Plan 与当轮**完整**设计文件。`REWORK` 时在同一 loop 内修改同一文件并复审，不重置目标、预算和证据；不收敛由 ReviewLoop 按共用策略升级；`HUMAN_REQUIRED` 必须停止并报告。
 3. PASS 前不要 commit 设计文件。PASS 时 ReviewLoop 返回 `designSha256`：它是对**所审查文件内容**（去掉首尾空白后的 UTF-8）的 SHA-256，用来核对 Code 阶段拿到的是同一份内容。它**只是内容一致性检查，不是用户授权或 PASS 的法律证明**；改动设计内容后旧值作废。
 4. PASS 后（按 `authorization.md` 具备 PR 写权限时）发一条简明 PR 评论（含 `designSha256` 锚点）：用大白话说明要做什么、选了哪条路线及主要风险，仅在存在影响产品/科研/架构的未决前提、`planConcern` 或超范围授权需求时请用户确认，不把普通技术前提抛给用户逐条认可。对用户回复遵循 `handoff.md` 最小充分原则，不将评论或五句话替代完整设计文件。新任务须按 `contracts.md` 先把设计全文归档到 PR 评论并校验哈希，**校验成功后才**删除未跟踪的设计工作文件，校验失败则保留并停下；然后**停下**，等用户说“Code”。旧文件模式任务沿用其原有合同约定。
 
