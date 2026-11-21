@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T03:50:04.151Z",
+  "updatedAt": "2026-11-21T03:50:07.189Z",
   "task": {
     "id": "plan/design-pr-milestone-records-20261121",
     "branch": "plan/design-pr-milestone-records-20261121",
@@ -8,15 +8,26 @@
     "task": "Development branch: plan/design-pr-milestone-records-20261121",
     "started": "2026-11-21T08:07:13+08:00",
     "status": "In progress",
-    "current": "plan: initialize Design review milestone recording task (no file changes)",
+    "current": "Merge remote-tracking branch 'origin/main' into plan/design-pr-milestone-records-20261121",
     "next": "等待用户对 PR #70 的实现做验收；本次未经过独立设计审查与 PR 机器人审查。",
-    "history": [],
+    "history": [
+      {
+        "at": "2026-11-21T11:44:53+08:00",
+        "text": "plan: initialize Design review milestone recording task (no file changes)"
+      }
+    ],
     "commits": [
       {
         "sha": "f426e1c069e0502390278b0070a56203c5d481c4",
         "branch": "plan/design-pr-milestone-records-20261121",
         "timestamp": "2026-11-21T08:07:13+08:00",
         "message": "plan: initialize Design review milestone recording task (no file changes)"
+      },
+      {
+        "sha": "25dbfcc4eef5fad727b055757a3320cb3e678e7d",
+        "branch": "plan/design-pr-milestone-records-20261121",
+        "timestamp": "2026-11-21T11:44:53+08:00",
+        "message": "Merge remote-tracking branch 'origin/main' into plan/design-pr-milestone-records-20261121"
       }
     ],
     "pr": {
