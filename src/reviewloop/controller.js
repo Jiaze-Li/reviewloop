@@ -1501,6 +1501,9 @@ export function createReviewLoopController({
     ds.history = [...ds.history, { round: loopState.round, verdict: adj.comparison.verdict, reason: adj.comparison.reason }].slice(-6);
     recordFindingSignatures(loopState, review, currentReviewScope(loopState, objective));
     const designFields = {
+      // Present ONLY on a genuinely adjudicated round that passed the drift
+      // re-read above: the hash of exactly the design the Supervisor saw.
+      adjudicatedDesignSha256: designTarget.sha256,
       comparison: adj.comparison,
       ...(adj.comparison.planConcern ? { planConcern: adj.comparison.planConcern } : {}),
       ...(out.factVerification ? { factVerification: out.factVerification } : {}),

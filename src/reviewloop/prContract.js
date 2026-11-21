@@ -75,7 +75,7 @@ function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function splitContractText(trimmed, maxCharsPerPart) {
+export function splitContractText(trimmed, maxCharsPerPart) {
   if (trimmed.length <= maxCharsPerPart) return [trimmed];
   const chunks = [];
   let offset = 0;

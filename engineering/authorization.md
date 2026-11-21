@@ -24,7 +24,7 @@
 | 阶段 | 进入前提 | 阶段内默认放行（不逐项请示） | 必须停止点 |
 |---|---|---|---|
 | **Plan** | 用户确认规划目标并允许开设正式任务 / Draft PR | 创建任务专属分支、必要零文件引导提交、创建 Draft PR、发布 Plan 归档评论与更新 PR 合同索引 | Plan 归档校验完成后停下，等用户明确说 **Design** |
-| **Design** | 用户明确说 **Design**，且已按 `contracts.md` 核对恢复 Plan | `reviewloop_begin(taskType="design")`、创建并修改根目录单个未跟踪设计文件、同 loop 内 `REWORK` 返工；`PASS` 后发布设计归档评论、更新索引、校验哈希 = `designSha256`、清理该未跟踪临时文件并发布 `designPassComment` | 归档校验失败保留文件并停下；完成后停下，等用户明确说 **Code** |
+| **Design** | 用户明确说 **Design**，且已按 `contracts.md` 核对恢复 Plan | `reviewloop_begin(taskType="design")`、创建并修改根目录单个未跟踪设计文件、同 loop 内 `REWORK` 返工；送审前发布设计草稿评论、发布每轮审查记录与外部审查转贴评论、更新“设计过程”区块（均见 `contracts.md` §5，不构成授权）；`PASS` 后发布设计归档评论、更新索引、校验哈希 = `designSha256`、清理该未跟踪临时文件并发布 `designPassComment` | 归档校验失败保留文件并停下；完成后停下，等用户明确说 **Code** |
 | **Code** | 用户明确说 **Code**，且已按 `contracts.md` 恢复核对 Design 原文与 `designSha256` | 在任务允许范围内修改文件、运行测试与检查、同 loop 内 `REWORK` / `PHASE_PASS` 返工、正常 `commit`、正常 `push` 至本任务分支、更新 PR 描述交接块并运行 `check-pr-handoff.js` | Code 本地 PASS 并完成已授权交付后停下（不得 `merge`；本地 PASS 不等于 PR bot `READY`） |
 | **PR 修复** | 用户明确说 **处理 PR \<n\>**，且已核对原合同/loop、当前 `HEAD` 与最新 `<!-- jiaze-review-session:v1 -->` | 当状态为 `REWORK` 且 `lastReviewedHead` 匹配 `HEAD` 时：在同任务分支修复、运行验证、正常 `commit`/`push`、在当前 `HEAD` 之后未重复发过时评论一次 `@gemini review` | 状态为 `HUMAN_REQUIRED`、`AUDIT_PENDING`、`PARTIAL`、缺失或过期时停止；修复推送并评论后停止；**绝不点 Resolve** |
 

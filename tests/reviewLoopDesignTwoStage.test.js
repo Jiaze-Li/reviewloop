@@ -198,9 +198,13 @@ test('blocking defects => REWORK without consuming the exchange budget; planConc
   assert.equal(r1.status, 'REWORK');
   assert.equal(r1.exchangeCount, undefined);
   assert.equal(r1.blockingFindings[0].title, 'missing AC');
+  // A genuinely adjudicated REWORK is bound to the exact design the Supervisor saw.
+  assert.equal(r1.adjudicatedDesignSha256, designContentSha256(readFileSync(path.join(cwd, 'Prompt.md'), 'utf8')));
   writeDesign(cwd, `${DESIGN}\n## AC\n- ok\n`);
   const r2 = await ctl.review({ loopId: b.loopId });
   assert.equal(r2.status, 'PASS');
+  assert.equal(r2.adjudicatedDesignSha256, r2.designSha256);
+  assert.notEqual(r2.adjudicatedDesignSha256, r1.adjudicatedDesignSha256);
   assert.equal(r2.planConcern, 'Plan itself may be wrong');
   rmSync(cwd, { recursive: true, force: true });
 });
@@ -213,6 +217,7 @@ test('NEEDS_HUMAN in round 1 => resumable HUMAN_REQUIRED with questions', async 
   const r = await ctl.review({ loopId: b.loopId });
   assert.equal(r.status, 'HUMAN_REQUIRED');
   assert.deepEqual(r.humanQuestions, ['Which user group?']);
+  assert.match(r.adjudicatedDesignSha256, /^[0-9a-f]{64}$/);
   assert.notEqual(r.terminal, true);
   rmSync(cwd, { recursive: true, force: true });
 });
@@ -233,6 +238,7 @@ test('I2: invalid/unusable Reviewer or Supervisor output, or a missing PASS comm
     const r = await ctl.review({ loopId: b.loopId });
     assert.equal(r.status, 'HUMAN_REQUIRED', name);
     assert.equal(r.designSha256, undefined, name);
+    assert.equal(r.adjudicatedDesignSha256, undefined, `${name}: no adjudication => no reviewed-hash binding`);
     rmSync(cwd, { recursive: true, force: true });
   }
 });
