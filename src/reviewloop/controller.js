@@ -561,45 +561,51 @@ export function createReviewLoopController({
       if (releasedByGrant) heldImage = JSON.parse(JSON.stringify(loopState));
     }
 
-    try {
-      // Upgrade-safe task-definition preflight. New begins enforce these bounds
-      // before repository work, but an in-flight objective frozen by an older
-      // ReviewLoop may legitimately carry a prior-version fingerprint and
-      // oversized metadata. Never let PHASE_PASS turn that legacy state into an
-      // unbounded contextRefreshSafe resume packet.
-      const boundedPhases = normalizePhasePlan(objective.phases ?? []);
-      const boundedEvidenceRequirements = normalizeEvidenceRequirements(
-        objective.evidenceRequirements ?? [],
-        boundedPhases.map((phase) => phase.id),
-      );
-      const boundedContractText = normalizeContractText(objective.contractText);
-      assertResumeTaskDefinitionBound({
-        goal: objective.goal,
-        constraints: objective.constraints ?? [],
-        phases: boundedPhases,
-        contractText: boundedContractText,
-        verificationPlan: objective.verificationPlan ?? null,
-        evidenceRequirements: boundedEvidenceRequirements,
-      });
-    } catch (err) {
-      // Preflight is a review operation even when it does not run the Gate.
-      // Preserve the frozen objective verbatim; fail closed instead of
-      // truncating or rewriting a fingerprint-valid legacy task definition.
-      recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
-      recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err?.message ?? String(err));
-      await saveLoop(loopState);
-      return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
-    }
-    // Migrate old multi-version histories without changing any proof binding,
-    // completed phase, objective or task-wide spend counter.
-    loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
+    const continueReview = async () => {
+      try {
+        // Upgrade-safe task-definition preflight. New begins enforce these bounds
+        // before repository work, but an in-flight objective frozen by an older
+        // ReviewLoop may legitimately carry a prior-version fingerprint and
+        // oversized metadata. Never let PHASE_PASS turn that legacy state into an
+        // unbounded contextRefreshSafe resume packet.
+        const boundedPhases = normalizePhasePlan(objective.phases ?? []);
+        const boundedEvidenceRequirements = normalizeEvidenceRequirements(
+          objective.evidenceRequirements ?? [],
+          boundedPhases.map((phase) => phase.id),
+        );
+        const boundedContractText = normalizeContractText(objective.contractText);
+        assertResumeTaskDefinitionBound({
+          goal: objective.goal,
+          constraints: objective.constraints ?? [],
+          phases: boundedPhases,
+          contractText: boundedContractText,
+          verificationPlan: objective.verificationPlan ?? null,
+          evidenceRequirements: boundedEvidenceRequirements,
+        });
+      } catch (err) {
+        // Preflight is a review operation even when it does not run the Gate.
+        // Preserve the frozen objective verbatim; fail closed instead of
+        // truncating or rewriting a fingerprint-valid legacy task definition.
+        recordTransition(loopState, REVIEW_LOOP_STATES.REVIEWING, 'frozen task-definition preflight');
+        recordTransition(loopState, REVIEW_LOOP_STATES.HUMAN_REQUIRED, err?.message ?? String(err));
+        await saveLoop(loopState);
+        return humanRequiredResult(loopState, null, await durableTelemetry(loopId));
+      }
+      // Migrate old multi-version histories without changing any proof binding,
+      // completed phase, objective or task-wide spend counter.
+      loopState.evidenceRecords = latestEvidenceRecords(loopState.evidenceRecords, objective);
+      return reviewLocal({ loopState, evidence, signal, onHeartbeat });
+    };
 
-    if (!releasedByGrant) return reviewLocal({ loopState, evidence, signal, onHeartbeat });
+    if (!releasedByGrant) return continueReview();
 
-    // Released by a grant: the stop is only really lifted once a model call is
-    // actually paid for. A Gate failure / evidence stop / no-progress answer spent
-    // nothing, so the loop is put back EXACTLY as it was (still HUMAN_REQUIRED, grant
-    // unconsumed); otherwise the grant is marked consumed.
+    // Released by a grant. Safety direction: the grant is marked consumed and saved
+    // BEFORE anything can be paid for, so a crash or an abort after a model call is
+    // reserved can never let the same grant be replayed for another paid call. The
+    // price is that a crash BEFORE any spend loses the authorization (the user simply
+    // authorizes again). If the call ends having spent nothing (Gate failure, evidence
+    // stop, no progress, an exception), the loop is put back EXACTLY as it was: still
+    // HUMAN_REQUIRED and the grant unconsumed.
     const spendMark = async () => {
       const wf = await persistence.readWorkflowState(loopState.loopId);
       const reservations = wf?.modelSpendReservations && typeof wf.modelSpendReservations === 'object' ? Object.keys(wf.modelSpendReservations).length : 0;
@@ -607,15 +613,20 @@ export function createReviewLoopController({
       return reservations + records;
     };
     const markBefore = await spendMark();
-    const out = await reviewLocal({ loopState, evidence, signal, onHeartbeat });
-    const spent = (await spendMark()) > markBefore;
-    const fresh = await loadLoop(loopState.loopId);
-    if (!spent) {
+    loopState.rereviewGrants = (loopState.rereviewGrants ?? []).map((g) => (g?.id === releasedByGrant.id ? { ...g, consumedAt: new Date().toISOString() } : g));
+    await saveLoop(loopState);
+    const putBackIfUnspent = async () => {
+      if ((await spendMark()) > markBefore) return;
       await saveLoop(heldImage);
-      return out;
+    };
+    let out;
+    try {
+      out = await continueReview();
+    } catch (err) {
+      try { await putBackIfUnspent(); } catch { /* the original error is the one to surface */ }
+      throw err;
     }
-    fresh.rereviewGrants = (fresh.rereviewGrants ?? []).map((g) => (g?.id === releasedByGrant.id ? { ...g, consumedAt: new Date().toISOString() } : g));
-    await saveLoop(fresh);
+    await putBackIfUnspent();
     return out;
   }
 

@@ -259,3 +259,48 @@ test('AC-08: state matrix - authorize-rereview is listed iff its own dry-run pre
     assert.ok(!text.includes('让 Worker 用同一个任务再次发起审查'), `${name}: no bare Worker retry advice`);
   }
 });
+
+// ---- review findings: consume-before-spend, restore on exception --------------------
+
+test('I3/O4: the grant is already consumed when the first model call is dispatched (a crash or abort cannot replay it)', async () => {
+  const w = await stopped();
+  const refused = await w.controller.review({ loopId: w.loopId });
+  await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'retry' });
+  let consumedAtDispatch = null;
+  const spy = createReviewLoopController({
+    persistence: w.persistence,
+    captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true, noWorkerChangeYet: false, changedFiles: ['a.js'], fingerprint: 'DELTA_1', diff: 'diff --git a/a.js b/a.js\n+++ b/a.js\n+// DELTA_1\n' }),
+    runGateFn: async () => ({ verdict: 'PASS', pass: true, fingerprint: 'GATE_FP', failureIdentities: [], results: [] }),
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+    reviewerFn: async () => {
+      const g = (await w.persistence.readWorkflowState(w.loopId)).reviewLoop.rereviewGrants[0];
+      consumedAtDispatch = g.consumedAt;
+      throw new Error('process killed');
+    },
+  });
+  await spy.review({ loopId: w.loopId }).catch(() => {});
+  assert.ok(consumedAtDispatch, 'consumedAt was durable before the model call ran');
+  const after = (await w.persistence.readWorkflowState(w.loopId)).reviewLoop;
+  assert.ok(after.rereviewGrants[0].consumedAt, 'a call that spent stays consumed');
+});
+
+test('I3: an exception under a grant before any spend restores the exact held state and the unconsumed grant', async () => {
+  const w = await stopped();
+  const refused = await w.controller.review({ loopId: w.loopId });
+  await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'retry' });
+  const before = JSON.parse(await snapshot(w));
+  const boom = createReviewLoopController({
+    persistence: w.persistence,
+    captureBaselineFn: async () => ({ head: 'BASE', dirtyFiles: [], evidenceComplete: true }),
+    collectWorkerDeltaFn: async () => ({ baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true, noWorkerChangeYet: false, changedFiles: ['a.js'], fingerprint: 'DELTA_1', diff: 'diff --git a/a.js b/a.js\n+++ b/a.js\n+// DELTA_1\n' }),
+    runGateFn: async () => { throw new Error('gate crashed'); },
+    discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
+    reviewerFn: async () => { throw new Error('unreachable'); },
+  });
+  await boom.review({ loopId: w.loopId }).catch(() => {});
+  const after = JSON.parse(await snapshot(w));
+  assert.equal(after.reviewLoop.state, 'HUMAN_REQUIRED');
+  assert.deepEqual(after.reviewLoop.history, before.reviewLoop.history);
+  assert.equal(after.reviewLoop.rereviewGrants[0].consumedAt, null);
+});
