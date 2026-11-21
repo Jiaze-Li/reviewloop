@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T08:00:18.133Z",
+  "updatedAt": "2026-11-21T08:18:19.251Z",
   "task": {
     "id": "plan/review-input-choice-and-decision-origin-20261121",
     "branch": "plan/review-input-choice-and-decision-origin-20261121",
@@ -8,7 +8,7 @@
     "task": "Development branch: plan/review-input-choice-and-decision-origin-20261121",
     "started": "2026-11-21T09:40:28+08:00",
     "status": "In progress",
-    "current": "Add selectable incremental review route for large Design reviews",
+    "current": "Raise the Supervisor call ceiling to 16 for incremental Design loops only",
     "next": "用真实模型小范围试跑分步审查，确认质量与费用后再决定是否对大型设计默认启用",
     "history": [
       {
@@ -22,6 +22,10 @@
       {
         "at": "2026-11-21T16:00:05+08:00",
         "text": "Add decision-provenance rule and zero-paid A/B/C review-input comparison"
+      },
+      {
+        "at": "2026-11-21T16:18:04+08:00",
+        "text": "Add selectable incremental review route for large Design reviews"
       }
     ],
     "commits": [
@@ -48,6 +52,12 @@
         "branch": "plan/review-input-choice-and-decision-origin-20261121",
         "timestamp": "2026-11-21T16:00:05+08:00",
         "message": "Add selectable incremental review route for large Design reviews"
+      },
+      {
+        "sha": "7a7a1da706e236acf946e53b58149bbccd707ad5",
+        "branch": "plan/review-input-choice-and-decision-origin-20261121",
+        "timestamp": "2026-11-21T16:18:04+08:00",
+        "message": "Raise the Supervisor call ceiling to 16 for incremental Design loops only"
       }
     ],
     "pr": {
