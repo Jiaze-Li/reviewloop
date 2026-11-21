@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T02:32:48.959Z",
+  "updatedAt": "2026-11-21T02:32:54.096Z",
   "task": {
     "id": "plan/review-reliability-20261121",
     "branch": "plan/review-reliability-20261121",
@@ -76,7 +76,7 @@
       "title": "plan: harden ReviewLoop review reliability and governed recovery",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/69",
       "merged": false,
-      "updatedAt": "2026-11-21T02:13:32Z"
+      "updatedAt": "2026-11-21T02:32:42Z"
     },
     "completed": null,
     "outcome": null
