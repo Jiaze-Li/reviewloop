@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-11-21T02:35:08.307Z",
+  "updatedAt": "2026-11-21T02:40:05.626Z",
   "task": {
     "id": "plan/review-reliability-20261121",
     "branch": "plan/review-reliability-20261121",
     "title": "plan/review-reliability-20261121",
     "task": "Development branch: plan/review-reliability-20261121",
     "started": "2026-11-21T00:07:08+08:00",
-    "status": "In progress",
+    "status": "Completed",
     "current": "test(reviewloop): update all Design test paths for receipt-free adjudication",
     "next": "等待你验收这次改动；如需合并，请你本人决定（尚未合并、尚未经过 PR 机器人审查）",
     "history": [
@@ -92,13 +92,15 @@
     ],
     "pr": {
       "number": 69,
-      "state": "open",
+      "state": "closed",
       "title": "plan: harden ReviewLoop review reliability and governed recovery",
       "url": "https://github.com/Jiaze-Li/reviewloop/pull/69",
-      "merged": false,
-      "updatedAt": "2026-11-21T02:34:48Z"
+      "merged": true,
+      "mergedAt": "2026-11-21T02:39:48Z",
+      "closedAt": "2026-11-21T02:39:48Z",
+      "updatedAt": "2026-11-21T02:39:48Z"
     },
-    "completed": null,
-    "outcome": null
+    "completed": "2026-11-21T02:39:48Z",
+    "outcome": "Merged"
   }
 }
