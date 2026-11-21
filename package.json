@@ -14,6 +14,7 @@
     "install-global": "node ./bin/install-plugin.js",
     "uninstall-global": "node ./bin/install-plugin.js --uninstall",
     "benchmark": "node ./scripts/benchmark-context-footprint.js",
+    "benchmark:routes": "node ./scripts/benchmark-review-input-routes.js",
     "benchmark:transports": "node ./scripts/benchmark-review-transports.js",
     "cli:status": "node ./bin/reviewloop.js cli status",
     "cli:repair": "node ./bin/reviewloop.js cli repair",
