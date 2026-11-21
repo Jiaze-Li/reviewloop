@@ -20,7 +20,7 @@ function world({ failReviewer = true, gateVerdict = 'PASS' } = {}) {
     collectWorkerDeltaFn: async () => {
       calls.delta += 1;
       return {
-        baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true, noWorkerChangeYet: false,
+        baselineHead: 'BASE', currentHead: 'BASE', evidenceComplete: true, noWorkerChangeYet: state.noWorkerChangeYet === true,
         changedFiles: ['a.js'], fingerprint: state.fingerprint, diff: `diff --git a/a.js b/a.js\n+++ b/a.js\n+// ${state.fingerprint}\n`,
       };
     },
@@ -129,27 +129,40 @@ test('AC-06: a grant for other content, an older stop, or a consumed grant relea
   assert.notEqual(wf.rereviewGrants[1].stopAt, newStop.at);
 });
 
-test('AC-06 / I3: a Gate failure under a grant spends nothing, leaves the stop and the SAME grant intact', async () => {
+test('AC-08: authorized Gate failure keeps durable REWORK and allows Worker to continue', async () => {
   const w = await stopped();
   w.state.gateVerdict = 'FAIL';
   w.state.failReviewer = false;
   const refused = await w.controller.review({ loopId: w.loopId });
-  await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'try the gate' });
+  await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'resume' });
   const before = JSON.parse(await snapshot(w));
   const callsBefore = w.calls.reviewer;
   const r = await w.controller.review({ loopId: w.loopId });
-  assert.equal(w.calls.reviewer, callsBefore, 'the Gate stopped it before any model call');
-  assert.notEqual(r.status, 'PASS');
+  assert.equal(r.status, 'REWORK');
+  assert.equal(w.calls.reviewer, callsBefore, 'no model call on Gate failure');
   const after = JSON.parse(await snapshot(w));
-  assert.equal(after.reviewLoop.state, 'HUMAN_REQUIRED', 'still stopped: no REVIEWING ambiguity is left behind');
-  assert.deepEqual(after.reviewLoop.history, before.reviewLoop.history);
-  assert.equal(after.reviewLoop.rereviewGrants[0].consumedAt, null, 'grant not consumed');
-  // the same content can retry under the same grant once the Gate passes
+  assert.equal(after.reviewLoop.state, 'REWORK', 'persisted state agrees with return');
+  assert.ok(after.reviewLoop.history.length > before.reviewLoop.history.length);
+  assert.ok(after.reviewLoop.rereviewGrants[0].consumedAt);
   w.state.gateVerdict = 'PASS';
-  const ok = await w.controller.review({ loopId: w.loopId });
-  assert.equal(ok.status, 'PASS');
+  assert.equal((await w.controller.review({ loopId: w.loopId })).status, 'PASS');
 });
 
+test('AC-08: an authorized NO_PROGRESS must not restore durable HUMAN_REQUIRED', async () => {
+  const w = await stopped();
+  const refused = await w.controller.review({ loopId: w.loopId });
+  await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'try' });
+  w.state.noWorkerChangeYet = true;
+  const r = await w.controller.review({ loopId: w.loopId });
+  assert.equal(r.status, 'NO_PROGRESS');
+  const after = JSON.parse(await snapshot(w));
+  assert.equal(after.reviewLoop.state, 'REVIEWING');
+  assert.ok(after.reviewLoop.rereviewGrants[0].consumedAt);
+  w.state.noWorkerChangeYet = false;
+  w.state.fingerprint = 'DELTA_FRESH';
+  w.state.failReviewer = false;
+  assert.equal((await w.controller.review({ loopId: w.loopId })).status, 'PASS');
+});
 test('AC-06: authorizations beyond the standard count need a stated call budget; budget and ledger are never reset', async () => {
   const w = await stopped();
   const refused = await w.controller.review({ loopId: w.loopId });
@@ -285,7 +298,7 @@ test('I3/O4: the grant is already consumed when the first model call is dispatch
   assert.ok(after.rereviewGrants[0].consumedAt, 'a call that spent stays consumed');
 });
 
-test('I3: an exception under a grant before any spend restores the exact held state and the unconsumed grant', async () => {
+test('AC-08: a pre-spend exception does not rewind the authorized REVIEWING state or grant history', async () => {
   const w = await stopped();
   const refused = await w.controller.review({ loopId: w.loopId });
   await authorizeRereview({ persistence: w.persistence, loopId: w.loopId, submission: refused.submissionDigest, reason: 'retry' });
@@ -298,9 +311,9 @@ test('I3: an exception under a grant before any spend restores the exact held st
     discoverVerificationCommandsFn: () => ({ source: 'test', commands: ['echo'] }),
     reviewerFn: async () => { throw new Error('unreachable'); },
   });
-  await boom.review({ loopId: w.loopId }).catch(() => {});
+  await assert.rejects(() => boom.review({ loopId: w.loopId }), /gate crashed/);
   const after = JSON.parse(await snapshot(w));
-  assert.equal(after.reviewLoop.state, 'HUMAN_REQUIRED');
-  assert.deepEqual(after.reviewLoop.history, before.reviewLoop.history);
-  assert.equal(after.reviewLoop.rereviewGrants[0].consumedAt, null);
+  assert.equal(after.reviewLoop.state, 'REVIEWING');
+  assert.ok(after.reviewLoop.history.length > before.reviewLoop.history.length);
+  assert.ok(after.reviewLoop.rereviewGrants[0].consumedAt);
 });

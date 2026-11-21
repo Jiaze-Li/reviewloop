@@ -1,4 +1,4 @@
-// P2 (RL-REVIEW-RELIABILITY): pre-dispatch input budget + dense receipts.
+// P2 (RL-REVIEW-RELIABILITY): pre-dispatch input budget.
 // Pure/unit level; no model, no network. The only process spawned is the local
 // argv probe, and only through an injected fake here.
 import test from 'node:test';
@@ -7,80 +7,6 @@ import {
   DEFAULT_UNVERIFIED_INPUT_LIMIT, InputBudgetError, assertPromptWithinBudget, estimateInputTokens, measurePrompt,
   probeArgvEnvelope, resolveInputBudget, utf8Bytes,
 } from '../src/reviewloop/inputBudget.js';
-import {
-  RECEIPT_INTERVAL_BYTES, newReceiptSession, unwrapReceipts, verifyReceipts, wrapWithReceipts,
-} from '../src/reviewloop/receipts.js';
-
-const lines = (n, w = 60) => Array.from({ length: n }, (_, i) => `line ${String(i).padStart(5, '0')} ${'x'.repeat(w)}`).join('\n');
-
-// ---- receipts ---------------------------------------------------------------------
-
-test('wrap/unwrap restores every block byte-for-byte (empty, no trailing newline, trailing newline, multibyte)', () => {
-  for (const text of ['', 'a', 'a\n', 'a\nb', lines(300), `${lines(300)}\n`, '中文设计\n'.repeat(900), 'x\r\ny\r\n'.repeat(2000), '\n\n\n']) {
-    const session = newReceiptSession('salt');
-    const wrapped = wrapWithReceipts(text, session);
-    assert.equal(unwrapReceipts(wrapped, session.blocks[0]), text, JSON.stringify(text.slice(0, 20)));
-    assert.ok(session.expected.length >= 1, 'every block ends with a receipt');
-  }
-});
-
-test('receipts are dense: the gap between two receipts never exceeds one interval plus one line', () => {
-  const session = newReceiptSession('salt');
-  const text = lines(2000, 100);
-  const wrapped = wrapWithReceipts(text, session);
-  const parts = wrapped.split(/⟦RL:\d+:[0-9a-f]{8}⟧\n/);
-  const longestLine = Math.max(...text.split('\n').map((l) => utf8Bytes(`${l}\n`)));
-  for (const p of parts) assert.ok(utf8Bytes(p) < RECEIPT_INTERVAL_BYTES + longestLine, `gap ${utf8Bytes(p)}`);
-  assert.ok(session.expected.length >= Math.floor(utf8Bytes(text) / (RECEIPT_INTERVAL_BYTES + longestLine)));
-});
-
-test('receipt values depend on the per-call salt; the numbering is global across blocks', () => {
-  const a = newReceiptSession('salt-a');
-  const b = newReceiptSession('salt-b');
-  wrapWithReceipts('one\n', a); wrapWithReceipts('two\n', a);
-  wrapWithReceipts('one\n', b); wrapWithReceipts('two\n', b);
-  assert.equal(a.expected.length, 2);
-  assert.match(a.expected[1], /^⟦RL:2:/);
-  assert.notEqual(a.expected[0], b.expected[0]);
-  assert.notEqual(newReceiptSession().salt, newReceiptSession().salt);
-});
-
-test('verifyReceipts: complete is OK; tail loss, middle loss, reorder, wrong value, extra and missing field are all refused', () => {
-  const session = newReceiptSession('salt');
-  wrapWithReceipts(lines(400, 100), session);
-  const exp = session.expected;
-  assert.ok(exp.length >= 5);
-  assert.equal(verifyReceipts([...exp], exp).ok, true);
-  assert.deepEqual(
-    [verifyReceipts(exp.slice(0, -1), exp), verifyReceipts([...exp.slice(0, 2), ...exp.slice(3)], exp),
-      verifyReceipts([exp[1], exp[0], ...exp.slice(2)], exp), verifyReceipts([...exp.slice(0, -1), '⟦RL:9:00000000⟧'], exp),
-      verifyReceipts([...exp, '⟦RL:99:00000000⟧'], exp), verifyReceipts(undefined, exp)].map((r) => r.class),
-    ['MISSING', 'ORDER_OR_VALUE', 'ORDER_OR_VALUE', 'ORDER_OR_VALUE', 'EXTRA', 'MISSING_FIELD'],
-  );
-  assert.equal(verifyReceipts(exp.slice(0, -1), exp).firstMissingIndex, exp.length - 1);
-});
-
-test('the bound is stated honestly: a loss containing NO receipt line is NOT detected, and is shorter than one interval + one line', () => {
-  const session = newReceiptSession('salt');
-  const text = lines(600, 100);
-  const wrapped = wrapWithReceipts(text, session);
-  // Remove a stretch of lines that lies strictly between two receipt lines.
-  const arr = wrapped.split('\n');
-  const receiptIdx = arr.map((l, i) => (/^⟦RL:/.test(l) ? i : -1)).filter((i) => i >= 0);
-  const from = receiptIdx[0] + 1;
-  const to = receiptIdx[1]; // exclusive
-  const removed = arr.slice(from + 1, to - 1);
-  assert.ok(removed.length > 0);
-  const remaining = [...arr.slice(0, from + 1), ...arr.slice(to - 1)];
-  const echoed = remaining.filter((l) => /^⟦RL:/.test(l));
-  assert.equal(verifyReceipts(echoed, session.expected).ok, true, 'a receipt-free loss is not detectable (documented limit)');
-  const lostBytes = utf8Bytes(`${removed.join('\n')}\n`);
-  assert.ok(lostBytes < RECEIPT_INTERVAL_BYTES + utf8Bytes(`${arr[from]}\n`), 'and it is strictly bounded by the interval');
-  // Whereas a loss spanning a receipt line IS detected.
-  const spanning = [...arr.slice(0, from), ...arr.slice(to + 2)];
-  assert.equal(verifyReceipts(spanning.filter((l) => /^⟦RL:/.test(l)), session.expected).ok, false);
-});
-
 // ---- budget -------------------------------------------------------------------------
 
 test('resolveInputBudget takes the strictest bound; the token bound uses 80% of the sentinel and 3 bytes/token', () => {

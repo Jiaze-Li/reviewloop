@@ -1,5 +1,4 @@
 // Two-stage Design review: Reviewer independent proposal + Supervisor adjudication.
-import { withReceipts } from './helpers/receiptEcho.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, readFileSync } from 'node:fs';
@@ -68,7 +67,7 @@ function makeCtl({ cwd, fakes = {}, deltaFp, inputBudget = null }) {
     designSupervisorFn: async (a) => {
       log.supervisor.push(a);
       const v = fakes.supervisor ? fakes.supervisor(log.supervisor.length, a) : adj();
-      return { value: withReceipts(a.prompt, v, fakes.mutateReceipts), usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
+      return { value: v, usage: { input_tokens: 1, output_tokens: 1 }, model: 'm' };
     },
     reviewerFn: async () => { throw new Error('single-pass reviewer must not run for two-stage design'); },
   });
@@ -1270,7 +1269,7 @@ test('AC-07 (synthetic, stub models): Supervisor fetches a range of a large trac
 });
 
 
-// ============================ P2: input budget, receipts, retries, evidence ============================
+// ============================ P2: input budget, retries, evidence ============================
 
 const budgetText = (bytes, tag) => {
   const line = `${tag} line of ordinary design prose that is long enough to be a realistic line\n`;
@@ -1299,7 +1298,6 @@ test('P2 AC-01/03: an adjudication prompt over budget (~220K chars) stops with Z
   const b = await beginBudget(ctl, cwd);
   writeDesign(cwd, BUDGET_DESIGN);
   const r = await ctl.review({ loopId: b.loopId });
-  if (r.status !== 'HUMAN_REQUIRED') console.log('DBG', JSON.stringify(r).slice(0, 600));
   assert.equal(r.status, 'HUMAN_REQUIRED');
   assert.equal(r.designSha256, undefined);
   assert.equal(log.supervisor.length, 0, 'not one supervisor call');
@@ -1349,55 +1347,18 @@ test('P2: a prompt within budget is untouched and PASSes; metrics are recorded a
   rmSync(cwd, { recursive: true, force: true });
 });
 
-const receiptDesign = `${budgetText(20_000, 'design')}\n## Options\n- A\n\n## Assumptions\nNone\n`;
-const CORRUPTIONS = {
-  tailLost: (l) => l.slice(0, -1),
-  middleLost: (l) => [...l.slice(0, 2), ...l.slice(4)],
-  reordered: (l) => [l[1], l[0], ...l.slice(2)],
-  wrongValue: (l) => [...l.slice(0, -1), '⟦RL:99:deadbeef⟧'],
-  extra: (l) => [...l, '⟦RL:999:abcdef01⟧'],
-  absent: () => undefined,
-};
-
-for (const [name, mutate] of Object.entries(CORRUPTIONS)) {
-  test(`P2 AC-02: receipts ${name} => INPUT_INCOMPLETE, never PASS, no paid retry, even with a perfect-looking verdict`, async () => {
-    const cwd = gitRepo();
-    const { ctl, log, persistence } = makeCtl({
-      cwd,
-      fakes: { mutateReceipts: mutate },
-      inputBudget: { limitBytes: 1_000_000, source: 'TEST' },
-    });
-    const b = await begin(ctl, cwd);
-    writeDesign(cwd, receiptDesign);
-    const r = await ctl.review({ loopId: b.loopId });
-    assert.equal(r.status, 'HUMAN_REQUIRED');
-    assert.equal(r.designSha256, undefined);
-    assert.equal(r.designPassComment, undefined);
-    assert.equal(log.supervisor.length, 1, 'a deterministic input failure is not retried');
-    const wf = await persistedState(persistence, b.loopId);
-    assert.equal(lastHrEntry(wf.reviewLoop).cause.kind, 'INPUT_INCOMPLETE');
-    const fr = wf.reviewLoop.failedRounds[0];
-    assert.equal(fr.replyClass, 'RECEIPTS_BAD');
-    assert.ok(fr.receipts.expectedCount >= 4, 'interior receipts exist for a 20 KB design');
-    assert.notEqual(fr.visibility, 'LOCAL_CONSTRUCTED', 'the call did happen');
-    rmSync(cwd, { recursive: true, force: true });
-  });
-}
-
-test('P2 AC-02: complete receipts PASS; stripping receipt lines leaves the Plan and design bytes intact', async () => {
+test('AC-07: design adjudication preserves exact Plan and Design without mandatory echo receipts', async () => {
   const cwd = gitRepo();
   const { ctl, log } = makeCtl({ cwd, inputBudget: { limitBytes: 1_000_000, source: 'TEST' } });
   const b = await begin(ctl, cwd);
-  writeDesign(cwd, receiptDesign);
+  writeDesign(cwd);
   const r = await ctl.review({ loopId: b.loopId });
   assert.equal(r.status, 'PASS');
   const sent = String(log.supervisor[0].prompt);
-  const stripped = sent.replace(/⟦RL:\d+:[0-9a-f]{8}⟧\n/g, '');
-  assert.ok(stripped.includes(PLAN), 'plan bytes verbatim');
-  assert.ok(stripped.includes(receiptDesign), 'design bytes verbatim');
+  assert.ok(sent.includes(PLAN) && sent.includes(DESIGN), 'complete frozen texts remain in the prompt');
+  assert.ok(!sent.includes('TRANSPORT RECEIPTS') && !sent.includes('⟦RL:'), 'no forced model echo cost');
   rmSync(cwd, { recursive: true, force: true });
 });
-
 test('P2 AC-09: an EMPTY reply is not re-bought; a format-only reply still gets exactly one retry', async () => {
   const cwd = gitRepo();
   const empty = makeCtl({
