@@ -56,12 +56,14 @@ test('F1: C keeps every call inside the budget; B grows past it; neither silentl
   assert.equal(segmentText('plan', small.plan).map((s) => s.text).join(''), small.plan);
 });
 
-test('F1/F2: at the full 96 KiB of source the 12-READ cap leaves a coverage gap, so C is not admitted', () => {
-  const c = simulateC(makeLargeFixture(), TIGHT_BUDGET_BYTES);
-  assert.equal(c.admitted, false);
-  assert.equal(c.stop, 'READ_BUDGET_COVERAGE_GAP');
-  assert.ok(c.unverifiedCriticalClaims > 0);
-  assert.equal(c.reads, CANDIDATE_LIMITS.maxRead);
+test('F1/F2: the full 96 KiB of source is admitted; more source reads than the cap leaves a visible coverage gap', () => {
+  const full = simulateC(makeLargeFixture(), TIGHT_BUDGET_BYTES);
+  assert.equal(full.admitted, true);
+  assert.ok(full.reads <= CANDIDATE_LIMITS.maxRead + 6, 'plan/design segments are pushed by the Controller and not capped');
+  const many = simulateC(makeLargeFixture({ sourceFiles: 24, sourceTotalBytes: 96 * 1024 }), TIGHT_BUDGET_BYTES);
+  assert.equal(many.admitted, false);
+  assert.equal(many.stop, 'READ_BUDGET_COVERAGE_GAP');
+  assert.ok(many.unverifiedCriticalClaims > 0);
 });
 
 test('F2: Plan and Design each legal but combined over budget; related sections must be co-visible', () => {
@@ -117,11 +119,11 @@ test('F4: SEARCH -> READ with 24 KiB / 400 line / 96 KiB limits, caching, tracke
   const before = broker.counts().reads;
   assert.equal(broker.read({ resource: 'repo', ref: 'src/m1.js', start: 1, end: 400 }).ok, true);
   assert.equal(broker.counts().reads, before, 'duplicate READ is served from cache and not re-counted');
-  // 96 KiB cumulative source cap: 4 files x 2 segments would exceed it only once the cap is crossed
+  // source caps: the cumulative 96 KiB and the per-stage read count are both hard stops
   const { broker: b2 } = brokerFor(2, makeLargeFixture({ sourceFiles: 8, sourceTotalBytes: 96 * 1024 }));
   let rejected = null;
   for (let i = 0; i < 8 && !rejected; i += 1) {
-    for (const [start, end] of [[1, 200], [201, 400]]) {
+    for (const [start, end] of [[1, 200], [201, 400], [1, 199]]) {
       const x = b2.read({ resource: 'repo', ref: `src/m${i}.js`, start, end });
       if (!x.ok) { rejected = x.reason; break; }
     }

@@ -118,6 +118,7 @@ export function createReviewLoopMcpServer({
           required: z.boolean().optional(),
           covers: z.array(z.string().min(1)).optional(),
         })).optional().describe('frozen non-command evidence obligations; required items mechanically block PASS until evidence is submitted'),
+        designInputRoute: z.enum(['incremental']).optional().describe('design only, requires reviewTarget: "incremental" reviews a large Plan/Design/source combination in several bounded stateless calls (Controller-read segments, SEARCH/READ source requests, coverage and open findings tracked by the Controller) instead of one full prompt. Omit for the default route. Frozen with the loop; same Gate, budgets and spend limits'),
         reviewTarget: z.string().min(1).optional().describe('design only: ONE repository-relative path (forward slashes, no "..") of the complete design file, at most 65536 UTF-8 bytes. It must NOT exist yet: call reviewloop_begin first, THEN create the file. Requires contractText (the complete Plan) and phases=[]. Every reviewloop_review round gives the Reviewer the whole current file; PASS returns designSha256'),
         designSha256: z.string().regex(/^[0-9a-fA-F]{64}$/).optional().describe('code only, optional: the designSha256 returned by the Design PASS. reviewloop_begin refuses a contractText whose whitespace-trimmed UTF-8 content hashes differently. A content-consistency check, not proof of Design PASS or of user authorization'),
         verificationCommands: z.array(z.string().min(1)).optional().describe('global whole-task deterministic Gate commands, frozen at begin and run at every phase gate plus the final gate; phase-local commands belong in phases[].verificationCommands'),
@@ -163,6 +164,7 @@ export function createReviewLoopMcpServer({
       maxReviewRounds,
       phases,
       reviewTarget,
+      designInputRoute,
       designSha256,
     }, extra) => {
       const res = await ctl.begin({
@@ -179,6 +181,7 @@ export function createReviewLoopMcpServer({
         maxReviewRounds,
         phases: phases ?? [],
         reviewTarget: reviewTarget ?? null,
+        designInputRoute: designInputRoute ?? null,
         designSha256: designSha256 ?? null,
         signal: extra?.signal,
       });

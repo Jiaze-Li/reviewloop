@@ -13,18 +13,19 @@
 
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DESIGN_LIMITS } from '../src/reviewloop/designTwoStage.js';
+import { INCREMENTAL_LIMITS, segmentText as productionSegmentText } from '../src/reviewloop/designIncremental.js';
 import { assertPromptWithinBudget, estimateInputTokens, InputBudgetError, utf8Bytes } from '../src/reviewloop/inputBudget.js';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 export const TIGHT_BUDGET_BYTES = 58 * 1024;
+// Same numbers the production incremental route enforces (designIncremental.js).
 export const CANDIDATE_LIMITS = Object.freeze({
-  maxSteps: 8,
-  maxSearch: 8,
-  maxRead: 12,
-  maxSegmentBytes: DESIGN_LIMITS.maxFileBytes,
-  maxSegmentLines: DESIGN_LIMITS.maxExcerptLines,
-  maxSourceBytes: DESIGN_LIMITS.maxTotalFileBytes,
+  maxSteps: INCREMENTAL_LIMITS.maxStepsPerStage,
+  maxSearch: INCREMENTAL_LIMITS.maxSearches,
+  maxRead: INCREMENTAL_LIMITS.maxSourceReads,
+  maxSegmentBytes: INCREMENTAL_LIMITS.segmentBytes,
+  maxSegmentLines: INCREMENTAL_LIMITS.segmentLines,
+  maxSourceBytes: INCREMENTAL_LIMITS.sourceBytes,
 });
 const INSTRUCTIONS_BYTES = 3000;
 const MANIFEST_BYTES = 1000;
@@ -45,24 +46,8 @@ export function makeLargeFixture({ planBytes = 40_000, designBytes = 64_000, dir
   };
 }
 
-// Whole-line segments: <= segment bytes and <= 400 lines. Never truncates.
-export function segmentText(resource, text, ref = resource) {
-  const out = [];
-  let cur = []; let bytes = 0; let start = 1; let n = 0;
-  const flush = () => {
-    if (!cur.length) return;
-    const body = cur.join('');
-    out.push({ id: `${ref}#L${start}-L${n}`, resource, text: body, bytes: utf8Bytes(body), sha256: sha(body) });
-    cur = []; bytes = 0; start = n + 1;
-  };
-  for (const line of text.split(/(?<=\n)/)) {
-    const b = utf8Bytes(line);
-    if (cur.length && (bytes + b > CANDIDATE_LIMITS.maxSegmentBytes || cur.length >= CANDIDATE_LIMITS.maxSegmentLines)) flush();
-    cur.push(line); bytes += b; n += 1;
-  }
-  flush();
-  return out;
-}
+// The production segmenter (whole lines, never truncating).
+export const segmentText = productionSegmentText;
 
 // ------------------------------------------------- shared candidate broker
 // One ACL used by BOTH candidate routes (B executes it as a sandbox, C as a
@@ -187,11 +172,13 @@ const checkpointBytes = (segments, findings = 0) => 600 + 120 * segments + 200 *
 
 // C: stateless call per step; each prompt = instructions + manifest + checkpoint + the segments just read.
 export function simulateC(fx, limitBytes, { relatedGroupSize = 2 } = {}) {
-  const segs = [...segmentText('plan', fx.plan), ...segmentText('design', fx.design),
-    ...fx.sources.flatMap((s) => segmentText('repo', s.text, s.path))];
+  // Plan/Design segments are pushed by the Controller (no read cap); only SOURCE reads are capped.
+  const required = [...segmentText('plan', fx.plan), ...segmentText('design', fx.design)];
+  const source = fx.sources.flatMap((s) => segmentText('repo', s.text, s.path));
   const searches = fx.sources.length;
-  const budgeted = segs.slice(0, CANDIDATE_LIMITS.maxRead);
-  const overBudgetReads = segs.length - budgeted.length;
+  const segs = [...required, ...source.slice(0, CANDIDATE_LIMITS.maxRead)];
+  const budgeted = segs;
+  const overBudgetReads = source.length - Math.min(source.length, CANDIDATE_LIMITS.maxRead);
   const prompts = [filler(INSTRUCTIONS_BYTES + MANIFEST_BYTES)];          // call 1: manifest only -> first SEARCH/READ request
   let pack = []; let packBytes = 0; let read = 0;
   const emit = () => {
@@ -213,7 +200,7 @@ export function simulateC(fx, limitBytes, { relatedGroupSize = 2 } = {}) {
   const peak = Math.max(...prompts.map(utf8Bytes));
   const fits = peak <= limitBytes;
   return {
-    route: 'C', admitted: fits && overBudgetReads === 0 && coRoom,
+    route: 'C', admitted: fits && overBudgetReads === 0 && coRoom && prompts.length <= CANDIDATE_LIMITS.maxSteps + 1,
     stop: !fits ? 'INPUT_TOO_LARGE' : overBudgetReads ? 'READ_BUDGET_COVERAGE_GAP' : !coRoom ? 'RELATED_SEGMENTS_NOT_CO_VISIBLE' : undefined,
     searches, reads: budgeted.length, checkpointBytes: checkpointBytes(read), unverifiedCriticalClaims: overBudgetReads,
     ...metrics(prompts),

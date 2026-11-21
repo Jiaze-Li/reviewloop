@@ -1165,7 +1165,10 @@ export function createReviewLoopController({
     if (objective.reviewTarget) {
       try {
         designTarget = await readReviewTarget({ cwd, reviewTarget: objective.reviewTarget });
-        assertTargetWithinOneChunk({ diff: delta.diff, target: designTarget, env });
+        // The incremental route shows the design to the models in Controller-read
+        // segments (never through the review diff), so the one-diff-chunk bound
+        // belongs to the default route only.
+        if (objective.designInputRoute !== 'incremental') assertTargetWithinOneChunk({ diff: delta.diff, target: designTarget, env });
       } catch (err) {
         if (!(err instanceof DesignTargetError)) throw err;
         return evidenceRework({

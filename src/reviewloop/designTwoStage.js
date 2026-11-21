@@ -17,6 +17,7 @@ import {
   InputBudgetError, assertPromptWithinBudget, probeArgvEnvelope, resolveInputBudget, sha256Hex, utf8Bytes,
 } from './inputBudget.js';
 import { DEFAULT_ROLE_POLICY } from '../orchestrator/roleRouting.js';
+import { runIncrementalDesign } from './designIncremental.js';
 import { getProviderCapabilities } from '../orchestrator/providerCapabilities.js';
 
 const execFileAsync = promisify(execFile);
@@ -397,6 +398,10 @@ function renderSourceHeader(f, kind) {
   return null;
 }
 
+export const renderSource = (f) => (f.excerpt
+  ? renderSourceHeader(f, 'VERIFIED SOURCE')
+  : `VERIFIED SOURCE FILE ${f.path} (sha256=${f.sha256 ?? 'unknown'}, dirty=${Boolean(f.dirty)}, source=${f.source ?? 'controller'}):\n${f.text}`);
+
 const alreadyProvidedBlock = (alreadyProvided) => (alreadyProvided?.length
   ? alreadyProvided.map((a) => `ALREADY PROVIDED AS WHOLE FILE: ${a.path} — cite "${a.path}"`).join('\n')
   : '');
@@ -427,6 +432,8 @@ export function buildFileRequestPrompt({ plan, context, workerSummary }) {
   ].filter(Boolean).join('\n');
 }
 
+export const PROPOSAL_SPEC = `Return ONE JSON object and nothing else (no prose, no code fence). Fields: proposals = array of 1 to ${DESIGN_LIMITS.maxProposals} objects, simplest reuse-first approach first; each object needs non-empty string fields title, summary and tradeoffs (its cost); confidenceNote = string (may be empty).\nExample: {"proposals":[{"title":"Reuse the existing queue","summary":"Add a retry step to the current upload queue.","tradeoffs":"Less flexible, but no new components."}],"confidenceNote":"Based on the files listed above."}`;
+
 export function buildProposalPrompt({ plan, context, files, rejected, workerSummary, alreadyProvided = [] }) {
   return [
     'You are an INDEPENDENT senior engineer. Propose how YOU would build the Plan; you have not seen anyone else\'s design.',
@@ -440,6 +447,17 @@ export function buildProposalPrompt({ plan, context, files, rejected, workerSumm
     'Example: {"proposals":[{"title":"Reuse the existing queue","summary":"Add a retry step to the current upload queue.","tradeoffs":"Less flexible, but no new components."}],"confidenceNote":"Based on the files listed above."}',
   ].filter(Boolean).join('\n');
 }
+
+// Verdict/finding/factCheck rules and the reply format; shared by the default and the incremental route.
+export const ADJUDICATION_COLUMNS = [
+    'Column 1 — comparison.verdict: ALIGNED (same approach), MINOR_DIFF (differences do not matter for the Plan), MAJOR_DIFF (materially different approach or cost), NEEDS_HUMAN (a product/scope decision or missing information only the user can supply; list it in humanQuestions).',
+    'Column 2 — blockingFindings (severity P1/P2 with title, detail, rule): violates the Plan or a non-goal; omits an acceptance criterion; internally inconsistent or contradicts stated repository facts or verified source code; missing "Options" or "Assumptions" section; a mechanism relying on an unstated premise; over-engineering where a simpler listed route satisfies the Plan. Speculative concerns are nonBlockingFindings.',
+    'Column 3 — factChecks: array (empty [] if no critical existing-code claims) of {claim, critical (boolean), status ("SUPPORTED"|"CONTRADICTED"|"UNVERIFIED"), evidenceSources (array of the EXACT labels shown above: the path of a VERIFIED SOURCE FILE, or the path#L<start>-L<end> label of a VERIFIED SOURCE EXCERPT), reason}. Never mark SUPPORTED without citing an actually provided VERIFIED SOURCE FILE or EXCERPT whose semantics & callers support the claim; lines outside a provided excerpt were NOT read and never support a claim. If codeIdentity mismatches a claimed commit/branch, sourceMode is "no-git", a verified file is dirty when clean HEAD is assumed, or a file was rejected/missing, mark UNVERIFIED (or CONTRADICTED if disproved).',
+    'If following the Plan itself looks wrong, do NOT block: put it in comparison.planConcern for the user.',
+    'designPassComment: only when verdict is ALIGNED or MINOR_DIFF, blockingFindings is empty, and no critical factCheck is CONTRADICTED or UNVERIFIED — a short, plain-language, formatted note for the user: what will be built, the comparison conclusion, and only material unconfirmed Assumptions (that affect scope, risk, or authorization) or planConcern if any; omit routine technical premises. No file paths or jargon. Otherwise null.',
+    'Return ONE JSON object and nothing else (no prose, no code fence). Rules: comparison.verdict is exactly one of ALIGNED, MINOR_DIFF, MAJOR_DIFF, NEEDS_HUMAN; comparison.reason and comparison.workerSummary are non-empty strings; comparison.planConcern is a string or null; blockingFindings is an array (may be empty) whose items have severity exactly "P1" or "P2" (a P3 or speculative item goes to nonBlockingFindings instead), a non-empty title, and string detail and rule; nonBlockingFindings is an array of {title, detail}; factChecks is an array of {claim, critical, status, evidenceSources, reason}; humanQuestions is an array of strings and MUST be non-empty when verdict is NEEDS_HUMAN; designPassComment is a string or null.',
+    'Example: {"comparison":{"verdict":"MINOR_DIFF","reason":"Both reuse the existing queue; only naming differs.","workerSummary":"Adds a retry step to the current queue.","planConcern":null},"blockingFindings":[{"severity":"P2","title":"Missing Assumptions section","detail":"The design never lists its premises.","rule":"Assumptions section required"}],"nonBlockingFindings":[{"title":"Vague wording","detail":"Section 3 could be shorter."}],"factChecks":[],"humanQuestions":[],"designPassComment":null}',
+];
 
 export function buildAdjudicationPrompt({
   plan, proposals, designText, history, exchangeCount,
@@ -464,13 +482,7 @@ export function buildAdjudicationPrompt({
     !factFetchUsed
       ? `FACT VERIFICATION STEP: If the design relies on critical existing-code claims (locks, concurrency, transactions, authority, state transitions, permissions, budgets, recovery) NOT yet covered by VERIFIED SOURCE FILE / VERIFIED SOURCE EXCERPT above, you MAY request up to ${DESIGN_LIMITS.maxRequestedFiles} tracked files or line ranges (including callers/consumers) by returning ONLY: {"needFactFiles":true,"requestedFiles":["path/a.js",{"path":"path/big.js","startLine":100,"endLine":180}],"pendingClaims":["short claim"]}. ${RANGE_GUIDANCE} If no critical existing-code claims exist or the provided files already suffice, return the final adjudication JSON directly.`
       : `FINAL FACT ADJUDICATION: Additional file fetching is complete. Do NOT return needFactFiles; return the final adjudication JSON now with factChecks covering EVERY pending claim${pendingClaims.length ? `: ${JSON.stringify(pendingClaims)}` : ' (non-empty)'}.`,
-    'Column 1 — comparison.verdict: ALIGNED (same approach), MINOR_DIFF (differences do not matter for the Plan), MAJOR_DIFF (materially different approach or cost), NEEDS_HUMAN (a product/scope decision or missing information only the user can supply; list it in humanQuestions).',
-    'Column 2 — blockingFindings (severity P1/P2 with title, detail, rule): violates the Plan or a non-goal; omits an acceptance criterion; internally inconsistent or contradicts stated repository facts or verified source code; missing "Options" or "Assumptions" section; a mechanism relying on an unstated premise; over-engineering where a simpler listed route satisfies the Plan. Speculative concerns are nonBlockingFindings.',
-    'Column 3 — factChecks: array (empty [] if no critical existing-code claims) of {claim, critical (boolean), status ("SUPPORTED"|"CONTRADICTED"|"UNVERIFIED"), evidenceSources (array of the EXACT labels shown above: the path of a VERIFIED SOURCE FILE, or the path#L<start>-L<end> label of a VERIFIED SOURCE EXCERPT), reason}. Never mark SUPPORTED without citing an actually provided VERIFIED SOURCE FILE or EXCERPT whose semantics & callers support the claim; lines outside a provided excerpt were NOT read and never support a claim. If codeIdentity mismatches a claimed commit/branch, sourceMode is "no-git", a verified file is dirty when clean HEAD is assumed, or a file was rejected/missing, mark UNVERIFIED (or CONTRADICTED if disproved).',
-    'If following the Plan itself looks wrong, do NOT block: put it in comparison.planConcern for the user.',
-    'designPassComment: only when verdict is ALIGNED or MINOR_DIFF, blockingFindings is empty, and no critical factCheck is CONTRADICTED or UNVERIFIED — a short, plain-language, formatted note for the user: what will be built, the comparison conclusion, and only material unconfirmed Assumptions (that affect scope, risk, or authorization) or planConcern if any; omit routine technical premises. No file paths or jargon. Otherwise null.',
-    'Return ONE JSON object and nothing else (no prose, no code fence). Rules: comparison.verdict is exactly one of ALIGNED, MINOR_DIFF, MAJOR_DIFF, NEEDS_HUMAN; comparison.reason and comparison.workerSummary are non-empty strings; comparison.planConcern is a string or null; blockingFindings is an array (may be empty) whose items have severity exactly "P1" or "P2" (a P3 or speculative item goes to nonBlockingFindings instead), a non-empty title, and string detail and rule; nonBlockingFindings is an array of {title, detail}; factChecks is an array of {claim, critical, status, evidenceSources, reason}; humanQuestions is an array of strings and MUST be non-empty when verdict is NEEDS_HUMAN; designPassComment is a string or null.',
-    'Example: {"comparison":{"verdict":"MINOR_DIFF","reason":"Both reuse the existing queue; only naming differs.","workerSummary":"Adds a retry step to the current queue.","planConcern":null},"blockingFindings":[{"severity":"P2","title":"Missing Assumptions section","detail":"The design never lists its premises.","rule":"Assumptions section required"}],"nonBlockingFindings":[{"title":"Vague wording","detail":"Section 3 could be shorter."}],"factChecks":[],"humanQuestions":[],"designPassComment":null}',
+    ...ADJUDICATION_COLUMNS,
   ].filter(Boolean).join('\n');
 }
 
@@ -823,7 +835,7 @@ export function createDesignTwoStageRunner({
     // an input-size stop is deterministic: it never buys the same prompt twice. Every prompt is measured against the budget
     // BEFORE evidence registration / reservation / dispatch, retries included.
     const runStage = async ({
-      op, stageName, role, routeFn, defaultFamily, fn, prompt, validate, label, counter, components = {},
+      op, stageName, role, routeFn, defaultFamily, fn, prompt, validate, label, counter, components = {}, hooks = null,
     }) => {
       const budget = budgets[role];
       const attempt = (p, suffix) => {
@@ -851,6 +863,7 @@ export function createDesignTwoStageRunner({
         stop: { kind: 'INPUT_TOO_LARGE', code: 'INPUT_TOO_LARGE' },
       });
       const send = async (p, suffix, entry) => {
+        if (!suffix) await hooks?.onDispatch?.();
         const reply = await metered({
           spend, loopState, role, routeFn, defaultFamily,
           op: `${op}${suffix}`, stageEvidence: `${designTarget.sha256}:${stage}:${stageName}${suffix}`,
@@ -904,6 +917,20 @@ export function createDesignTwoStageRunner({
       kind: 'FAILED', reason: r.failed, safeReason: r.safeFailed ?? r.failed, stop: r.stop ?? { kind: 'REVIEW_TOOL_FAILED', code: 'UNUSABLE' },
       physicalCalls, evidence: evidenceLog, fileMeta,
     });
+
+    if (objective.designInputRoute === 'incremental') {
+      return runIncrementalDesign({
+        runStage, loopState, designState, designTarget, plan, context, cwd, execFileFn, stage, saveLoop, beat, failOut,
+        evidenceLog, physicalCalls, budgets, noteFiles, objective,
+        routes: {
+          reviewer: { role: 'reviewer', routeFn: routeReviewerFn, defaultFamily: 'agy:opus', fn: designReviewerFn },
+          supervisor: { role: 'supervisor', routeFn: routeSupervisorFn, defaultFamily: 'agy:gemini-supervisor', fn: designSupervisorFn },
+        },
+      }, {
+        readRequestedFiles, validateProposals, validateAdjudication, proposalSpec: PROPOSAL_SPEC, adjudicationSpec: ADJUDICATION_COLUMNS,
+        publicCodeIdentity, citationOf, renderSource,
+      });
+    }
 
     let fileReq;
     {

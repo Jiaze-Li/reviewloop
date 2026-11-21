@@ -176,6 +176,9 @@ export function createReviewObjective({
   // current content every review round must put in front of the Reviewer.
   // Its presence is also the version marker of the unified Design path.
   reviewTarget = null,
+  // Design only, optional: 'incremental' selects the controller-mediated route
+  // (designIncremental.js). Absent = the default full-prompt route.
+  designInputRoute = null,
   createdAt = new Date().toISOString(),
 } = {}) {
   if (!loopId) throw new Error('createReviewObjective: loopId is required');
@@ -266,6 +269,11 @@ export function createReviewObjective({
     }
     objective.reviewTarget = String(reviewTarget);
   }
+  if (designInputRoute != null) {
+    if (designInputRoute !== 'incremental') throw new Error(`createReviewObjective: unknown designInputRoute "${designInputRoute}"`);
+    if (!objective.reviewTarget) throw new Error('createReviewObjective: designInputRoute requires a design reviewTarget');
+    objective.designInputRoute = designInputRoute;
+  }
   if (prContext != null) {
     throw new Error(PR_TASK_REMOVED_MESSAGE);
   }
@@ -322,6 +330,8 @@ function fingerprintFields(o) {
   // full-file check). Folded in only when present, so every pre-existing
   // objective keeps its original hash.
   if (o.reviewTarget) base.reviewTarget = o.reviewTarget;
+  // Load-bearing too (it changes how the design is reviewed); folded in only when present.
+  if (o.designInputRoute) base.designInputRoute = o.designInputRoute;
   // Baseline Gate evidence identity — load-bearing for FAIL->WARN suppression.
   // Only folded in when present, so a pre-baselineGate objective keeps its hash.
   if (o.baselineGateEvidence && typeof o.baselineGateEvidence === 'object') {
@@ -404,6 +414,9 @@ export function assertObjectiveNotWeakened(original, candidate) {
   }
   if ((candidate.reviewTarget ?? null) !== (original.reviewTarget ?? null)) {
     problems.push('design reviewTarget changed');
+  }
+  if ((candidate.designInputRoute ?? null) !== (original.designInputRoute ?? null)) {
+    problems.push('design input route changed');
   }
   if ((candidate.contractText ?? null) !== (original.contractText ?? null)) {
     problems.push('frozen contract text changed');

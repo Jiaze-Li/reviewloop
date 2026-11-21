@@ -29,7 +29,7 @@ export function createBeginTask({
     goal, cwd, taskType = TASK_TYPES.CODE, prNumber = null, prContext = null, reviewer = null,
     verificationCommands = null, blockingSeverities, maxReviewRounds,
     constraints = [], phases = [], contractText = '', evidenceRequirements = [], signal = null,
-    reviewTarget = null, designSha256 = null,
+    reviewTarget = null, designSha256 = null, designInputRoute = null,
   } = {}) {
     if (prNumber != null) throw new Error(`reviewloop_begin: PR mode has been retired; ${PR_TASK_REMOVED_MESSAGE}`);
     if (!goal || !String(goal).trim()) throw new Error('reviewloop_begin: goal is required');
@@ -61,6 +61,9 @@ export function createBeginTask({
         throw new Error('reviewloop_begin: a Design loop with reviewTarget requires the complete Plan as contractText');
       }
       frozenReviewTarget = await assertReviewTargetAbsent({ cwd, reviewTarget });
+    }
+    if (designInputRoute != null && (resolvedTaskType !== TASK_TYPES.DESIGN || reviewTarget == null)) {
+      throw new Error('reviewloop_begin: designInputRoute is only valid for a design loop with reviewTarget');
     }
     // Code begin may bind itself to the exact Design that passed review.
     // Content-consistency check only: it is not proof of Design PASS or of user authorization.
@@ -207,6 +210,7 @@ export function createBeginTask({
       constraints, phases, contractText: frozenContractText, evidenceRequirements,
       blockingSeverities, maxReviewRounds: resolvedMaxRounds,
       reviewTarget: frozenReviewTarget,
+      designInputRoute,
       verificationPlan,
       baselineGateEvidence: baselineGate,
     });
@@ -289,6 +293,7 @@ export function createBeginTask({
       currentPhase: currentReviewScope(loopState, objective).id,
       objectiveFingerprint: objective.fingerprint,
       ...(objective.reviewTarget ? { reviewTarget: objective.reviewTarget } : {}),
+      ...(objective.designInputRoute ? { designInputRoute: objective.designInputRoute } : {}),
       ...(planWarnings.length ? { planWarnings } : {}),
     };
   }
